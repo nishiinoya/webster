@@ -1,0 +1,6 @@
+.editor-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+}

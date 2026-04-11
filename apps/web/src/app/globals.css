@@ -10,17 +10,15 @@
   box-sizing: border-box;
 }
 
+html,
 body {
   min-width: 320px;
   min-height: 100vh;
   margin: 0;
 }
 
-.app-shell {
-  display: grid;
-  min-height: 100vh;
-  place-items: center;
-  padding: 24px;
+body {
+  background: #f4f7fb;
 }
 
 h1 {
