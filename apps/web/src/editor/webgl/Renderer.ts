@@ -1,10 +1,12 @@
 import { Camera2D } from "../core/Camera2D";
 import { Scene } from "../core/Scene";
+import { Quad } from "./Quad";
 import { ShaderProgram } from "./ShaderProgram";
 
 export class Renderer {
   private readonly gl: WebGLRenderingContext;
   private readonly shaderProgram: ShaderProgram;
+  private readonly quad: Quad;
   private width = 0;
   private height = 0;
 
@@ -22,6 +24,7 @@ export class Renderer {
 
     this.gl = gl;
     this.shaderProgram = new ShaderProgram(gl);
+    this.quad = new Quad(gl);
   }
 
   resize() {
@@ -45,11 +48,14 @@ export class Renderer {
     camera.resize(this.width, this.height);
     this.clear();
 
-    void scene;
     this.shaderProgram.use();
+    this.shaderProgram.setProjection(camera.projectionMatrix);
+    this.shaderProgram.setColor(scene.rectangle.color);
+    this.quad.draw(scene.rectangle, this.shaderProgram);
   }
 
   dispose() {
+    this.quad.dispose();
     this.shaderProgram.dispose();
   }
 
