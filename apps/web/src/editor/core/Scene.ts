@@ -156,8 +156,14 @@ export class Scene {
         id: layer.id,
         isSelected: layer.id === this.selectedLayerId,
         isVisible: layer.visible,
+        locked: layer.locked,
         name: layer.name,
-        type: layer.type
+        opacity: layer.opacity,
+        type: layer.type,
+        x: layer.x,
+        y: layer.y,
+        width: layer.width * layer.scaleX,
+        height: layer.height * layer.scaleY
       }))
       .reverse();
   }

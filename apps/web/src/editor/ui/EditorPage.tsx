@@ -27,8 +27,14 @@ const initialLayers: LayerSummary[] = [
     id: "default-shape",
     isVisible: true,
     isSelected: true,
+    locked: false,
     name: "Rectangle",
-    type: "shape"
+    opacity: 1,
+    type: "shape",
+    x: -110,
+    y: -60,
+    width: 260,
+    height: 160
   }
 ];
 
@@ -65,7 +71,7 @@ export function EditorPage() {
     "--layers-panel-height": `${layersPanelHeight}px`,
     "--properties-panel-height": `${propertiesPanelHeight}px`
   };
-  const selectedLayerName = layers.find((layer) => layer.isSelected)?.name ?? "None";
+  const selectedLayer = layers.find((layer) => layer.isSelected) ?? null;
 
   function startResize(onMove: (moveEvent: PointerEvent) => void) {
     document.body.classList.add("is-resizing-editor");
@@ -172,7 +178,7 @@ export function EditorPage() {
             onPointerDown={startLayersResize}
             type="button"
           />
-          <PropertiesPanel selectedLayerName={selectedLayerName} selectedTool={selectedTool} />
+          <PropertiesPanel selectedLayer={selectedLayer} selectedTool={selectedTool} />
           <button
             aria-label="Resize properties panel"
             className="resize-handle resize-handle-horizontal"

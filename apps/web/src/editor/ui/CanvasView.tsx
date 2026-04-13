@@ -24,7 +24,13 @@ export function CanvasView({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const editorAppRef = useRef<EditorApp | null>(null);
   const panStateRef = useRef<{ x: number; y: number } | null>(null);
+  const selectedToolRef = useRef(selectedTool);
   const [webglError, setWebglError] = useState<string | null>(null);
+
+  useEffect(() => {
+    selectedToolRef.current = selectedTool;
+    editorAppRef.current?.setSelectedTool(selectedTool);
+  }, [selectedTool]);
 
   useEffect(() => {
     if (!canvasRef.current) {
@@ -44,6 +50,7 @@ export function CanvasView({
           }
 
           editorAppRef.current = editorApp;
+          editorApp.setSelectedTool(selectedToolRef.current);
           editorApp.start();
           onLayersChange(editorApp.getLayerSummaries());
           onZoomChange(Math.round(editorApp.getCameraSnapshot().zoom * 100));
@@ -89,10 +96,6 @@ export function CanvasView({
       didCancel = true;
     };
   }, [onLayersChange, uploadRequest]);
-
-  useEffect(() => {
-    editorAppRef.current?.setSelectedTool(selectedTool);
-  }, [selectedTool]);
 
   useEffect(() => {
     if (!selectLayerRequest || !editorAppRef.current) {
@@ -157,7 +160,10 @@ export function CanvasView({
               aria-label="WebGL editor canvas"
               className={`webgl-canvas${selectedTool === "Pan" ? " is-pan-tool" : ""}`}
               onContextMenu={(event) => event.preventDefault()}
-              onPointerCancel={stopPan}
+              onPointerCancel={() => {
+                stopPan();
+                editorAppRef.current?.cancelInput();
+              }}
               onPointerDown={(event) => {
                 if (event.button === 1 || selectedTool === "Pan") {
                   event.preventDefault();
@@ -166,24 +172,42 @@ export function CanvasView({
                   return;
                 }
 
-                if (event.button === 0 && selectedTool === "Move") {
-                  const selectedLayer = editorAppRef.current?.selectLayerAt(
-                    event.clientX,
-                    event.clientY
-                  );
+                if (selectedTool === "Move") {
+                  const didHandleInput = editorAppRef.current?.pointerDown({
+                    button: event.button,
+                    clientX: event.clientX,
+                    clientY: event.clientY
+                  });
 
-                  if (selectedLayer && editorAppRef.current) {
+                  if (didHandleInput && editorAppRef.current) {
+                    event.currentTarget.setPointerCapture(event.pointerId);
                     onLayersChange(editorAppRef.current.getLayerSummaries());
                   }
                 }
               }}
-              onPointerMove={(event) => panTo(event.clientX, event.clientY)}
+              onPointerMove={(event) => {
+                panTo(event.clientX, event.clientY);
+
+                const didHandleInput = editorAppRef.current?.pointerMove({
+                  button: event.button,
+                  clientX: event.clientX,
+                  clientY: event.clientY
+                });
+
+                if (didHandleInput && editorAppRef.current) {
+                  onLayersChange(editorAppRef.current.getLayerSummaries());
+                }
+              }}
               onPointerUp={(event) => {
                 if (event.currentTarget.hasPointerCapture(event.pointerId)) {
                   event.currentTarget.releasePointerCapture(event.pointerId);
                 }
 
                 stopPan();
+
+                if (editorAppRef.current?.pointerUp()) {
+                  onLayersChange(editorAppRef.current.getLayerSummaries());
+                }
               }}
             />
             {webglError ? <p className="canvas-error">{webglError}</p> : null}

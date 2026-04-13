@@ -1,17 +1,35 @@
 type PropertiesPanelProps = {
-  selectedLayerName: string;
+  selectedLayer: {
+    height: number;
+    locked: boolean;
+    name: string;
+    opacity: number;
+    width: number;
+    x: number;
+    y: number;
+  } | null;
   selectedTool: string;
 };
 
-const propertyRows = [
-  ["X", "0 px"],
-  ["Y", "0 px"],
-  ["Width", "1200 px"],
-  ["Height", "800 px"],
-  ["Opacity", "100%"]
-];
+export function PropertiesPanel({ selectedLayer, selectedTool }: PropertiesPanelProps) {
+  const propertyRows = selectedLayer
+    ? [
+        ["X", `${Math.round(selectedLayer.x)} px`],
+        ["Y", `${Math.round(selectedLayer.y)} px`],
+        ["Width", `${Math.round(selectedLayer.width)} px`],
+        ["Height", `${Math.round(selectedLayer.height)} px`],
+        ["Opacity", `${Math.round(selectedLayer.opacity * 100)}%`],
+        ["Locked", selectedLayer.locked ? "Yes" : "No"]
+      ]
+    : [
+        ["X", "-"],
+        ["Y", "-"],
+        ["Width", "-"],
+        ["Height", "-"],
+        ["Opacity", "-"],
+        ["Locked", "-"]
+      ];
 
-export function PropertiesPanel({ selectedLayerName, selectedTool }: PropertiesPanelProps) {
   return (
     <section className="editor-panel" aria-label="Properties panel">
       <div className="panel-header">
@@ -24,7 +42,7 @@ export function PropertiesPanel({ selectedLayerName, selectedTool }: PropertiesP
         </div>
         <div>
           <dt>Layer</dt>
-          <dd>{selectedLayerName}</dd>
+          <dd>{selectedLayer?.name ?? "None"}</dd>
         </div>
         {propertyRows.map(([label, value]) => (
           <div key={label}>

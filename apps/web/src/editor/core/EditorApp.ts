@@ -1,4 +1,6 @@
 import { Renderer } from "../webgl/Renderer";
+import { InputController } from "../tools/InputController";
+import type { ToolPointerEvent } from "../tools/MoveTool";
 import { Camera2D } from "./Camera2D";
 import { Scene } from "./Scene";
 import { ImageLayer } from "../layers/ImageLayer";
@@ -15,6 +17,7 @@ export class EditorApp {
   private readonly renderer: Renderer;
   private readonly scene: Scene;
   private readonly camera: Camera2D;
+  private readonly inputController: InputController;
   private animationFrameId: number | null = null;
   private isDisposed = false;
   private lastCameraSnapshot: CameraSnapshot | null = null;
@@ -36,6 +39,7 @@ export class EditorApp {
     this.scene = new Scene();
     this.camera = new Camera2D();
     this.camera.setBounds(this.scene.document);
+    this.inputController = new InputController(canvas, this.scene, this.camera);
   }
 
   start() {
@@ -96,6 +100,7 @@ export class EditorApp {
 
   setSelectedTool(tool: string) {
     this.selectedTool = tool;
+    this.inputController.setSelectedTool(tool);
   }
 
   selectLayer(layerId: string | null) {
@@ -112,6 +117,22 @@ export class EditorApp {
     }
 
     return layer;
+  }
+
+  pointerDown(event: ToolPointerEvent) {
+    return this.inputController.pointerDown(event);
+  }
+
+  pointerMove(event: ToolPointerEvent) {
+    return this.inputController.pointerMove(event);
+  }
+
+  pointerUp() {
+    return this.inputController.pointerUp();
+  }
+
+  cancelInput() {
+    this.inputController.cancel();
   }
 
   async addImageFile(file: File) {
