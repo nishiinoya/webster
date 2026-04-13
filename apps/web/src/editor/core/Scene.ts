@@ -117,7 +117,23 @@ export class Scene {
     return this.reorderLayer(layerId, 0);
   }
 
+  getLayerSummaries() {
+    return this.layers
+      .map((layer) => ({
+        id: layer.id,
+        isSelected: layer.id === this.selectedLayerId,
+        isVisible: layer.visible,
+        name: layer.name,
+        type: layer.type
+      }))
+      .reverse();
+  }
+
   dispose() {
-    // Scene graph resources will be released here when drawing is added.
+    for (const layer of this.layers) {
+      if ("dispose" in layer && typeof layer.dispose === "function") {
+        layer.dispose();
+      }
+    }
   }
 }

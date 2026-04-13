@@ -1,22 +1,29 @@
 import { Camera2D } from "../core/Camera2D";
 import { Scene } from "../core/Scene";
+import { ImageLayer } from "../layers/ImageLayer";
 import { ShapeLayer } from "../layers/ShapeLayer";
 import { CheckerboardShaderProgram } from "./CheckerboardShaderProgram";
 import { loadShaderSource } from "./loadShaderSource";
 import { Quad } from "./Quad";
 import { SolidColorShaderProgram } from "./SolidColorShaderProgram";
+import { TexturedShaderProgram } from "./TexturedShaderProgram";
+import { TextureManager } from "./TextureManager";
 
 export type RendererShaderSources = {
   checkerboardFragment: string;
   checkerboardVertex: string;
   solidFragment: string;
   solidVertex: string;
+  texturedFragment: string;
+  texturedVertex: string;
 };
 
 export class Renderer {
   private readonly gl: WebGLRenderingContext;
   private readonly solidColorShaderProgram: SolidColorShaderProgram;
   private readonly checkerboardShaderProgram: CheckerboardShaderProgram;
+  private readonly texturedShaderProgram: TexturedShaderProgram;
+  private readonly textureManager: TextureManager;
   private readonly quad: Quad;
   private width = 0;
   private height = 0;
@@ -24,18 +31,29 @@ export class Renderer {
   private cssHeight = 1;
 
   static async create(canvas: HTMLCanvasElement) {
-    const [checkerboardFragment, checkerboardVertex, solidFragment, solidVertex] = await Promise.all([
+    const [
+      checkerboardFragment,
+      checkerboardVertex,
+      solidFragment,
+      solidVertex,
+      texturedFragment,
+      texturedVertex
+    ] = await Promise.all([
       loadShaderSource("/glsl/checkerboard.frag.glsl"),
       loadShaderSource("/glsl/checkerboard.vert.glsl"),
       loadShaderSource("/glsl/solid.frag.glsl"),
-      loadShaderSource("/glsl/solid.vert.glsl")
+      loadShaderSource("/glsl/solid.vert.glsl"),
+      loadShaderSource("/glsl/textured.frag.glsl"),
+      loadShaderSource("/glsl/textured.vert.glsl")
     ]);
 
     return new Renderer(canvas, {
       checkerboardFragment,
       checkerboardVertex,
       solidFragment,
-      solidVertex
+      solidVertex,
+      texturedFragment,
+      texturedVertex
     });
   }
 
@@ -65,6 +83,12 @@ export class Renderer {
       shaderSources.checkerboardVertex,
       shaderSources.checkerboardFragment
     );
+    this.texturedShaderProgram = new TexturedShaderProgram(
+      gl,
+      shaderSources.texturedVertex,
+      shaderSources.texturedFragment
+    );
+    this.textureManager = new TextureManager(gl);
     this.quad = new Quad(gl);
     this.gl.enable(this.gl.BLEND);
     this.gl.blendFunc(this.gl.SRC_ALPHA, this.gl.ONE_MINUS_SRC_ALPHA);
@@ -126,11 +150,25 @@ export class Renderer {
         ]);
         this.quad.draw(layer, this.solidColorShaderProgram);
       }
+
+      if (layer instanceof ImageLayer) {
+        this.texturedShaderProgram.use();
+        this.texturedShaderProgram.setProjection(camera.projectionMatrix);
+        this.texturedShaderProgram.setTextureUnit(0);
+        this.texturedShaderProgram.setOpacity(layer.opacity);
+        this.gl.activeTexture(this.gl.TEXTURE0);
+        this.gl.bindTexture(this.gl.TEXTURE_2D, this.textureManager.getTexture(layer));
+        this.quad.drawTextured(layer, this.texturedShaderProgram);
+        this.solidColorShaderProgram.use();
+        this.solidColorShaderProgram.setProjection(camera.projectionMatrix);
+      }
     }
   }
 
   dispose() {
     this.quad.dispose();
+    this.textureManager.dispose();
+    this.texturedShaderProgram.dispose();
     this.checkerboardShaderProgram.dispose();
     this.solidColorShaderProgram.dispose();
   }

@@ -1,5 +1,5 @@
 export class ShaderProgram {
-  private readonly program: WebGLProgram;
+  protected readonly program: WebGLProgram;
   readonly positionAttributeLocation: number;
 
   constructor(

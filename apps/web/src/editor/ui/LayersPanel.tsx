@@ -3,6 +3,7 @@ type Layer = {
   name: string;
   isVisible: boolean;
   isSelected: boolean;
+  type: string;
 };
 
 type LayersPanelProps = {
@@ -25,7 +26,7 @@ export function LayersPanel({ layers }: LayersPanelProps) {
             type="button"
           >
             <span className="visibility-dot" aria-label={layer.isVisible ? "Visible" : "Hidden"} />
-            <span className="layer-thumbnail" aria-hidden="true" />
+            <span className={`layer-thumbnail layer-thumbnail-${layer.type}`} aria-hidden="true" />
             <span>{layer.name}</span>
           </button>
         ))}

@@ -1,0 +1,33 @@
+import { ShaderProgram } from "./ShaderProgram";
+
+export class TexturedShaderProgram extends ShaderProgram {
+  readonly texCoordAttributeLocation: number;
+  private readonly projectionUniformLocation: WebGLUniformLocation;
+  private readonly textureUniformLocation: WebGLUniformLocation;
+  private readonly opacityUniformLocation: WebGLUniformLocation;
+
+  constructor(gl: WebGLRenderingContext, vertexShaderSource: string, fragmentShaderSource: string) {
+    super(gl, vertexShaderSource, fragmentShaderSource);
+
+    this.texCoordAttributeLocation = gl.getAttribLocation(this.program, "a_texCoord");
+    this.projectionUniformLocation = this.getUniformLocation("u_projection");
+    this.textureUniformLocation = this.getUniformLocation("u_texture");
+    this.opacityUniformLocation = this.getUniformLocation("u_opacity");
+
+    if (this.texCoordAttributeLocation < 0) {
+      throw new Error("WebGL texture coordinate attribute is unavailable.");
+    }
+  }
+
+  setProjection(matrix: Float32Array) {
+    this.gl.uniformMatrix3fv(this.projectionUniformLocation, false, matrix);
+  }
+
+  setTextureUnit(textureUnit: number) {
+    this.gl.uniform1i(this.textureUniformLocation, textureUnit);
+  }
+
+  setOpacity(opacity: number) {
+    this.gl.uniform1f(this.opacityUniformLocation, opacity);
+  }
+}

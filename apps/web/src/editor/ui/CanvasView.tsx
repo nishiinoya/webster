@@ -1,15 +1,24 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { LayerSummary } from "../core/EditorApp";
 import { EditorApp } from "../core/EditorApp";
 
 type CanvasViewProps = {
   activeTabTitle: string;
+  onLayersChange: (layers: LayerSummary[]) => void;
   onZoomChange: (zoomPercentage: number) => void;
   selectedTool: string;
+  uploadRequest: { file: File; id: number } | null;
 };
 
-export function CanvasView({ activeTabTitle, onZoomChange, selectedTool }: CanvasViewProps) {
+export function CanvasView({
+  activeTabTitle,
+  onLayersChange,
+  onZoomChange,
+  selectedTool,
+  uploadRequest
+}: CanvasViewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const editorAppRef = useRef<EditorApp | null>(null);
   const panStateRef = useRef<{ x: number; y: number } | null>(null);
@@ -34,6 +43,7 @@ export function CanvasView({ activeTabTitle, onZoomChange, selectedTool }: Canva
 
           editorAppRef.current = editorApp;
           editorApp.start();
+          onLayersChange(editorApp.getLayerSummaries());
           onZoomChange(Math.round(editorApp.getCameraSnapshot().zoom * 100));
           setWebglError(null);
         })
@@ -51,7 +61,32 @@ export function CanvasView({ activeTabTitle, onZoomChange, selectedTool }: Canva
       editorAppRef.current?.dispose();
       editorAppRef.current = null;
     };
-  }, [onZoomChange]);
+  }, [onLayersChange, onZoomChange]);
+
+  useEffect(() => {
+    if (!uploadRequest || !editorAppRef.current) {
+      return;
+    }
+
+    let didCancel = false;
+
+    editorAppRef.current
+      .addImageFile(uploadRequest.file)
+      .then(() => {
+        if (!didCancel && editorAppRef.current) {
+          onLayersChange(editorAppRef.current.getLayerSummaries());
+        }
+      })
+      .catch((error) => {
+        if (!didCancel) {
+          setWebglError(error instanceof Error ? error.message : "Unable to add image.");
+        }
+      });
+
+    return () => {
+      didCancel = true;
+    };
+  }, [onLayersChange, uploadRequest]);
 
   useEffect(() => {
     const canvas = canvasRef.current;

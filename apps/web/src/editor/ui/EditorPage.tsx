@@ -2,6 +2,7 @@
 
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { useState } from "react";
+import type { LayerSummary } from "@/editor/core/EditorApp";
 import { CanvasView } from "./CanvasView";
 import "./EditorPage.css";
 import { HistoryPanel } from "./HistoryPanel";
@@ -21,12 +22,13 @@ const mockTabs = [
 
 const mockTools = ["Move", "Pan", "Marquee", "Brush", "Eraser", "Text", "Zoom"];
 
-const mockLayers = [
+const initialLayers: LayerSummary[] = [
   {
-    id: "background",
-    name: "Background",
+    id: "default-shape",
     isVisible: true,
-    isSelected: true
+    isSelected: true,
+    name: "Rectangle",
+    type: "shape"
   }
 ];
 
@@ -46,6 +48,8 @@ function clamp(value: number, min: number, max: number) {
 export function EditorPage() {
   const [selectedTool, setSelectedTool] = useState("Move");
   const [zoomPercentage, setZoomPercentage] = useState(100);
+  const [layers, setLayers] = useState<LayerSummary[]>(initialLayers);
+  const [uploadRequest, setUploadRequest] = useState<{ file: File; id: number } | null>(null);
   const [toolsPanelWidth, setToolsPanelWidth] = useState(88);
   const [rightPanelWidth, setRightPanelWidth] = useState(300);
   const [layersPanelHeight, setLayersPanelHeight] = useState(190);
@@ -119,6 +123,7 @@ export function EditorPage() {
     <main className="editor-page">
       <Toolbar
         documentTitle="Untitled"
+        onUploadImage={(file) => setUploadRequest({ file, id: Date.now() })}
         selectedTool={selectedTool}
         zoomPercentage={zoomPercentage}
       />
@@ -138,8 +143,10 @@ export function EditorPage() {
           <TabsBar tabs={mockTabs} />
           <CanvasView
             activeTabTitle="Untitled"
+            onLayersChange={setLayers}
             onZoomChange={setZoomPercentage}
             selectedTool={selectedTool}
+            uploadRequest={uploadRequest}
           />
         </div>
         <button
@@ -149,7 +156,7 @@ export function EditorPage() {
           type="button"
         />
         <aside className="editor-side-panels" aria-label="Editor panels">
-          <LayersPanel layers={mockLayers} />
+          <LayersPanel layers={layers} />
           <button
             aria-label="Resize layers panel"
             className="resize-handle resize-handle-horizontal"

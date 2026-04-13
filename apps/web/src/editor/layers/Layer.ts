@@ -1,4 +1,4 @@
-export type LayerType = "shape";
+export type LayerType = "shape" | "image";
 
 export type LayerOptions = {
   id: string;

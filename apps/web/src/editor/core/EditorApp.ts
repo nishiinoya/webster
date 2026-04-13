@@ -1,12 +1,15 @@
 import { Renderer } from "../webgl/Renderer";
 import { Camera2D } from "./Camera2D";
 import { Scene } from "./Scene";
+import { ImageLayer } from "../layers/ImageLayer";
 
 export type CameraSnapshot = {
   x: number;
   y: number;
   zoom: number;
 };
+
+export type LayerSummary = ReturnType<Scene["getLayerSummaries"]>[number];
 
 export class EditorApp {
   private readonly renderer: Renderer;
@@ -84,6 +87,35 @@ export class EditorApp {
     };
   }
 
+  getLayerSummaries() {
+    return this.scene.getLayerSummaries();
+  }
+
+  async addImageFile(file: File) {
+    const image = await loadImageElement(file);
+    const width = image.naturalWidth || image.width;
+    const height = image.naturalHeight || image.height;
+    const maxInitialSize = 420;
+    const scale = Math.min(1, maxInitialSize / Math.max(width, height));
+
+    const layer = new ImageLayer({
+      id: crypto.randomUUID(),
+      name: file.name || "Image",
+      image,
+      objectUrl: image.src,
+      x: (-width * scale) / 2,
+      y: (-height * scale) / 2,
+      width,
+      height,
+      scaleX: scale,
+      scaleY: scale
+    });
+
+    this.scene.addLayer(layer);
+
+    return layer;
+  }
+
   private getCanvasPoint(clientX: number, clientY: number) {
     const bounds = this.canvas.getBoundingClientRect();
 
@@ -108,4 +140,22 @@ export class EditorApp {
     this.lastCameraSnapshot = snapshot;
     this.onCameraChange?.(snapshot);
   }
+}
+
+async function loadImageElement(file: File) {
+  const objectUrl = URL.createObjectURL(file);
+  const image = new Image();
+  image.decoding = "async";
+  image.src = objectUrl;
+
+  try {
+    await image.decode();
+  } catch {
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error(`Unable to load image: ${file.name}`));
+    });
+  }
+
+  return image;
 }
