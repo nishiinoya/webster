@@ -30,6 +30,7 @@ const initialLayers: LayerSummary[] = [
     locked: false,
     name: "Rectangle",
     opacity: 1,
+    rotation: 0,
     type: "shape",
     x: -110,
     y: -60,

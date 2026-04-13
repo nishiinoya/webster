@@ -159,6 +159,7 @@ export class Scene {
         locked: layer.locked,
         name: layer.name,
         opacity: layer.opacity,
+        rotation: layer.rotation,
         type: layer.type,
         x: layer.x,
         y: layer.y,

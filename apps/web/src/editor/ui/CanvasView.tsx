@@ -25,6 +25,7 @@ export function CanvasView({
   const editorAppRef = useRef<EditorApp | null>(null);
   const panStateRef = useRef<{ x: number; y: number } | null>(null);
   const selectedToolRef = useRef(selectedTool);
+  const [canvasCursor, setCanvasCursor] = useState("default");
   const [webglError, setWebglError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -148,6 +149,15 @@ export function CanvasView({
     panState.y = clientY;
   }
 
+  function updateCanvasCursor(clientX: number, clientY: number) {
+    if (selectedTool === "Pan") {
+      setCanvasCursor(panStateRef.current ? "grabbing" : "grab");
+      return;
+    }
+
+    setCanvasCursor(editorAppRef.current?.getCursor(clientX, clientY) ?? "default");
+  }
+
   return (
     <section className="canvas-view" aria-label="Main canvas">
       <div className="canvas-ruler canvas-ruler-horizontal" aria-hidden="true" />
@@ -159,16 +169,19 @@ export function CanvasView({
               ref={canvasRef}
               aria-label="WebGL editor canvas"
               className={`webgl-canvas${selectedTool === "Pan" ? " is-pan-tool" : ""}`}
+              style={{ cursor: getCanvasCursorStyle(canvasCursor) }}
               onContextMenu={(event) => event.preventDefault()}
               onPointerCancel={() => {
                 stopPan();
                 editorAppRef.current?.cancelInput();
+                setCanvasCursor("default");
               }}
               onPointerDown={(event) => {
                 if (event.button === 1 || selectedTool === "Pan") {
                   event.preventDefault();
                   event.currentTarget.setPointerCapture(event.pointerId);
                   startPan(event.clientX, event.clientY);
+                  updateCanvasCursor(event.clientX, event.clientY);
                   return;
                 }
 
@@ -182,6 +195,7 @@ export function CanvasView({
                   if (didHandleInput && editorAppRef.current) {
                     event.currentTarget.setPointerCapture(event.pointerId);
                     onLayersChange(editorAppRef.current.getLayerSummaries());
+                    updateCanvasCursor(event.clientX, event.clientY);
                   }
                 }
               }}
@@ -197,6 +211,8 @@ export function CanvasView({
                 if (didHandleInput && editorAppRef.current) {
                   onLayersChange(editorAppRef.current.getLayerSummaries());
                 }
+
+                updateCanvasCursor(event.clientX, event.clientY);
               }}
               onPointerUp={(event) => {
                 if (event.currentTarget.hasPointerCapture(event.pointerId)) {
@@ -208,7 +224,10 @@ export function CanvasView({
                 if (editorAppRef.current?.pointerUp()) {
                   onLayersChange(editorAppRef.current.getLayerSummaries());
                 }
+
+                updateCanvasCursor(event.clientX, event.clientY);
               }}
+              onPointerLeave={() => setCanvasCursor("default")}
             />
             {webglError ? <p className="canvas-error">{webglError}</p> : null}
           </div>
@@ -218,4 +237,16 @@ export function CanvasView({
       </div>
     </section>
   );
+}
+
+function getCanvasCursorStyle(cursor: string) {
+  if (!cursor.startsWith("rotate-")) {
+    return cursor;
+  }
+
+  const rotation = Number(cursor.slice("rotate-".length));
+  const safeRotation = Number.isFinite(rotation) ? rotation : 0;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><g transform="rotate(${safeRotation} 12 12)"><path fill="none" stroke="#eef1f4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M18 7v5h-5M6 17v-5h5M17.2 12a5.8 5.8 0 0 0-9.8-4.2M6.8 12a5.8 5.8 0 0 0 9.8 4.2"/></g></svg>`;
+
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 12 12, grab`;
 }

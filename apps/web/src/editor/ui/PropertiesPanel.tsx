@@ -4,6 +4,7 @@ type PropertiesPanelProps = {
     locked: boolean;
     name: string;
     opacity: number;
+    rotation: number;
     width: number;
     x: number;
     y: number;
@@ -18,6 +19,7 @@ export function PropertiesPanel({ selectedLayer, selectedTool }: PropertiesPanel
         ["Y", `${Math.round(selectedLayer.y)} px`],
         ["Width", `${Math.round(selectedLayer.width)} px`],
         ["Height", `${Math.round(selectedLayer.height)} px`],
+        ["Rotation", `${Math.round(selectedLayer.rotation)} deg`],
         ["Opacity", `${Math.round(selectedLayer.opacity * 100)}%`],
         ["Locked", selectedLayer.locked ? "Yes" : "No"]
       ]
@@ -26,6 +28,7 @@ export function PropertiesPanel({ selectedLayer, selectedTool }: PropertiesPanel
         ["Y", "-"],
         ["Width", "-"],
         ["Height", "-"],
+        ["Rotation", "-"],
         ["Opacity", "-"],
         ["Locked", "-"]
       ];

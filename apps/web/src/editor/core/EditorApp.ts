@@ -135,6 +135,10 @@ export class EditorApp {
     this.inputController.cancel();
   }
 
+  getCursor(clientX: number, clientY: number) {
+    return this.inputController.getCursor(clientX, clientY);
+  }
+
   async addImageFile(file: File) {
     const image = await loadImageElement(file);
     const width = image.naturalWidth || image.width;

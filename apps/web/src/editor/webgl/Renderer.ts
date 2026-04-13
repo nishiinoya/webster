@@ -1,5 +1,11 @@
 import { Camera2D } from "../core/Camera2D";
 import { Scene } from "../core/Scene";
+import {
+  distance,
+  getLayerCorners,
+  getTransformHandles,
+  midpoint
+} from "../core/TransformGeometry";
 import { ImageLayer } from "../layers/ImageLayer";
 import { Layer } from "../layers/Layer";
 import { ShapeLayer } from "../layers/ShapeLayer";
@@ -190,52 +196,104 @@ export class Renderer {
   }
 
   private drawSelectionOutline(layer: Layer, camera: Camera2D) {
-    const width = layer.width * layer.scaleX;
-    const height = layer.height * layer.scaleY;
-    const left = Math.min(layer.x, layer.x + width);
-    const right = Math.max(layer.x, layer.x + width);
-    const bottom = Math.min(layer.y, layer.y + height);
-    const top = Math.max(layer.y, layer.y + height);
+    const corners = getLayerCorners(layer);
     const outlineWidth = Math.max(1.5 / camera.zoom, 0.5);
-    const padding = 2 / camera.zoom;
 
     this.solidColorShaderProgram.use();
     this.solidColorShaderProgram.setProjection(camera.projectionMatrix);
     this.solidColorShaderProgram.setColor([0.39, 0.86, 0.75, 1]);
 
+    this.drawLine(corners.bottomLeft, corners.bottomRight, outlineWidth);
+    this.drawLine(corners.bottomRight, corners.topRight, outlineWidth);
+    this.drawLine(corners.topRight, corners.topLeft, outlineWidth);
+    this.drawLine(corners.topLeft, corners.bottomLeft, outlineWidth);
+
+    if (!layer.locked) {
+      this.drawTransformHandles(layer, camera);
+    }
+  }
+
+  private drawTransformHandles(layer: Layer, camera: Camera2D) {
+    const handleSize = 10 / camera.zoom;
+    const rotationHandleSize = 12 / camera.zoom;
+    const corners = getLayerCorners(layer);
+    const topCenter = midpoint(corners.topLeft, corners.topRight);
+    const handles = getTransformHandles(layer, camera);
+    const rotationHandle = handles.find((handle) => handle.id === "rotate");
+
+    if (rotationHandle) {
+      this.solidColorShaderProgram.setColor([0.39, 0.86, 0.75, 0.8]);
+      this.drawLine(topCenter, rotationHandle, Math.max(1 / camera.zoom, 0.4));
+    }
+
+    for (const handle of handles) {
+      const size = handle.id === "rotate" ? rotationHandleSize : handleSize;
+
+      this.solidColorShaderProgram.setColor(
+        handle.id === "rotate" ? [0.94, 0.78, 0.36, 1] : [0.07, 0.08, 0.09, 1]
+      );
+      this.quad.draw(
+        {
+          x: handle.x - size / 2,
+          y: handle.y - size / 2,
+          width: size,
+          height: size
+        },
+        this.solidColorShaderProgram
+      );
+
+      this.solidColorShaderProgram.setColor([0.39, 0.86, 0.75, 1]);
+      this.quad.draw(
+        {
+          x: handle.x - size / 2,
+          y: handle.y - size / 2,
+          width: size,
+          height: Math.max(1 / camera.zoom, 0.4)
+        },
+        this.solidColorShaderProgram
+      );
+      this.quad.draw(
+        {
+          x: handle.x - size / 2,
+          y: handle.y + size / 2 - Math.max(1 / camera.zoom, 0.4),
+          width: size,
+          height: Math.max(1 / camera.zoom, 0.4)
+        },
+        this.solidColorShaderProgram
+      );
+      this.quad.draw(
+        {
+          x: handle.x - size / 2,
+          y: handle.y - size / 2,
+          width: Math.max(1 / camera.zoom, 0.4),
+          height: size
+        },
+        this.solidColorShaderProgram
+      );
+      this.quad.draw(
+        {
+          x: handle.x + size / 2 - Math.max(1 / camera.zoom, 0.4),
+          y: handle.y - size / 2,
+          width: Math.max(1 / camera.zoom, 0.4),
+          height: size
+        },
+        this.solidColorShaderProgram
+      );
+    }
+  }
+
+  private drawLine(start: { x: number; y: number }, end: { x: number; y: number }, width: number) {
+    const center = midpoint(start, end);
+    const length = distance(start, end);
+    const rotation = (Math.atan2(end.y - start.y, end.x - start.x) * 180) / Math.PI;
+
     this.quad.draw(
       {
-        x: left - padding,
-        y: bottom - padding - outlineWidth,
-        width: right - left + padding * 2,
-        height: outlineWidth
-      },
-      this.solidColorShaderProgram
-    );
-    this.quad.draw(
-      {
-        x: left - padding,
-        y: top + padding,
-        width: right - left + padding * 2,
-        height: outlineWidth
-      },
-      this.solidColorShaderProgram
-    );
-    this.quad.draw(
-      {
-        x: left - padding - outlineWidth,
-        y: bottom - padding - outlineWidth,
-        width: outlineWidth,
-        height: top - bottom + padding * 2 + outlineWidth * 2
-      },
-      this.solidColorShaderProgram
-    );
-    this.quad.draw(
-      {
-        x: right + padding,
-        y: bottom - padding - outlineWidth,
-        width: outlineWidth,
-        height: top - bottom + padding * 2 + outlineWidth * 2
+        x: center.x - length / 2,
+        y: center.y - width / 2,
+        width: length,
+        height: width,
+        rotation
       },
       this.solidColorShaderProgram
     );
