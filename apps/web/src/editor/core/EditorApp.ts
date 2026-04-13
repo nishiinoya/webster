@@ -18,6 +18,7 @@ export class EditorApp {
   private animationFrameId: number | null = null;
   private isDisposed = false;
   private lastCameraSnapshot: CameraSnapshot | null = null;
+  private selectedTool = "Move";
 
   static async create(
     canvas: HTMLCanvasElement,
@@ -47,7 +48,9 @@ export class EditorApp {
         return;
       }
 
-      this.renderer.render(this.scene, this.camera);
+      this.renderer.render(this.scene, this.camera, {
+        showSelectionOutline: shouldShowSelectionOutline(this.selectedTool)
+      });
       this.animationFrameId = window.requestAnimationFrame(tick);
     };
 
@@ -89,6 +92,10 @@ export class EditorApp {
 
   getLayerSummaries() {
     return this.scene.getLayerSummaries();
+  }
+
+  setSelectedTool(tool: string) {
+    this.selectedTool = tool;
   }
 
   selectLayer(layerId: string | null) {
@@ -156,6 +163,10 @@ export class EditorApp {
     this.lastCameraSnapshot = snapshot;
     this.onCameraChange?.(snapshot);
   }
+}
+
+function shouldShowSelectionOutline(tool: string) {
+  return tool === "Move" || tool === "Pan" || tool === "Zoom";
 }
 
 async function loadImageElement(file: File) {

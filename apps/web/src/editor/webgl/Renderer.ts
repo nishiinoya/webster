@@ -19,6 +19,10 @@ export type RendererShaderSources = {
   texturedVertex: string;
 };
 
+export type RenderOptions = {
+  showSelectionOutline: boolean;
+};
+
 export class Renderer {
   private readonly gl: WebGLRenderingContext;
   private readonly solidColorShaderProgram: SolidColorShaderProgram;
@@ -120,7 +124,7 @@ export class Renderer {
     this.gl.viewport(0, 0, nextWidth, nextHeight);
   }
 
-  render(scene: Scene, camera: Camera2D) {
+  render(scene: Scene, camera: Camera2D, options: RenderOptions) {
     this.resize();
     camera.resize(this.cssWidth, this.cssHeight);
     this.clear();
@@ -167,7 +171,7 @@ export class Renderer {
 
     const selectedLayer = scene.selectedLayerId ? scene.getLayer(scene.selectedLayerId) : null;
 
-    if (selectedLayer?.visible && selectedLayer.opacity > 0) {
+    if (options.showSelectionOutline && selectedLayer?.visible && selectedLayer.opacity > 0) {
       this.drawSelectionOutline(selectedLayer, camera);
     }
   }

@@ -91,6 +91,10 @@ export function CanvasView({
   }, [onLayersChange, uploadRequest]);
 
   useEffect(() => {
+    editorAppRef.current?.setSelectedTool(selectedTool);
+  }, [selectedTool]);
+
+  useEffect(() => {
     if (!selectLayerRequest || !editorAppRef.current) {
       return;
     }
@@ -162,7 +166,7 @@ export function CanvasView({
                   return;
                 }
 
-                if (event.button === 0) {
+                if (event.button === 0 && selectedTool === "Move") {
                   const selectedLayer = editorAppRef.current?.selectLayerAt(
                     event.clientX,
                     event.clientY
