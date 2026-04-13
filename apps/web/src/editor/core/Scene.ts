@@ -361,12 +361,26 @@ function cloneLayer(layer: Layer) {
 function isPointInsideLayer(layer: Layer, x: number, y: number) {
   const width = layer.width * layer.scaleX;
   const height = layer.height * layer.scaleY;
-  const left = Math.min(layer.x, layer.x + width);
-  const right = Math.max(layer.x, layer.x + width);
-  const bottom = Math.min(layer.y, layer.y + height);
-  const top = Math.max(layer.y, layer.y + height);
 
-  return x >= left && x <= right && y >= bottom && y <= top;
+  const centerX = layer.x + width / 2;
+  const centerY = layer.y + height / 2;
+
+  const radians = (-layer.rotation * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+
+  const dx = x - centerX;
+  const dy = y - centerY;
+
+  const localX = dx * cos - dy * sin;
+  const localY = dx * sin + dy * cos;
+
+  return (
+    localX >= -width / 2 &&
+    localX <= width / 2 &&
+    localY >= -height / 2 &&
+    localY <= height / 2
+  );
 }
 
 function clamp(value: number, min: number, max: number) {
