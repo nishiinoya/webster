@@ -1,11 +1,12 @@
 type ToolbarProps = {
   documentTitle: string;
   selectedTool: string;
+  zoomPercentage: number;
 };
 
 const toolbarActions = ["File", "Edit", "View", "Select", "Filter"];
 
-export function Toolbar({ documentTitle, selectedTool }: ToolbarProps) {
+export function Toolbar({ documentTitle, selectedTool, zoomPercentage }: ToolbarProps) {
   return (
     <header className="editor-toolbar" aria-label="Top toolbar">
       <div className="toolbar-brand">
@@ -26,7 +27,7 @@ export function Toolbar({ documentTitle, selectedTool }: ToolbarProps) {
       </nav>
       <div className="toolbar-status" aria-label="Current editor status">
         <span>{selectedTool}</span>
-        <span>100%</span>
+        <span>{zoomPercentage}%</span>
       </div>
     </header>
   );

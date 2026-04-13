@@ -1,5 +1,13 @@
-import type { SceneRectangle } from "../core/Scene";
 import { ShaderProgram } from "./ShaderProgram";
+
+export type QuadRectangle = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  scaleX?: number;
+  scaleY?: number;
+};
 
 export class Quad {
   private readonly vertexBuffer: WebGLBuffer;
@@ -14,11 +22,13 @@ export class Quad {
     this.vertexBuffer = vertexBuffer;
   }
 
-  draw(rectangle: SceneRectangle, shaderProgram: ShaderProgram) {
-    const { x, y, width, height } = rectangle;
+  draw(rectangle: QuadRectangle, shaderProgram: ShaderProgram) {
+    const { x, y, width, height, scaleX, scaleY } = rectangle;
+    const scaledWidth = width * (scaleX ?? 1);
+    const scaledHeight = height * (scaleY ?? 1);
     const left = x;
-    const right = x + width;
-    const top = y + height;
+    const right = x + scaledWidth;
+    const top = y + scaledHeight;
     const bottom = y;
 
     const vertices = new Float32Array([

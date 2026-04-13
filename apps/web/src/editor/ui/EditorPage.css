@@ -293,21 +293,22 @@
 }
 
 .canvas-stage {
+  position: relative;
   display: grid;
   min-height: 100%;
-  padding: 64px;
-  place-items: center;
+  padding: 0;
 }
 
 .canvas-placeholder {
-  display: grid;
-  width: min(760px, 100%);
-  gap: 14px;
-  justify-items: center;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
 }
 
 .canvas-label,
 .canvas-meta {
+  position: absolute;
+  z-index: 2;
   margin: 0;
   border: 1px solid rgba(32, 35, 33, 0.12);
   border-radius: 8px;
@@ -316,28 +317,39 @@
   color: #3f4741;
   font-size: 13px;
   font-weight: 700;
+  pointer-events: none;
+}
+
+.canvas-label {
+  top: 48px;
+  left: 50%;
+  transform: translateX(-50%);
 }
 
 .canvas-meta {
+  right: 18px;
+  bottom: 18px;
   font-weight: 600;
 }
 
 .canvas-frame {
-  position: relative;
+  position: absolute;
+  inset: 0;
   display: grid;
-  width: min(620px, 100%);
-  aspect-ratio: 4 / 3;
   overflow: hidden;
-  border: 1px solid #b9c2b6;
-  border-radius: 6px;
-  background: #ffffff;
-  box-shadow: 0 18px 42px rgba(32, 35, 33, 0.18);
+  background: transparent;
 }
 
 .webgl-canvas {
   display: block;
   width: 100%;
   height: 100%;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.webgl-canvas.is-pan-tool {
+  cursor: grab;
 }
 
 .canvas-error {
@@ -499,7 +511,7 @@
   }
 
   .canvas-stage {
-    padding: 48px 34px;
+    padding: 0;
   }
 }
 
@@ -557,6 +569,6 @@
   }
 
   .canvas-stage {
-    padding: 46px 20px 28px 44px;
+    padding: 0;
   }
 }

@@ -19,7 +19,7 @@ const mockTabs = [
   }
 ];
 
-const mockTools = ["Move", "Marquee", "Brush", "Eraser", "Text", "Zoom"];
+const mockTools = ["Move", "Pan", "Marquee", "Brush", "Eraser", "Text", "Zoom"];
 
 const mockLayers = [
   {
@@ -44,7 +44,8 @@ function clamp(value: number, min: number, max: number) {
 }
 
 export function EditorPage() {
-  const selectedTool = "Move";
+  const [selectedTool, setSelectedTool] = useState("Move");
+  const [zoomPercentage, setZoomPercentage] = useState(100);
   const [toolsPanelWidth, setToolsPanelWidth] = useState(88);
   const [rightPanelWidth, setRightPanelWidth] = useState(300);
   const [layersPanelHeight, setLayersPanelHeight] = useState(190);
@@ -116,9 +117,17 @@ export function EditorPage() {
 
   return (
     <main className="editor-page">
-      <Toolbar documentTitle="Untitled" selectedTool={selectedTool} />
+      <Toolbar
+        documentTitle="Untitled"
+        selectedTool={selectedTool}
+        zoomPercentage={zoomPercentage}
+      />
       <section className="editor-shell" style={layoutStyle} aria-label="Editor workspace">
-        <ToolsPanel selectedTool={selectedTool} tools={mockTools} />
+        <ToolsPanel
+          onSelectTool={setSelectedTool}
+          selectedTool={selectedTool}
+          tools={mockTools}
+        />
         <button
           aria-label="Resize tools panel"
           className="resize-handle resize-handle-vertical"
@@ -127,7 +136,11 @@ export function EditorPage() {
         />
         <div className="editor-center">
           <TabsBar tabs={mockTabs} />
-          <CanvasView activeTabTitle="Untitled" selectedTool={selectedTool} />
+          <CanvasView
+            activeTabTitle="Untitled"
+            onZoomChange={setZoomPercentage}
+            selectedTool={selectedTool}
+          />
         </div>
         <button
           aria-label="Resize side panels"

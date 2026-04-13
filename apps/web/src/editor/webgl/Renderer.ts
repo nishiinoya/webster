@@ -1,5 +1,6 @@
 import { Camera2D } from "../core/Camera2D";
 import { Scene } from "../core/Scene";
+import { ShapeLayer } from "../layers/ShapeLayer";
 import { Quad } from "./Quad";
 import { ShaderProgram } from "./ShaderProgram";
 
@@ -9,6 +10,8 @@ export class Renderer {
   private readonly quad: Quad;
   private width = 0;
   private height = 0;
+  private cssWidth = 1;
+  private cssHeight = 1;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     const gl = canvas.getContext("webgl", {
@@ -25,19 +28,30 @@ export class Renderer {
     this.gl = gl;
     this.shaderProgram = new ShaderProgram(gl);
     this.quad = new Quad(gl);
+    this.gl.enable(this.gl.BLEND);
+    this.gl.blendFunc(this.gl.SRC_ALPHA, this.gl.ONE_MINUS_SRC_ALPHA);
   }
 
   resize() {
     const pixelRatio = window.devicePixelRatio || 1;
-    const nextWidth = Math.max(1, Math.floor(this.canvas.clientWidth * pixelRatio));
-    const nextHeight = Math.max(1, Math.floor(this.canvas.clientHeight * pixelRatio));
+    const nextCssWidth = Math.max(1, this.canvas.clientWidth);
+    const nextCssHeight = Math.max(1, this.canvas.clientHeight);
+    const nextWidth = Math.max(1, Math.floor(nextCssWidth * pixelRatio));
+    const nextHeight = Math.max(1, Math.floor(nextCssHeight * pixelRatio));
 
-    if (this.width === nextWidth && this.height === nextHeight) {
+    if (
+      this.width === nextWidth &&
+      this.height === nextHeight &&
+      this.cssWidth === nextCssWidth &&
+      this.cssHeight === nextCssHeight
+    ) {
       return;
     }
 
     this.width = nextWidth;
     this.height = nextHeight;
+    this.cssWidth = nextCssWidth;
+    this.cssHeight = nextCssHeight;
     this.canvas.width = nextWidth;
     this.canvas.height = nextHeight;
     this.gl.viewport(0, 0, nextWidth, nextHeight);
@@ -45,13 +59,29 @@ export class Renderer {
 
   render(scene: Scene, camera: Camera2D) {
     this.resize();
-    camera.resize(this.width, this.height);
+    camera.resize(this.cssWidth, this.cssHeight);
     this.clear();
 
     this.shaderProgram.use();
     this.shaderProgram.setProjection(camera.projectionMatrix);
-    this.shaderProgram.setColor(scene.rectangle.color);
-    this.quad.draw(scene.rectangle, this.shaderProgram);
+    this.shaderProgram.setColor(scene.document.color);
+    this.quad.draw(scene.document, this.shaderProgram);
+
+    for (const layer of scene.layers) {
+      if (!layer.visible || layer.opacity <= 0) {
+        continue;
+      }
+
+      if (layer instanceof ShapeLayer) {
+        this.shaderProgram.setColor([
+          layer.color[0],
+          layer.color[1],
+          layer.color[2],
+          layer.color[3] * layer.opacity
+        ]);
+        this.quad.draw(layer, this.shaderProgram);
+      }
+    }
   }
 
   dispose() {
@@ -60,7 +90,7 @@ export class Renderer {
   }
 
   private clear() {
-    this.gl.clearColor(0.84, 0.86, 0.83, 1);
+    this.gl.clearColor(0.92, 0.94, 0.91, 1);
     this.gl.clear(this.gl.COLOR_BUFFER_BIT);
   }
 }

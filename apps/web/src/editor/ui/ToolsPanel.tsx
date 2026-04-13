@@ -1,9 +1,10 @@
 type ToolsPanelProps = {
+  onSelectTool: (tool: string) => void;
   selectedTool: string;
   tools: string[];
 };
 
-export function ToolsPanel({ selectedTool, tools }: ToolsPanelProps) {
+export function ToolsPanel({ onSelectTool, selectedTool, tools }: ToolsPanelProps) {
   return (
     <aside className="tools-panel" aria-label="Left tools panel">
       <p className="panel-title">Tools</p>
@@ -13,6 +14,7 @@ export function ToolsPanel({ selectedTool, tools }: ToolsPanelProps) {
             aria-pressed={tool === selectedTool}
             className="tool-button"
             key={tool}
+            onClick={() => onSelectTool(tool)}
             type="button"
           >
             <span className="tool-icon" aria-hidden="true">
