@@ -1,5 +1,6 @@
-import { Layer } from "../layers/Layer";
 import { ImageLayer } from "../layers/ImageLayer";
+import { Layer } from "../layers/Layer";
+import type { SerializedLayer } from "../layers/Layer";
 import { ShapeLayer } from "../layers/ShapeLayer";
 
 export type DocumentBounds = {
@@ -10,30 +11,75 @@ export type DocumentBounds = {
   color: [number, number, number, number];
 };
 
-export class Scene {
-  readonly document: DocumentBounds = {
-    x: -400,
-    y: -300,
-    width: 800,
-    height: 600,
-    color: [0.96, 0.97, 0.94, 1]
+export type SerializedScene = {
+  app: "webster";
+  canvas: {
+    background: [number, number, number, number];
+    height: number;
+    width: number;
+    x?: number;
+    y?: number;
   };
+  layers: SerializedLayer[];
+  selectedLayerId?: string | null;
+  version: 1;
+};
+
+export class Scene {
+  readonly document: DocumentBounds;
 
   readonly layers: Layer[] = [];
   selectedLayerId: string | null = null;
 
-  constructor() {
-    this.addLayer(
-      new ShapeLayer({
-        id: "default-shape",
-        name: "Rectangle",
-        x: -110,
-        y: -60,
-        width: 260,
-        height: 160,
-        color: [0.18, 0.49, 0.44, 1]
-      })
-    );
+  constructor(options: { createDefaultLayer?: boolean } = {}) {
+    this.document = {
+      x: -400,
+      y: -300,
+      width: 800,
+      height: 600,
+      color: [0.96, 0.97, 0.94, 1]
+    };
+
+    if (options.createDefaultLayer ?? true) {
+      this.addLayer(
+        new ShapeLayer({
+          id: "default-shape",
+          name: "Rectangle",
+          x: -110,
+          y: -60,
+          width: 260,
+          height: 160,
+          color: [0.18, 0.49, 0.44, 1]
+        })
+      );
+    }
+  }
+
+  static async fromJSON(data: SerializedScene, assets = new Map<string, Blob>()) {
+    if (!data || data.version !== 1 || !Array.isArray(data.layers)) {
+      throw new Error("Unsupported scene JSON.");
+    }
+
+    const scene = new Scene({ createDefaultLayer: false });
+
+    scene.document.x = data.canvas.x ?? -data.canvas.width / 2;
+    scene.document.y = data.canvas.y ?? -data.canvas.height / 2;
+    scene.document.width = data.canvas.width;
+    scene.document.height = data.canvas.height;
+    scene.document.color = data.canvas.background;
+
+    for (const layerData of data.layers) {
+      scene.layers.push(await Layer.fromJSON(layerData, assets));
+    }
+
+    scene.selectedLayerId =
+      data.selectedLayerId === undefined
+        ? scene.layers.at(-1)?.id ?? null
+        : data.selectedLayerId
+          ? scene.getLayer(data.selectedLayerId)?.id ?? scene.layers.at(-1)?.id ?? null
+          : null;
+
+    return scene;
   }
 
   addLayer(layer: Layer) {
@@ -249,6 +295,22 @@ export class Scene {
       .reverse();
   }
 
+  async toJSON(): Promise<SerializedScene> {
+    return {
+      app: "webster",
+      canvas: {
+        background: this.document.color,
+        height: this.document.height,
+        width: this.document.width,
+        x: this.document.x,
+        y: this.document.y
+      },
+      layers: await Promise.all(this.layers.map((layer) => layer.toJSON())),
+      selectedLayerId: this.selectedLayerId,
+      version: 1
+    };
+  }
+
   dispose() {
     for (const layer of this.layers) {
       disposeLayer(layer);
@@ -289,7 +351,7 @@ function cloneLayer(layer: Layer) {
     return new ImageLayer({
       ...options,
       image: layer.image,
-      objectUrl: layer.objectUrl
+      objectUrl: ""
     });
   }
 

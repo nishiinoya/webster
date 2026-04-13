@@ -2,6 +2,8 @@ import { useRef } from "react";
 
 type ToolbarProps = {
   documentTitle: string;
+  onOpenProject: (file: File) => void;
+  onSaveProject: () => void;
   onUploadImage: (file: File) => void;
   selectedTool: string;
   zoomPercentage: number;
@@ -11,16 +13,24 @@ const toolbarActions = ["Edit", "View", "Select", "Filter"];
 
 export function Toolbar({
   documentTitle,
+  onOpenProject,
+  onSaveProject,
   onUploadImage,
   selectedTool,
   zoomPercentage
 }: ToolbarProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const fileMenuRef = useRef<HTMLDetailsElement | null>(null);
+  const projectInputRef = useRef<HTMLInputElement | null>(null);
 
   function openImagePicker() {
     fileMenuRef.current?.removeAttribute("open");
     fileInputRef.current?.click();
+  }
+
+  function openProjectPicker() {
+    fileMenuRef.current?.removeAttribute("open");
+    projectInputRef.current?.click();
   }
 
   return (
@@ -41,14 +51,21 @@ export function Toolbar({
             <button className="toolbar-menu-item" disabled type="button">
               New
             </button>
-            <button className="toolbar-menu-item" disabled type="button">
-              Open image...
+            <button className="toolbar-menu-item" onClick={openProjectPicker} type="button">
+              Open .webster...
             </button>
             <button className="toolbar-menu-item" onClick={openImagePicker} type="button">
               Import image as layer...
             </button>
-            <button className="toolbar-menu-item" disabled type="button">
-              Save
+            <button
+              className="toolbar-menu-item"
+              onClick={() => {
+                fileMenuRef.current?.removeAttribute("open");
+                onSaveProject();
+              }}
+              type="button"
+            >
+              Save .webster
             </button>
             <button className="toolbar-menu-item" disabled type="button">
               Export
@@ -69,6 +86,20 @@ export function Toolbar({
 
             if (file) {
               onUploadImage(file);
+              event.target.value = "";
+            }
+          }}
+          type="file"
+        />
+        <input
+          ref={projectInputRef}
+          accept=".webster,application/zip,application/vnd.webster.project"
+          className="visually-hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+
+            if (file) {
+              onOpenProject(file);
               event.target.value = "";
             }
           }}

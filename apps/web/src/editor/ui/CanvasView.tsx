@@ -9,6 +9,8 @@ type CanvasViewProps = {
   layerCommandRequest: { command: LayerCommand; id: number } | null;
   onLayersChange: (layers: LayerSummary[]) => void;
   onZoomChange: (zoomPercentage: number) => void;
+  projectFileRequest: { file: File; id: number } | null;
+  projectSaveRequest: { id: number } | null;
   selectLayerRequest: { layerId: string; id: number } | null;
   selectedTool: string;
   uploadRequest: { file: File; id: number } | null;
@@ -19,6 +21,8 @@ export function CanvasView({
   layerCommandRequest,
   onLayersChange,
   onZoomChange,
+  projectFileRequest,
+  projectSaveRequest,
   selectLayerRequest,
   selectedTool,
   uploadRequest
@@ -117,6 +121,46 @@ export function CanvasView({
     editorAppRef.current.applyLayerCommand(layerCommandRequest.command);
     onLayersChange(editorAppRef.current.getLayerSummaries());
   }, [layerCommandRequest, onLayersChange]);
+
+  useEffect(() => {
+    if (!projectSaveRequest || !editorAppRef.current) {
+      return;
+    }
+
+    const editorApp = editorAppRef.current;
+
+    async function saveProject() {
+      try {
+        downloadBlob(await editorApp.exportProjectFile(), "untitled.webster");
+        setWebglError(null);
+      } catch (error) {
+        setWebglError(error instanceof Error ? error.message : "Unable to save project file.");
+      }
+    }
+
+    void saveProject();
+  }, [projectSaveRequest]);
+
+  useEffect(() => {
+    if (!projectFileRequest || !editorAppRef.current) {
+      return;
+    }
+
+    const editorApp = editorAppRef.current;
+    const request = projectFileRequest;
+
+    async function openProject() {
+      try {
+        await editorApp.importProjectFile(request.file);
+        onLayersChange(editorApp.getLayerSummaries());
+        setWebglError(null);
+      } catch (error) {
+        setWebglError(error instanceof Error ? error.message : "Unable to open project file.");
+      }
+    }
+
+    void openProject();
+  }, [onLayersChange, projectFileRequest]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -248,6 +292,16 @@ export function CanvasView({
       </div>
     </section>
   );
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 function getCanvasCursorStyle(cursor: string) {

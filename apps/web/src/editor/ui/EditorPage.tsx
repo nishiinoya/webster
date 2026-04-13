@@ -70,6 +70,13 @@ export function EditorPage() {
     command: LayerCommand;
     id: number;
   } | null>(null);
+  const [projectFileRequest, setProjectFileRequest] = useState<{
+    id: number;
+    file: File;
+  } | null>(null);
+  const [projectSaveRequest, setProjectSaveRequest] = useState<{
+    id: number;
+  } | null>(null);
   const [toolsPanelWidth, setToolsPanelWidth] = useState(88);
   const [rightPanelWidth, setRightPanelWidth] = useState(380);
   const [layersPanelHeight, setLayersPanelHeight] = useState(190);
@@ -177,6 +184,8 @@ export function EditorPage() {
     <main className="editor-page">
       <Toolbar
         documentTitle="Untitled"
+        onOpenProject={(file) => setProjectFileRequest({ file, id: Date.now() })}
+        onSaveProject={() => setProjectSaveRequest({ id: Date.now() })}
         onUploadImage={(file) => setUploadRequest({ file, id: Date.now() })}
         selectedTool={selectedTool}
         zoomPercentage={zoomPercentage}
@@ -200,6 +209,8 @@ export function EditorPage() {
             layerCommandRequest={layerCommandRequest}
             onLayersChange={setLayers}
             onZoomChange={setZoomPercentage}
+            projectFileRequest={projectFileRequest}
+            projectSaveRequest={projectSaveRequest}
             selectLayerRequest={selectLayerRequest}
             selectedTool={selectedTool}
             uploadRequest={uploadRequest}

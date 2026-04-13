@@ -11,6 +11,10 @@ export class InputController {
     this.moveTool = new MoveTool(canvas, scene, camera);
   }
 
+  setScene(scene: Scene) {
+    this.moveTool.setScene(scene);
+  }
+
   setSelectedTool(tool: string) {
     this.selectedTool = tool;
   }

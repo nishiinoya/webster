@@ -59,9 +59,14 @@ export class MoveTool {
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
-    private readonly scene: Scene,
+    private scene: Scene,
     private readonly camera: Camera2D
   ) {}
+
+  setScene(scene: Scene) {
+    this.cancel();
+    this.scene = scene;
+  }
 
   pointerDown(event: ToolPointerEvent) {
     if (event.button !== 0) {

@@ -3,6 +3,7 @@ import { InputController } from "../tools/InputController";
 import type { ToolPointerEvent } from "../tools/MoveTool";
 import { Camera2D } from "./Camera2D";
 import { Scene } from "./Scene";
+import { exportScenePackage, importScenePackage } from "./ProjectPackage";
 import { ImageLayer } from "../layers/ImageLayer";
 
 export type CameraSnapshot = {
@@ -25,7 +26,7 @@ export type LayerCommand =
 
 export class EditorApp {
   private readonly renderer: Renderer;
-  private readonly scene: Scene;
+  private scene: Scene;
   private readonly camera: Camera2D;
   private readonly inputController: InputController;
   private animationFrameId: number | null = null;
@@ -108,6 +109,20 @@ export class EditorApp {
     return this.scene.getLayerSummaries();
   }
 
+  async exportProjectFile() {
+    return exportScenePackage(this.scene);
+  }
+
+  async importProjectFile(file: File) {
+    const nextScene = await importScenePackage(file);
+    this.scene.dispose();
+    this.scene = nextScene;
+    this.camera.setBounds(this.scene.document);
+    this.inputController.setScene(this.scene);
+
+    return this.scene;
+  }
+
   setSelectedTool(tool: string) {
     this.selectedTool = tool;
     this.inputController.setSelectedTool(tool);
@@ -174,9 +189,11 @@ export class EditorApp {
     const scale = Math.min(1, maxInitialSize / Math.max(width, height));
 
     const layer = new ImageLayer({
+      assetId: crypto.randomUUID(),
       id: crypto.randomUUID(),
       name: file.name || "Image",
       image,
+      mimeType: file.type || "image/png",
       objectUrl: image.src,
       x: (-width * scale) / 2,
       y: (-height * scale) / 2,
