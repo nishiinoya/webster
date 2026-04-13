@@ -1,11 +1,158 @@
 "use client";
 
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
+import { useState } from "react";
+import { CanvasView } from "./CanvasView";
 import "./EditorPage.css";
+import { HistoryPanel } from "./HistoryPanel";
+import { LayersPanel } from "./LayersPanel";
+import { PropertiesPanel } from "./PropertiesPanel";
+import { TabsBar } from "./TabsBar";
+import { Toolbar } from "./Toolbar";
+import { ToolsPanel } from "./ToolsPanel";
+
+const mockTabs = [
+  {
+    id: "untitled",
+    title: "Untitled",
+    isActive: true
+  }
+];
+
+const mockTools = ["Move", "Marquee", "Brush", "Eraser", "Text", "Zoom"];
+
+const mockLayers = [
+  {
+    id: "background",
+    name: "Background",
+    isVisible: true,
+    isSelected: true
+  }
+];
+
+const mockHistory = ["New document", "Selected Move tool"];
+
+type EditorLayoutVars = CSSProperties & {
+  "--tools-panel-width": string;
+  "--right-panel-width": string;
+  "--layers-panel-height": string;
+  "--properties-panel-height": string;
+};
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
 
 export function EditorPage() {
+  const selectedTool = "Move";
+  const [toolsPanelWidth, setToolsPanelWidth] = useState(88);
+  const [rightPanelWidth, setRightPanelWidth] = useState(300);
+  const [layersPanelHeight, setLayersPanelHeight] = useState(190);
+  const [propertiesPanelHeight, setPropertiesPanelHeight] = useState(250);
+
+  const layoutStyle: EditorLayoutVars = {
+    "--tools-panel-width": `${toolsPanelWidth}px`,
+    "--right-panel-width": `${rightPanelWidth}px`,
+    "--layers-panel-height": `${layersPanelHeight}px`,
+    "--properties-panel-height": `${propertiesPanelHeight}px`
+  };
+
+  function startResize(onMove: (moveEvent: PointerEvent) => void) {
+    document.body.classList.add("is-resizing-editor");
+
+    function stopResize() {
+      document.body.classList.remove("is-resizing-editor");
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", stopResize);
+    }
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", stopResize, { once: true });
+  }
+
+  function startToolsResize(event: ReactPointerEvent<HTMLButtonElement>) {
+    const startX = event.clientX;
+    const startWidth = toolsPanelWidth;
+
+    function resize(moveEvent: PointerEvent) {
+      setToolsPanelWidth(clamp(startWidth + moveEvent.clientX - startX, 68, 180));
+    }
+
+    startResize(resize);
+  }
+
+  function startRightPanelResize(event: ReactPointerEvent<HTMLButtonElement>) {
+    const startX = event.clientX;
+    const startWidth = rightPanelWidth;
+
+    function resize(moveEvent: PointerEvent) {
+      setRightPanelWidth(clamp(startWidth - (moveEvent.clientX - startX), 240, 460));
+    }
+
+    startResize(resize);
+  }
+
+  function startLayersResize(event: ReactPointerEvent<HTMLButtonElement>) {
+    const startY = event.clientY;
+    const startHeight = layersPanelHeight;
+
+    function resize(moveEvent: PointerEvent) {
+      setLayersPanelHeight(clamp(startHeight + moveEvent.clientY - startY, 120, 360));
+    }
+
+    startResize(resize);
+  }
+
+  function startPropertiesResize(event: ReactPointerEvent<HTMLButtonElement>) {
+    const startY = event.clientY;
+    const startHeight = propertiesPanelHeight;
+
+    function resize(moveEvent: PointerEvent) {
+      setPropertiesPanelHeight(clamp(startHeight + moveEvent.clientY - startY, 150, 420));
+    }
+
+    startResize(resize);
+  }
+
   return (
     <main className="editor-page">
-      <h1>Photo Redactor Editor</h1>
+      <Toolbar documentTitle="Untitled" selectedTool={selectedTool} />
+      <section className="editor-shell" style={layoutStyle} aria-label="Editor workspace">
+        <ToolsPanel selectedTool={selectedTool} tools={mockTools} />
+        <button
+          aria-label="Resize tools panel"
+          className="resize-handle resize-handle-vertical"
+          onPointerDown={startToolsResize}
+          type="button"
+        />
+        <div className="editor-center">
+          <TabsBar tabs={mockTabs} />
+          <CanvasView activeTabTitle="Untitled" selectedTool={selectedTool} />
+        </div>
+        <button
+          aria-label="Resize side panels"
+          className="resize-handle resize-handle-vertical"
+          onPointerDown={startRightPanelResize}
+          type="button"
+        />
+        <aside className="editor-side-panels" aria-label="Editor panels">
+          <LayersPanel layers={mockLayers} />
+          <button
+            aria-label="Resize layers panel"
+            className="resize-handle resize-handle-horizontal"
+            onPointerDown={startLayersResize}
+            type="button"
+          />
+          <PropertiesPanel selectedLayerName="Background" selectedTool={selectedTool} />
+          <button
+            aria-label="Resize properties panel"
+            className="resize-handle resize-handle-horizontal"
+            onPointerDown={startPropertiesResize}
+            type="button"
+          />
+          <HistoryPanel entries={mockHistory} />
+        </aside>
+      </section>
     </main>
   );
 }
