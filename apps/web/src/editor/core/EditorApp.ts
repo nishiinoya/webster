@@ -16,11 +16,19 @@ export class EditorApp {
   private isDisposed = false;
   private lastCameraSnapshot: CameraSnapshot | null = null;
 
-  constructor(
+  static async create(
+    canvas: HTMLCanvasElement,
+    onCameraChange?: (camera: CameraSnapshot) => void
+  ) {
+    return new EditorApp(canvas, await Renderer.create(canvas), onCameraChange);
+  }
+
+  private constructor(
     private readonly canvas: HTMLCanvasElement,
+    renderer: Renderer,
     private readonly onCameraChange?: (camera: CameraSnapshot) => void
   ) {
-    this.renderer = new Renderer(canvas);
+    this.renderer = renderer;
     this.scene = new Scene();
     this.camera = new Camera2D();
     this.camera.setBounds(this.scene.document);

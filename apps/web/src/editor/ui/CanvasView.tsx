@@ -20,24 +20,57 @@ export function CanvasView({ activeTabTitle, onZoomChange, selectedTool }: Canva
       return;
     }
 
-    try {
-      const editorApp = new EditorApp(canvasRef.current, ({ zoom }) => {
-        onZoomChange(Math.round(zoom * 100));
-      });
+    let didCancel = false;
 
-      editorAppRef.current = editorApp;
-      editorApp.start();
-      onZoomChange(Math.round(editorApp.getCameraSnapshot().zoom * 100));
-      setWebglError(null);
+    try {
+      EditorApp.create(canvasRef.current, ({ zoom }) => {
+        onZoomChange(Math.round(zoom * 100));
+      })
+        .then((editorApp) => {
+          if (didCancel) {
+            editorApp.dispose();
+            return;
+          }
+
+          editorAppRef.current = editorApp;
+          editorApp.start();
+          onZoomChange(Math.round(editorApp.getCameraSnapshot().zoom * 100));
+          setWebglError(null);
+        })
+        .catch((error) => {
+          if (!didCancel) {
+            setWebglError(error instanceof Error ? error.message : "WebGL failed to start.");
+          }
+        });
     } catch (error) {
       setWebglError(error instanceof Error ? error.message : "WebGL failed to start.");
     }
 
     return () => {
+      didCancel = true;
       editorAppRef.current?.dispose();
       editorAppRef.current = null;
     };
   }, [onZoomChange]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+
+    if (!canvas) {
+      return;
+    }
+
+    function handleWheel(event: WheelEvent) {
+      event.preventDefault();
+      editorAppRef.current?.zoomCameraAt(event.clientX, event.clientY, event.deltaY);
+    }
+
+    canvas.addEventListener("wheel", handleWheel, { passive: false });
+
+    return () => {
+      canvas.removeEventListener("wheel", handleWheel);
+    };
+  }, []);
 
   function startPan(clientX: number, clientY: number) {
     panStateRef.current = {
@@ -89,10 +122,6 @@ export function CanvasView({ activeTabTitle, onZoomChange, selectedTool }: Canva
                 }
 
                 stopPan();
-              }}
-              onWheel={(event) => {
-                event.preventDefault();
-                editorAppRef.current?.zoomCameraAt(event.clientX, event.clientY, event.deltaY);
               }}
             />
             {webglError ? <p className="canvas-error">{webglError}</p> : null}
