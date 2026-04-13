@@ -1,6 +1,7 @@
 import { Camera2D } from "../core/Camera2D";
 import { Scene } from "../core/Scene";
 import { ImageLayer } from "../layers/ImageLayer";
+import { Layer } from "../layers/Layer";
 import { ShapeLayer } from "../layers/ShapeLayer";
 import { CheckerboardShaderProgram } from "./CheckerboardShaderProgram";
 import { loadShaderSource } from "./loadShaderSource";
@@ -163,6 +164,12 @@ export class Renderer {
         this.solidColorShaderProgram.setProjection(camera.projectionMatrix);
       }
     }
+
+    const selectedLayer = scene.selectedLayerId ? scene.getLayer(scene.selectedLayerId) : null;
+
+    if (selectedLayer?.visible && selectedLayer.opacity > 0) {
+      this.drawSelectionOutline(selectedLayer, camera);
+    }
   }
 
   dispose() {
@@ -176,5 +183,57 @@ export class Renderer {
   private clear() {
     this.gl.clearColor(0.07, 0.08, 0.09, 1);
     this.gl.clear(this.gl.COLOR_BUFFER_BIT);
+  }
+
+  private drawSelectionOutline(layer: Layer, camera: Camera2D) {
+    const width = layer.width * layer.scaleX;
+    const height = layer.height * layer.scaleY;
+    const left = Math.min(layer.x, layer.x + width);
+    const right = Math.max(layer.x, layer.x + width);
+    const bottom = Math.min(layer.y, layer.y + height);
+    const top = Math.max(layer.y, layer.y + height);
+    const outlineWidth = Math.max(1.5 / camera.zoom, 0.5);
+    const padding = 2 / camera.zoom;
+
+    this.solidColorShaderProgram.use();
+    this.solidColorShaderProgram.setProjection(camera.projectionMatrix);
+    this.solidColorShaderProgram.setColor([0.39, 0.86, 0.75, 1]);
+
+    this.quad.draw(
+      {
+        x: left - padding,
+        y: bottom - padding - outlineWidth,
+        width: right - left + padding * 2,
+        height: outlineWidth
+      },
+      this.solidColorShaderProgram
+    );
+    this.quad.draw(
+      {
+        x: left - padding,
+        y: top + padding,
+        width: right - left + padding * 2,
+        height: outlineWidth
+      },
+      this.solidColorShaderProgram
+    );
+    this.quad.draw(
+      {
+        x: left - padding - outlineWidth,
+        y: bottom - padding - outlineWidth,
+        width: outlineWidth,
+        height: top - bottom + padding * 2 + outlineWidth * 2
+      },
+      this.solidColorShaderProgram
+    );
+    this.quad.draw(
+      {
+        x: right + padding,
+        y: bottom - padding - outlineWidth,
+        width: outlineWidth,
+        height: top - bottom + padding * 2 + outlineWidth * 2
+      },
+      this.solidColorShaderProgram
+    );
   }
 }

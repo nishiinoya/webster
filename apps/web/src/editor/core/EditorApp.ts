@@ -91,6 +91,22 @@ export class EditorApp {
     return this.scene.getLayerSummaries();
   }
 
+  selectLayer(layerId: string | null) {
+    return this.scene.selectLayer(layerId);
+  }
+
+  selectLayerAt(clientX: number, clientY: number) {
+    const screenPoint = this.getCanvasPoint(clientX, clientY);
+    const worldPoint = this.camera.screenToWorld(screenPoint.x, screenPoint.y);
+    const layer = this.scene.hitTestLayer(worldPoint.x, worldPoint.y);
+
+    if (layer) {
+      this.scene.selectLayer(layer.id);
+    }
+
+    return layer;
+  }
+
   async addImageFile(file: File) {
     const image = await loadImageElement(file);
     const width = image.naturalWidth || image.width;

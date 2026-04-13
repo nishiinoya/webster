@@ -62,6 +62,39 @@ export class Scene {
     return this.layers.find((layer) => layer.id === layerId) ?? null;
   }
 
+  selectLayer(layerId: string | null) {
+    if (layerId === null) {
+      this.selectedLayerId = null;
+      return null;
+    }
+
+    const layer = this.getLayer(layerId);
+
+    if (!layer) {
+      return null;
+    }
+
+    this.selectedLayerId = layer.id;
+
+    return layer;
+  }
+
+  hitTestLayer(x: number, y: number) {
+    for (let index = this.layers.length - 1; index >= 0; index -= 1) {
+      const layer = this.layers[index];
+
+      if (!layer.visible || layer.opacity <= 0) {
+        continue;
+      }
+
+      if (isPointInsideLayer(layer, x, y)) {
+        return layer;
+      }
+    }
+
+    return null;
+  }
+
   moveLayer(layerId: string, x: number, y: number) {
     const layer = this.getLayer(layerId);
 
@@ -136,4 +169,15 @@ export class Scene {
       }
     }
   }
+}
+
+function isPointInsideLayer(layer: Layer, x: number, y: number) {
+  const width = layer.width * layer.scaleX;
+  const height = layer.height * layer.scaleY;
+  const left = Math.min(layer.x, layer.x + width);
+  const right = Math.max(layer.x, layer.x + width);
+  const bottom = Math.min(layer.y, layer.y + height);
+  const top = Math.max(layer.y, layer.y + height);
+
+  return x >= left && x <= right && y >= bottom && y <= top;
 }

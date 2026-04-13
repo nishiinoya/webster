@@ -8,6 +8,7 @@ type CanvasViewProps = {
   activeTabTitle: string;
   onLayersChange: (layers: LayerSummary[]) => void;
   onZoomChange: (zoomPercentage: number) => void;
+  selectLayerRequest: { layerId: string; id: number } | null;
   selectedTool: string;
   uploadRequest: { file: File; id: number } | null;
 };
@@ -16,6 +17,7 @@ export function CanvasView({
   activeTabTitle,
   onLayersChange,
   onZoomChange,
+  selectLayerRequest,
   selectedTool,
   uploadRequest
 }: CanvasViewProps) {
@@ -89,6 +91,15 @@ export function CanvasView({
   }, [onLayersChange, uploadRequest]);
 
   useEffect(() => {
+    if (!selectLayerRequest || !editorAppRef.current) {
+      return;
+    }
+
+    editorAppRef.current.selectLayer(selectLayerRequest.layerId);
+    onLayersChange(editorAppRef.current.getLayerSummaries());
+  }, [onLayersChange, selectLayerRequest]);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
 
     if (!canvas) {
@@ -148,6 +159,18 @@ export function CanvasView({
                   event.preventDefault();
                   event.currentTarget.setPointerCapture(event.pointerId);
                   startPan(event.clientX, event.clientY);
+                  return;
+                }
+
+                if (event.button === 0) {
+                  const selectedLayer = editorAppRef.current?.selectLayerAt(
+                    event.clientX,
+                    event.clientY
+                  );
+
+                  if (selectedLayer && editorAppRef.current) {
+                    onLayersChange(editorAppRef.current.getLayerSummaries());
+                  }
                 }
               }}
               onPointerMove={(event) => panTo(event.clientX, event.clientY)}

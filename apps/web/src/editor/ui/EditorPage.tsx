@@ -50,6 +50,10 @@ export function EditorPage() {
   const [zoomPercentage, setZoomPercentage] = useState(100);
   const [layers, setLayers] = useState<LayerSummary[]>(initialLayers);
   const [uploadRequest, setUploadRequest] = useState<{ file: File; id: number } | null>(null);
+  const [selectLayerRequest, setSelectLayerRequest] = useState<{
+    id: number;
+    layerId: string;
+  } | null>(null);
   const [toolsPanelWidth, setToolsPanelWidth] = useState(88);
   const [rightPanelWidth, setRightPanelWidth] = useState(300);
   const [layersPanelHeight, setLayersPanelHeight] = useState(190);
@@ -61,6 +65,7 @@ export function EditorPage() {
     "--layers-panel-height": `${layersPanelHeight}px`,
     "--properties-panel-height": `${propertiesPanelHeight}px`
   };
+  const selectedLayerName = layers.find((layer) => layer.isSelected)?.name ?? "None";
 
   function startResize(onMove: (moveEvent: PointerEvent) => void) {
     document.body.classList.add("is-resizing-editor");
@@ -145,6 +150,7 @@ export function EditorPage() {
             activeTabTitle="Untitled"
             onLayersChange={setLayers}
             onZoomChange={setZoomPercentage}
+            selectLayerRequest={selectLayerRequest}
             selectedTool={selectedTool}
             uploadRequest={uploadRequest}
           />
@@ -156,14 +162,17 @@ export function EditorPage() {
           type="button"
         />
         <aside className="editor-side-panels" aria-label="Editor panels">
-          <LayersPanel layers={layers} />
+          <LayersPanel
+            layers={layers}
+            onSelectLayer={(layerId) => setSelectLayerRequest({ id: Date.now(), layerId })}
+          />
           <button
             aria-label="Resize layers panel"
             className="resize-handle resize-handle-horizontal"
             onPointerDown={startLayersResize}
             type="button"
           />
-          <PropertiesPanel selectedLayerName="Background" selectedTool={selectedTool} />
+          <PropertiesPanel selectedLayerName={selectedLayerName} selectedTool={selectedTool} />
           <button
             aria-label="Resize properties panel"
             className="resize-handle resize-handle-horizontal"

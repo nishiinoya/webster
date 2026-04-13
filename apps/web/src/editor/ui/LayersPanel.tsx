@@ -8,9 +8,10 @@ type Layer = {
 
 type LayersPanelProps = {
   layers: Layer[];
+  onSelectLayer: (layerId: string) => void;
 };
 
-export function LayersPanel({ layers }: LayersPanelProps) {
+export function LayersPanel({ layers, onSelectLayer }: LayersPanelProps) {
   return (
     <section className="editor-panel" aria-label="Layers panel">
       <div className="panel-header">
@@ -23,6 +24,7 @@ export function LayersPanel({ layers }: LayersPanelProps) {
             aria-pressed={layer.isSelected}
             className="layer-row"
             key={layer.id}
+            onClick={() => onSelectLayer(layer.id)}
             type="button"
           >
             <span className="visibility-dot" aria-label={layer.isVisible ? "Visible" : "Hidden"} />
