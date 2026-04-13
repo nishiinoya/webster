@@ -47,7 +47,7 @@ export function LayersPanel({ layers, onLayerCommand, onSelectLayer }: LayersPan
               }}
               type="button"
             >
-              {layer.isVisible ? "V" : "-"}
+              {layer.isVisible ? "Hide" : "Show"}
             </button>
             <span className={`layer-thumbnail layer-thumbnail-${layer.type}`} aria-hidden="true" />
             <input
@@ -66,7 +66,7 @@ export function LayersPanel({ layers, onLayerCommand, onSelectLayer }: LayersPan
                 onClick={() => updateLayer(layer.id, { locked: !layer.locked })}
                 type="button"
               >
-                {layer.locked ? "L" : "U"}
+                {layer.locked ? "Unlock" : "Lock"}
               </button>
               <button
                 aria-label={`Move ${layer.name} up`}
@@ -82,7 +82,7 @@ export function LayersPanel({ layers, onLayerCommand, onSelectLayer }: LayersPan
                 onClick={() => onLayerCommand({ type: "move-down", layerId: layer.id })}
                 type="button"
               >
-                Dn
+                Down
               </button>
               <button
                 aria-label={`Duplicate ${layer.name}`}
@@ -90,7 +90,7 @@ export function LayersPanel({ layers, onLayerCommand, onSelectLayer }: LayersPan
                 onClick={() => onLayerCommand({ type: "duplicate", layerId: layer.id })}
                 type="button"
               >
-                Dup
+                Copy
               </button>
               <button
                 aria-label={`Delete ${layer.name}`}
@@ -98,7 +98,7 @@ export function LayersPanel({ layers, onLayerCommand, onSelectLayer }: LayersPan
                 onClick={() => onLayerCommand({ type: "delete", layerId: layer.id })}
                 type="button"
               >
-                Del
+                Delete
               </button>
             </div>
             <label className="layer-opacity-control" onClick={stopPanelControl}>

@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { LayerCommand, LayerSummary } from "@/editor/core/EditorApp";
 import { CanvasView } from "./CanvasView";
 import "./EditorPage.css";
@@ -40,6 +40,10 @@ const initialLayers: LayerSummary[] = [
 ];
 
 const mockHistory = ["New document", "Selected Move tool"];
+const layersPanelMinHeight = 120;
+const propertiesPanelMinHeight = 150;
+const historyPanelMinHeight = 120;
+const sidePanelHandleHeight = 12;
 
 type EditorLayoutVars = CSSProperties & {
   "--tools-panel-width": string;
@@ -53,6 +57,7 @@ function clamp(value: number, min: number, max: number) {
 }
 
 export function EditorPage() {
+  const sidePanelsRef = useRef<HTMLElement | null>(null);
   const [selectedTool, setSelectedTool] = useState("Move");
   const [zoomPercentage, setZoomPercentage] = useState(100);
   const [layers, setLayers] = useState<LayerSummary[]>(initialLayers);
@@ -66,7 +71,7 @@ export function EditorPage() {
     id: number;
   } | null>(null);
   const [toolsPanelWidth, setToolsPanelWidth] = useState(88);
-  const [rightPanelWidth, setRightPanelWidth] = useState(300);
+  const [rightPanelWidth, setRightPanelWidth] = useState(380);
   const [layersPanelHeight, setLayersPanelHeight] = useState(190);
   const [propertiesPanelHeight, setPropertiesPanelHeight] = useState(250);
 
@@ -80,6 +85,27 @@ export function EditorPage() {
 
   function runLayerCommand(command: LayerCommand) {
     setLayerCommandRequest({ command, id: Date.now() });
+  }
+
+  function getSidePanelHeight() {
+    return sidePanelsRef.current?.getBoundingClientRect().height ?? window.innerHeight - 64;
+  }
+
+  function getMaxLayersPanelHeight() {
+    return Math.max(
+      layersPanelMinHeight,
+      getSidePanelHeight() -
+        propertiesPanelHeight -
+        historyPanelMinHeight -
+        sidePanelHandleHeight
+    );
+  }
+
+  function getMaxPropertiesPanelHeight() {
+    return Math.max(
+      propertiesPanelMinHeight,
+      getSidePanelHeight() - layersPanelHeight - historyPanelMinHeight - sidePanelHandleHeight
+    );
   }
 
   function startResize(onMove: (moveEvent: PointerEvent) => void) {
@@ -111,7 +137,7 @@ export function EditorPage() {
     const startWidth = rightPanelWidth;
 
     function resize(moveEvent: PointerEvent) {
-      setRightPanelWidth(clamp(startWidth - (moveEvent.clientX - startX), 240, 460));
+      setRightPanelWidth(clamp(startWidth - (moveEvent.clientX - startX), 320, 620));
     }
 
     startResize(resize);
@@ -122,7 +148,9 @@ export function EditorPage() {
     const startHeight = layersPanelHeight;
 
     function resize(moveEvent: PointerEvent) {
-      setLayersPanelHeight(clamp(startHeight + moveEvent.clientY - startY, 120, 360));
+      setLayersPanelHeight(
+        clamp(startHeight + moveEvent.clientY - startY, layersPanelMinHeight, getMaxLayersPanelHeight())
+      );
     }
 
     startResize(resize);
@@ -133,7 +161,13 @@ export function EditorPage() {
     const startHeight = propertiesPanelHeight;
 
     function resize(moveEvent: PointerEvent) {
-      setPropertiesPanelHeight(clamp(startHeight + moveEvent.clientY - startY, 150, 420));
+      setPropertiesPanelHeight(
+        clamp(
+          startHeight + moveEvent.clientY - startY,
+          propertiesPanelMinHeight,
+          getMaxPropertiesPanelHeight()
+        )
+      );
     }
 
     startResize(resize);
@@ -177,7 +211,7 @@ export function EditorPage() {
           onPointerDown={startRightPanelResize}
           type="button"
         />
-        <aside className="editor-side-panels" aria-label="Editor panels">
+        <aside className="editor-side-panels" aria-label="Editor panels" ref={sidePanelsRef}>
           <LayersPanel
             layers={layers}
             onLayerCommand={runLayerCommand}
