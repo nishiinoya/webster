@@ -2,7 +2,7 @@
 
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { useState } from "react";
-import type { LayerSummary } from "@/editor/core/EditorApp";
+import type { LayerCommand, LayerSummary } from "@/editor/core/EditorApp";
 import { CanvasView } from "./CanvasView";
 import "./EditorPage.css";
 import { HistoryPanel } from "./HistoryPanel";
@@ -61,6 +61,10 @@ export function EditorPage() {
     id: number;
     layerId: string;
   } | null>(null);
+  const [layerCommandRequest, setLayerCommandRequest] = useState<{
+    command: LayerCommand;
+    id: number;
+  } | null>(null);
   const [toolsPanelWidth, setToolsPanelWidth] = useState(88);
   const [rightPanelWidth, setRightPanelWidth] = useState(300);
   const [layersPanelHeight, setLayersPanelHeight] = useState(190);
@@ -73,6 +77,10 @@ export function EditorPage() {
     "--properties-panel-height": `${propertiesPanelHeight}px`
   };
   const selectedLayer = layers.find((layer) => layer.isSelected) ?? null;
+
+  function runLayerCommand(command: LayerCommand) {
+    setLayerCommandRequest({ command, id: Date.now() });
+  }
 
   function startResize(onMove: (moveEvent: PointerEvent) => void) {
     document.body.classList.add("is-resizing-editor");
@@ -155,6 +163,7 @@ export function EditorPage() {
           <TabsBar tabs={mockTabs} />
           <CanvasView
             activeTabTitle="Untitled"
+            layerCommandRequest={layerCommandRequest}
             onLayersChange={setLayers}
             onZoomChange={setZoomPercentage}
             selectLayerRequest={selectLayerRequest}
@@ -171,6 +180,7 @@ export function EditorPage() {
         <aside className="editor-side-panels" aria-label="Editor panels">
           <LayersPanel
             layers={layers}
+            onLayerCommand={runLayerCommand}
             onSelectLayer={(layerId) => setSelectLayerRequest({ id: Date.now(), layerId })}
           />
           <button
@@ -179,7 +189,11 @@ export function EditorPage() {
             onPointerDown={startLayersResize}
             type="button"
           />
-          <PropertiesPanel selectedLayer={selectedLayer} selectedTool={selectedTool} />
+          <PropertiesPanel
+            onLayerCommand={runLayerCommand}
+            selectedLayer={selectedLayer}
+            selectedTool={selectedTool}
+          />
           <button
             aria-label="Resize properties panel"
             className="resize-handle resize-handle-horizontal"

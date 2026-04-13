@@ -30,6 +30,16 @@ export type Point = {
   y: number;
 };
 
+export type TransformRectangle = {
+  height: number;
+  rotation?: number;
+  scaleX?: number;
+  scaleY?: number;
+  width: number;
+  x: number;
+  y: number;
+};
+
 export function getLayerSize(layer: Layer) {
   return {
     width: layer.width * layer.scaleX,
@@ -133,4 +143,28 @@ export function normalize(point: Point) {
 
 export function degreesToRadians(degrees: number) {
   return (degrees * Math.PI) / 180;
+}
+
+export function getModelMatrix(rectangle: TransformRectangle) {
+  const width = rectangle.width * (rectangle.scaleX ?? 1);
+  const height = rectangle.height * (rectangle.scaleY ?? 1);
+  const rotation = degreesToRadians(rectangle.rotation ?? 0);
+  const cos = Math.cos(rotation);
+  const sin = Math.sin(rotation);
+  const centerX = rectangle.x + width / 2;
+  const centerY = rectangle.y + height / 2;
+  const translateX = centerX - (cos * width) / 2 + (sin * height) / 2;
+  const translateY = centerY - (sin * width) / 2 - (cos * height) / 2;
+
+  return new Float32Array([
+    cos * width,
+    sin * width,
+    0,
+    -sin * height,
+    cos * height,
+    0,
+    translateX,
+    translateY,
+    1
+  ]);
 }

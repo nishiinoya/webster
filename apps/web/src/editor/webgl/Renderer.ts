@@ -3,6 +3,7 @@ import { Scene } from "../core/Scene";
 import {
   distance,
   getLayerCorners,
+  getModelMatrix,
   getTransformHandles,
   midpoint
 } from "../core/TransformGeometry";
@@ -137,12 +138,13 @@ export class Renderer {
 
     this.checkerboardShaderProgram.use();
     this.checkerboardShaderProgram.setProjection(camera.projectionMatrix);
+    this.checkerboardShaderProgram.setModel(getModelMatrix(scene.document));
     this.checkerboardShaderProgram.setCheckerboard(
       [0.22, 0.23, 0.25, 1],
       [0.31, 0.32, 0.35, 1],
       24
     );
-    this.quad.draw(scene.document, this.checkerboardShaderProgram);
+    this.quad.draw(this.checkerboardShaderProgram);
 
     this.solidColorShaderProgram.use();
     this.solidColorShaderProgram.setProjection(camera.projectionMatrix);
@@ -159,17 +161,19 @@ export class Renderer {
           layer.color[2],
           layer.color[3] * layer.opacity
         ]);
-        this.quad.draw(layer, this.solidColorShaderProgram);
+        this.solidColorShaderProgram.setModel(getModelMatrix(layer));
+        this.quad.draw(this.solidColorShaderProgram);
       }
 
       if (layer instanceof ImageLayer) {
         this.texturedShaderProgram.use();
         this.texturedShaderProgram.setProjection(camera.projectionMatrix);
+        this.texturedShaderProgram.setModel(getModelMatrix(layer));
         this.texturedShaderProgram.setTextureUnit(0);
         this.texturedShaderProgram.setOpacity(layer.opacity);
         this.gl.activeTexture(this.gl.TEXTURE0);
         this.gl.bindTexture(this.gl.TEXTURE_2D, this.textureManager.getTexture(layer));
-        this.quad.drawTextured(layer, this.texturedShaderProgram);
+        this.quad.drawTextured(this.texturedShaderProgram);
         this.solidColorShaderProgram.use();
         this.solidColorShaderProgram.setProjection(camera.projectionMatrix);
       }
@@ -232,54 +236,53 @@ export class Renderer {
       this.solidColorShaderProgram.setColor(
         handle.id === "rotate" ? [0.94, 0.78, 0.36, 1] : [0.07, 0.08, 0.09, 1]
       );
-      this.quad.draw(
-        {
+      this.solidColorShaderProgram.setModel(
+        getModelMatrix({
           x: handle.x - size / 2,
           y: handle.y - size / 2,
           width: size,
           height: size
-        },
-        this.solidColorShaderProgram
+        })
       );
+      this.quad.draw(this.solidColorShaderProgram);
 
       this.solidColorShaderProgram.setColor([0.39, 0.86, 0.75, 1]);
-      this.quad.draw(
-        {
-          x: handle.x - size / 2,
-          y: handle.y - size / 2,
-          width: size,
-          height: Math.max(1 / camera.zoom, 0.4)
-        },
-        this.solidColorShaderProgram
-      );
-      this.quad.draw(
-        {
-          x: handle.x - size / 2,
-          y: handle.y + size / 2 - Math.max(1 / camera.zoom, 0.4),
-          width: size,
-          height: Math.max(1 / camera.zoom, 0.4)
-        },
-        this.solidColorShaderProgram
-      );
-      this.quad.draw(
-        {
-          x: handle.x - size / 2,
-          y: handle.y - size / 2,
-          width: Math.max(1 / camera.zoom, 0.4),
-          height: size
-        },
-        this.solidColorShaderProgram
-      );
-      this.quad.draw(
-        {
-          x: handle.x + size / 2 - Math.max(1 / camera.zoom, 0.4),
-          y: handle.y - size / 2,
-          width: Math.max(1 / camera.zoom, 0.4),
-          height: size
-        },
-        this.solidColorShaderProgram
-      );
+      this.drawRectangle({
+        x: handle.x - size / 2,
+        y: handle.y - size / 2,
+        width: size,
+        height: Math.max(1 / camera.zoom, 0.4)
+      });
+      this.drawRectangle({
+        x: handle.x - size / 2,
+        y: handle.y + size / 2 - Math.max(1 / camera.zoom, 0.4),
+        width: size,
+        height: Math.max(1 / camera.zoom, 0.4)
+      });
+      this.drawRectangle({
+        x: handle.x - size / 2,
+        y: handle.y - size / 2,
+        width: Math.max(1 / camera.zoom, 0.4),
+        height: size
+      });
+      this.drawRectangle({
+        x: handle.x + size / 2 - Math.max(1 / camera.zoom, 0.4),
+        y: handle.y - size / 2,
+        width: Math.max(1 / camera.zoom, 0.4),
+        height: size
+      });
     }
+  }
+
+  private drawRectangle(rectangle: {
+    height: number;
+    rotation?: number;
+    width: number;
+    x: number;
+    y: number;
+  }) {
+    this.solidColorShaderProgram.setModel(getModelMatrix(rectangle));
+    this.quad.draw(this.solidColorShaderProgram);
   }
 
   private drawLine(start: { x: number; y: number }, end: { x: number; y: number }, width: number) {
@@ -287,15 +290,12 @@ export class Renderer {
     const length = distance(start, end);
     const rotation = (Math.atan2(end.y - start.y, end.x - start.x) * 180) / Math.PI;
 
-    this.quad.draw(
-      {
-        x: center.x - length / 2,
-        y: center.y - width / 2,
-        width: length,
-        height: width,
-        rotation
-      },
-      this.solidColorShaderProgram
-    );
+    this.drawRectangle({
+      x: center.x - length / 2,
+      y: center.y - width / 2,
+      width: length,
+      height: width,
+      rotation
+    });
   }
 }

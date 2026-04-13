@@ -13,6 +13,16 @@ export type CameraSnapshot = {
 
 export type LayerSummary = ReturnType<Scene["getLayerSummaries"]>[number];
 
+export type LayerUpdate = Parameters<Scene["updateLayer"]>[1];
+
+export type LayerCommand =
+  | { type: "delete"; layerId: string }
+  | { type: "duplicate"; layerId: string }
+  | { type: "move-down"; layerId: string }
+  | { type: "move-up"; layerId: string }
+  | { type: "select"; layerId: string }
+  | { type: "update"; layerId: string; updates: LayerUpdate };
+
 export class EditorApp {
   private readonly renderer: Renderer;
   private readonly scene: Scene;
@@ -105,6 +115,23 @@ export class EditorApp {
 
   selectLayer(layerId: string | null) {
     return this.scene.selectLayer(layerId);
+  }
+
+  applyLayerCommand(command: LayerCommand) {
+    switch (command.type) {
+      case "delete":
+        return this.scene.removeLayer(command.layerId);
+      case "duplicate":
+        return this.scene.duplicateLayer(command.layerId);
+      case "move-down":
+        return this.scene.moveLayerBackward(command.layerId);
+      case "move-up":
+        return this.scene.moveLayerForward(command.layerId);
+      case "select":
+        return this.scene.selectLayer(command.layerId);
+      case "update":
+        return this.scene.updateLayer(command.layerId, command.updates);
+    }
   }
 
   selectLayerAt(clientX: number, clientY: number) {

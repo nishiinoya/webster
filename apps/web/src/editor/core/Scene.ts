@@ -1,4 +1,5 @@
 import { Layer } from "../layers/Layer";
+import { ImageLayer } from "../layers/ImageLayer";
 import { ShapeLayer } from "../layers/ShapeLayer";
 
 export type DocumentBounds = {
@@ -50,6 +51,8 @@ export class Scene {
     }
 
     const [removedLayer] = this.layers.splice(layerIndex, 1);
+
+    disposeLayer(removedLayer);
 
     if (this.selectedLayerId === layerId) {
       this.selectedLayerId = this.layers.at(-1)?.id ?? null;
@@ -106,6 +109,83 @@ export class Scene {
     layer.y = y;
 
     return layer;
+  }
+
+  updateLayer(
+    layerId: string,
+    updates: Partial<{
+      height: number;
+      locked: boolean;
+      name: string;
+      opacity: number;
+      rotation: number;
+      visible: boolean;
+      width: number;
+      x: number;
+      y: number;
+    }>
+  ) {
+    const layer = this.getLayer(layerId);
+
+    if (!layer) {
+      return null;
+    }
+
+    if (updates.name !== undefined) {
+      layer.name = updates.name;
+    }
+
+    if (updates.visible !== undefined) {
+      layer.visible = updates.visible;
+    }
+
+    if (updates.locked !== undefined) {
+      layer.locked = updates.locked;
+    }
+
+    if (updates.opacity !== undefined) {
+      layer.opacity = clamp(updates.opacity, 0, 1);
+    }
+
+    if (!layer.locked) {
+      if (updates.x !== undefined) {
+        layer.x = updates.x;
+      }
+
+      if (updates.y !== undefined) {
+        layer.y = updates.y;
+      }
+
+      if (updates.rotation !== undefined) {
+        layer.rotation = normalizeRotation(updates.rotation);
+      }
+
+      if (updates.width !== undefined) {
+        layer.scaleX = Math.max(1, updates.width) / layer.width;
+      }
+
+      if (updates.height !== undefined) {
+        layer.scaleY = Math.max(1, updates.height) / layer.height;
+      }
+    }
+
+    return layer;
+  }
+
+  duplicateLayer(layerId: string) {
+    const layer = this.getLayer(layerId);
+
+    if (!layer) {
+      return null;
+    }
+
+    const copy = cloneLayer(layer);
+    const layerIndex = this.layers.findIndex((candidate) => candidate.id === layerId);
+
+    this.layers.splice(layerIndex + 1, 0, copy);
+    this.selectedLayerId = copy.id;
+
+    return copy;
   }
 
   reorderLayer(layerId: string, targetIndex: number) {
@@ -171,11 +251,49 @@ export class Scene {
 
   dispose() {
     for (const layer of this.layers) {
-      if ("dispose" in layer && typeof layer.dispose === "function") {
-        layer.dispose();
-      }
+      disposeLayer(layer);
     }
   }
+}
+
+function disposeLayer(layer: Layer) {
+  if ("dispose" in layer && typeof layer.dispose === "function") {
+    layer.dispose();
+  }
+}
+
+function cloneLayer(layer: Layer) {
+  const options = {
+    height: layer.height,
+    id: crypto.randomUUID(),
+    locked: false,
+    name: `${layer.name} copy`,
+    opacity: layer.opacity,
+    rotation: layer.rotation,
+    scaleX: layer.scaleX,
+    scaleY: layer.scaleY,
+    visible: layer.visible,
+    width: layer.width,
+    x: layer.x + 24,
+    y: layer.y - 24
+  };
+
+  if (layer instanceof ShapeLayer) {
+    return new ShapeLayer({
+      ...options,
+      color: [...layer.color]
+    });
+  }
+
+  if (layer instanceof ImageLayer) {
+    return new ImageLayer({
+      ...options,
+      image: layer.image,
+      objectUrl: layer.objectUrl
+    });
+  }
+
+  throw new Error(`Unsupported layer type: ${layer.type}`);
 }
 
 function isPointInsideLayer(layer: Layer, x: number, y: number) {
@@ -187,4 +305,12 @@ function isPointInsideLayer(layer: Layer, x: number, y: number) {
   const top = Math.max(layer.y, layer.y + height);
 
   return x >= left && x <= right && y >= bottom && y <= top;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function normalizeRotation(rotation: number) {
+  return ((rotation % 360) + 360) % 360;
 }

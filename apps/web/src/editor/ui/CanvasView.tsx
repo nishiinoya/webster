@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { LayerSummary } from "../core/EditorApp";
+import type { LayerCommand, LayerSummary } from "../core/EditorApp";
 import { EditorApp } from "../core/EditorApp";
 
 type CanvasViewProps = {
   activeTabTitle: string;
+  layerCommandRequest: { command: LayerCommand; id: number } | null;
   onLayersChange: (layers: LayerSummary[]) => void;
   onZoomChange: (zoomPercentage: number) => void;
   selectLayerRequest: { layerId: string; id: number } | null;
@@ -15,6 +16,7 @@ type CanvasViewProps = {
 
 export function CanvasView({
   activeTabTitle,
+  layerCommandRequest,
   onLayersChange,
   onZoomChange,
   selectLayerRequest,
@@ -106,6 +108,15 @@ export function CanvasView({
     editorAppRef.current.selectLayer(selectLayerRequest.layerId);
     onLayersChange(editorAppRef.current.getLayerSummaries());
   }, [onLayersChange, selectLayerRequest]);
+
+  useEffect(() => {
+    if (!layerCommandRequest || !editorAppRef.current) {
+      return;
+    }
+
+    editorAppRef.current.applyLayerCommand(layerCommandRequest.command);
+    onLayersChange(editorAppRef.current.getLayerSummaries());
+  }, [layerCommandRequest, onLayersChange]);
 
   useEffect(() => {
     const canvas = canvasRef.current;

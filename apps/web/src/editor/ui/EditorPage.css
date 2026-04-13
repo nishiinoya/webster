@@ -485,26 +485,19 @@
 
 .layer-row {
   display: grid;
-  min-height: 46px;
-  grid-template-columns: 10px 30px minmax(0, 1fr);
+  min-height: 76px;
+  grid-template-columns: 28px 30px minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
   background: #202329;
   padding: 7px 9px;
   text-align: left;
 }
 
-.layer-row[aria-pressed="true"] {
+.layer-row[aria-selected="true"] {
   border-color: #4aa391;
   background: #203731;
-}
-
-.visibility-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: #4aa391;
 }
 
 .layer-thumbnail {
@@ -527,11 +520,77 @@
   background: #2f7d6f;
 }
 
+.layer-name-input,
+.property-list input {
+  min-width: 0;
+  border: 1px solid #30353d;
+  border-radius: 6px;
+  background: #15171b;
+  color: #eef1f4;
+  font: inherit;
+}
+
+.layer-name-input {
+  width: 100%;
+  padding: 6px 8px;
+  font-weight: 700;
+}
+
+.layer-row-controls {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.layer-icon-button,
+.property-toggle-row button {
+  min-height: 26px;
+  border: 1px solid #333941;
+  border-radius: 6px;
+  background: #171a1f;
+  color: #dce1e6;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.layer-icon-button {
+  min-width: 28px;
+  padding: 0 7px;
+}
+
+.layer-icon-button:hover:not(:disabled),
+.property-toggle-row button:hover:not(:disabled) {
+  border-color: #4aa391;
+  background: #203731;
+}
+
+.layer-icon-button-danger:hover:not(:disabled) {
+  border-color: #b96a6a;
+  background: #3a2023;
+}
+
+.layer-opacity-control {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: auto minmax(70px, 1fr) 38px;
+  align-items: center;
+  gap: 8px;
+  color: #9aa1ab;
+  font-size: 11px;
+}
+
+.layer-opacity-control input {
+  width: 100%;
+}
+
 .property-list {
   gap: 0;
 }
 
-.property-list div {
+.property-list div,
+.property-list label {
   display: grid;
   min-height: 34px;
   grid-template-columns: minmax(78px, 1fr) minmax(90px, 1fr);
@@ -539,17 +598,35 @@
   border-bottom: 1px solid #2d3137;
 }
 
-.property-list dt {
+.property-list span {
   color: #9aa1ab;
   font-size: 12px;
 }
 
-.property-list dd {
+.property-list strong {
   margin: 0;
   color: #f2f4f7;
   font-size: 13px;
   font-weight: 700;
   text-align: right;
+}
+
+.property-list input {
+  width: 100%;
+  padding: 5px 7px;
+  text-align: right;
+}
+
+.property-list input:disabled,
+.property-toggle-row button:disabled {
+  color: #747b85;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.property-toggle-row button {
+  justify-self: end;
+  padding: 0 9px;
 }
 
 .history-list {

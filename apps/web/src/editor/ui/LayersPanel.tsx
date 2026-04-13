@@ -1,17 +1,21 @@
-type Layer = {
-  id: string;
-  name: string;
-  isVisible: boolean;
-  isSelected: boolean;
-  type: string;
-};
+import type { ChangeEvent, MouseEvent } from "react";
+import type { LayerCommand, LayerSummary } from "../core/EditorApp";
 
 type LayersPanelProps = {
-  layers: Layer[];
+  layers: LayerSummary[];
+  onLayerCommand: (command: LayerCommand) => void;
   onSelectLayer: (layerId: string) => void;
 };
 
-export function LayersPanel({ layers, onSelectLayer }: LayersPanelProps) {
+export function LayersPanel({ layers, onLayerCommand, onSelectLayer }: LayersPanelProps) {
+  function stopPanelControl(event: MouseEvent<HTMLElement>) {
+    event.stopPropagation();
+  }
+
+  function updateLayer(layerId: string, updates: Extract<LayerCommand, { type: "update" }>["updates"]) {
+    onLayerCommand({ type: "update", layerId, updates });
+  }
+
   return (
     <section className="editor-panel" aria-label="Layers panel">
       <div className="panel-header">
@@ -20,17 +24,98 @@ export function LayersPanel({ layers, onSelectLayer }: LayersPanelProps) {
       </div>
       <div className="layer-list">
         {layers.map((layer) => (
-          <button
-            aria-pressed={layer.isSelected}
+          <div
+            aria-selected={layer.isSelected}
             className="layer-row"
             key={layer.id}
             onClick={() => onSelectLayer(layer.id)}
-            type="button"
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onSelectLayer(layer.id);
+              }
+            }}
+            role="button"
+            tabIndex={0}
           >
-            <span className="visibility-dot" aria-label={layer.isVisible ? "Visible" : "Hidden"} />
+            <button
+              aria-label={layer.isVisible ? `Hide ${layer.name}` : `Show ${layer.name}`}
+              className="layer-icon-button"
+              onClick={(event) => {
+                stopPanelControl(event);
+                updateLayer(layer.id, { visible: !layer.isVisible });
+              }}
+              type="button"
+            >
+              {layer.isVisible ? "V" : "-"}
+            </button>
             <span className={`layer-thumbnail layer-thumbnail-${layer.type}`} aria-hidden="true" />
-            <span>{layer.name}</span>
-          </button>
+            <input
+              aria-label={`Rename ${layer.name}`}
+              className="layer-name-input"
+              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                updateLayer(layer.id, { name: event.target.value })
+              }
+              onClick={stopPanelControl}
+              value={layer.name}
+            />
+            <div className="layer-row-controls" onClick={stopPanelControl}>
+              <button
+                aria-label={layer.locked ? `Unlock ${layer.name}` : `Lock ${layer.name}`}
+                className="layer-icon-button"
+                onClick={() => updateLayer(layer.id, { locked: !layer.locked })}
+                type="button"
+              >
+                {layer.locked ? "L" : "U"}
+              </button>
+              <button
+                aria-label={`Move ${layer.name} up`}
+                className="layer-icon-button"
+                onClick={() => onLayerCommand({ type: "move-up", layerId: layer.id })}
+                type="button"
+              >
+                Up
+              </button>
+              <button
+                aria-label={`Move ${layer.name} down`}
+                className="layer-icon-button"
+                onClick={() => onLayerCommand({ type: "move-down", layerId: layer.id })}
+                type="button"
+              >
+                Dn
+              </button>
+              <button
+                aria-label={`Duplicate ${layer.name}`}
+                className="layer-icon-button"
+                onClick={() => onLayerCommand({ type: "duplicate", layerId: layer.id })}
+                type="button"
+              >
+                Dup
+              </button>
+              <button
+                aria-label={`Delete ${layer.name}`}
+                className="layer-icon-button layer-icon-button-danger"
+                onClick={() => onLayerCommand({ type: "delete", layerId: layer.id })}
+                type="button"
+              >
+                Del
+              </button>
+            </div>
+            <label className="layer-opacity-control" onClick={stopPanelControl}>
+              <span>Opacity</span>
+              <input
+                aria-label={`${layer.name} opacity`}
+                max="100"
+                min="0"
+                onChange={(event) =>
+                  updateLayer(layer.id, { opacity: Number(event.target.value) / 100 })
+                }
+                type="range"
+                value={Math.round(layer.opacity * 100)}
+              />
+              <span>{Math.round(layer.opacity * 100)}%</span>
+            </label>
+          </div>
         ))}
       </div>
     </section>
