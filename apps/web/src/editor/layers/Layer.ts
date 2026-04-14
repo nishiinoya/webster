@@ -1,3 +1,6 @@
+import { LayerMask } from "./LayerMask";
+import type { SerializedLayerMask } from "./LayerMask";
+
 export type LayerType = "shape" | "image";
 
 export type SerializedLayerBase = {
@@ -14,6 +17,7 @@ export type SerializedLayerBase = {
   width: number;
   x: number;
   y: number;
+  mask?: SerializedLayerMask | null;
 };
 
 export type SerializedShapeLayer = SerializedLayerBase & {
@@ -44,6 +48,7 @@ export type LayerOptions = {
   rotation?: number;
   scaleX?: number;
   scaleY?: number;
+  mask?: LayerMask | null;
 };
 
 export abstract class Layer {
@@ -60,6 +65,7 @@ export abstract class Layer {
   rotation: number;
   scaleX: number;
   scaleY: number;
+  mask: LayerMask | null;
 
   protected constructor(options: LayerOptions) {
     this.id = options.id;
@@ -75,6 +81,7 @@ export abstract class Layer {
     this.rotation = options.rotation ?? 0;
     this.scaleX = options.scaleX ?? 1;
     this.scaleY = options.scaleY ?? 1;
+    this.mask = options.mask ?? null;
   }
 
   static async fromJSON(data: SerializedLayer, assets = new Map<string, Blob>()) {
@@ -126,7 +133,8 @@ export abstract class Layer {
       visible: this.visible,
       width: this.width,
       x: this.x,
-      y: this.y
+      y: this.y,
+      mask: this.mask?.toJSON() ?? null
     };
   }
 }
@@ -145,7 +153,8 @@ function getLayerOptions(data: SerializedLayer): LayerOptions {
     visible: data.visible,
     width: data.width,
     x: data.x,
-    y: data.y
+    y: data.y,
+    mask: data.mask ? LayerMask.fromJSON(data.mask) : null
   };
 }
 

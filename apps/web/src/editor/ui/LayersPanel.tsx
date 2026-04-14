@@ -101,6 +101,68 @@ export function LayersPanel({ layers, onLayerCommand, onSelectLayer }: LayersPan
                 Delete
               </button>
             </div>
+            <div className="layer-mask-controls" onClick={stopPanelControl}>
+              <button
+                aria-label={layer.hasMask ? `Delete mask from ${layer.name}` : `Add mask to ${layer.name}`}
+                className="layer-icon-button"
+                onClick={() =>
+                  onLayerCommand({
+                    action: layer.hasMask ? "delete" : "add",
+                    layerId: layer.id,
+                    type: "mask"
+                  })
+                }
+                type="button"
+              >
+                {layer.hasMask ? "Del mask" : "Add mask"}
+              </button>
+              <button
+                aria-label={layer.maskEnabled ? `Disable ${layer.name} mask` : `Enable ${layer.name} mask`}
+                className="layer-icon-button"
+                disabled={!layer.hasMask}
+                onClick={() =>
+                  onLayerCommand({
+                    action: "toggle-enabled",
+                    layerId: layer.id,
+                    type: "mask"
+                  })
+                }
+                type="button"
+              >
+                {layer.maskEnabled ? "Mask on" : "Mask off"}
+              </button>
+              <button
+                aria-label={`Invert ${layer.name} mask`}
+                className="layer-icon-button"
+                disabled={!layer.hasMask}
+                onClick={() => onLayerCommand({ action: "invert", layerId: layer.id, type: "mask" })}
+                type="button"
+              >
+                Invert
+              </button>
+              <button
+                aria-label={`Clear ${layer.name} mask to white`}
+                className="layer-icon-button"
+                disabled={!layer.hasMask}
+                onClick={() =>
+                  onLayerCommand({ action: "clear-white", layerId: layer.id, type: "mask" })
+                }
+                type="button"
+              >
+                White
+              </button>
+              <button
+                aria-label={`Clear ${layer.name} mask to black`}
+                className="layer-icon-button"
+                disabled={!layer.hasMask}
+                onClick={() =>
+                  onLayerCommand({ action: "clear-black", layerId: layer.id, type: "mask" })
+                }
+                type="button"
+              >
+                Black
+              </button>
+            </div>
             <label className="layer-opacity-control" onClick={stopPanelControl}>
               <span>Opacity</span>
               <input

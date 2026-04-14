@@ -12,11 +12,13 @@ import { useProjectFileActions } from "./canvas/useProjectFileActions";
 import type { SaveStatus } from "./canvas/useProjectFileActions";
 import type { WebsterFileHandle } from "./canvas/projectFiles";
 import type { EditorDocumentTab } from "./editorDocuments";
+import type { MaskBrushOptions } from "../tools/MaskBrushTool";
 
 type CanvasViewProps = {
   activeDocument: EditorDocumentTab;
   closedDocumentRequest: { id: number; tabId: string } | null;
   layerCommandRequest: { command: LayerCommand; id: number } | null;
+  maskBrushOptions: MaskBrushOptions;
   onLayersChange: (layers: LayerSummary[]) => void;
   onLayerCommandRequestHandled: (requestId: number) => void;
   onProjectFileRequestHandled: (requestId: number) => void;
@@ -41,6 +43,7 @@ export function CanvasView({
   activeDocument,
   closedDocumentRequest,
   layerCommandRequest,
+  maskBrushOptions,
   onLayersChange,
   onLayerCommandRequestHandled,
   onProjectFileRequestHandled,
@@ -58,6 +61,7 @@ export function CanvasView({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const { editorAppRef, editorReadyId, setWebglError, webglError } = useEditorApp({
     canvasRef,
+    maskBrushOptions,
     onLayersChange,
     onZoomChange,
     selectedTool
@@ -100,6 +104,7 @@ export function CanvasView({
     onSceneChange: rememberActiveScene,
     projectFileRequest,
     projectSaveRequest,
+    selectedTool,
     setWebglError
   });
 

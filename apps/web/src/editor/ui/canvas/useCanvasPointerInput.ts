@@ -71,7 +71,7 @@ export function useCanvasPointerInput({
           return;
         }
 
-        if (selectedTool === "Move") {
+        if (selectedTool === "Move" || selectedTool === "Mask Brush") {
           const didHandleInput = editorAppRef.current?.pointerDown({
             button: event.button,
             clientX: event.clientX,

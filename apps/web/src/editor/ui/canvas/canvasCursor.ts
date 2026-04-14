@@ -1,4 +1,14 @@
 export function getCanvasCursorStyle(cursor: string) {
+  if (cursor.startsWith("mask-brush-")) {
+    const [, , sizePart, mode] = cursor.split("-");
+    const size = Math.min(Math.max(Number(sizePart) || 24, 6), 96);
+    const stroke = mode === "hide" ? "#ffb3b3" : "#dff7f1";
+    const radius = size / 2 - 1;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><circle cx="${size / 2}" cy="${size / 2}" r="${radius}" fill="none" stroke="${stroke}" stroke-width="2"/><circle cx="${size / 2}" cy="${size / 2}" r="1.5" fill="${stroke}"/></svg>`;
+
+    return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${size / 2} ${size / 2}, crosshair`;
+  }
+
   if (!cursor.startsWith("rotate-")) {
     return cursor;
   }

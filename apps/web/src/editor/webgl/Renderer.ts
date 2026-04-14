@@ -155,6 +155,8 @@ export class Renderer {
       }
 
       if (layer instanceof ShapeLayer) {
+        this.solidColorShaderProgram.use();
+        this.solidColorShaderProgram.setProjection(camera.projectionMatrix);
         this.solidColorShaderProgram.setColor([
           layer.color[0],
           layer.color[1],
@@ -162,7 +164,8 @@ export class Renderer {
           layer.color[3] * layer.opacity
         ]);
         this.solidColorShaderProgram.setModel(getModelMatrix(layer));
-        this.quad.draw(this.solidColorShaderProgram);
+        this.bindMask(layer, this.solidColorShaderProgram);
+        this.quad.drawTextured(this.solidColorShaderProgram);
       }
 
       if (layer instanceof ImageLayer) {
@@ -170,9 +173,11 @@ export class Renderer {
         this.texturedShaderProgram.setProjection(camera.projectionMatrix);
         this.texturedShaderProgram.setModel(getModelMatrix(layer));
         this.texturedShaderProgram.setTextureUnit(0);
+        this.texturedShaderProgram.setMaskTextureUnit(1);
         this.texturedShaderProgram.setOpacity(layer.opacity);
         this.gl.activeTexture(this.gl.TEXTURE0);
         this.gl.bindTexture(this.gl.TEXTURE_2D, this.textureManager.getTexture(layer));
+        this.bindMask(layer, this.texturedShaderProgram);
         this.quad.drawTextured(this.texturedShaderProgram);
         this.solidColorShaderProgram.use();
         this.solidColorShaderProgram.setProjection(camera.projectionMatrix);
@@ -197,6 +202,24 @@ export class Renderer {
   private clear() {
     this.gl.clearColor(0.07, 0.08, 0.09, 1);
     this.gl.clear(this.gl.COLOR_BUFFER_BIT);
+  }
+
+  private bindMask(
+    layer: Layer,
+    shaderProgram: SolidColorShaderProgram | TexturedShaderProgram
+  ) {
+    const mask = layer.mask;
+    const isMaskEnabled = Boolean(mask?.enabled);
+
+    shaderProgram.setMaskEnabled(isMaskEnabled);
+    shaderProgram.setMaskTextureUnit(1);
+
+    if (!mask || !isMaskEnabled) {
+      return;
+    }
+
+    this.gl.activeTexture(this.gl.TEXTURE1);
+    this.gl.bindTexture(this.gl.TEXTURE_2D, this.textureManager.getMaskTexture(mask));
   }
 
   private drawSelectionOutline(layer: Layer, camera: Camera2D) {
@@ -282,7 +305,9 @@ export class Renderer {
     y: number;
   }) {
     this.solidColorShaderProgram.setModel(getModelMatrix(rectangle));
-    this.quad.draw(this.solidColorShaderProgram);
+    this.solidColorShaderProgram.setMaskEnabled(false);
+    this.solidColorShaderProgram.setMaskTextureUnit(1);
+    this.quad.drawTextured(this.solidColorShaderProgram);
   }
 
   private drawLine(start: { x: number; y: number }, end: { x: number; y: number }, width: number) {

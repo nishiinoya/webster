@@ -5,6 +5,8 @@ export class TexturedShaderProgram extends ShaderProgram {
   private readonly modelUniformLocation: WebGLUniformLocation;
   private readonly projectionUniformLocation: WebGLUniformLocation;
   private readonly textureUniformLocation: WebGLUniformLocation;
+  private readonly maskEnabledUniformLocation: WebGLUniformLocation;
+  private readonly maskUniformLocation: WebGLUniformLocation;
   private readonly opacityUniformLocation: WebGLUniformLocation;
 
   constructor(gl: WebGLRenderingContext, vertexShaderSource: string, fragmentShaderSource: string) {
@@ -14,6 +16,8 @@ export class TexturedShaderProgram extends ShaderProgram {
     this.modelUniformLocation = this.getUniformLocation("u_model");
     this.projectionUniformLocation = this.getUniformLocation("u_projection");
     this.textureUniformLocation = this.getUniformLocation("u_texture");
+    this.maskEnabledUniformLocation = this.getUniformLocation("u_maskEnabled");
+    this.maskUniformLocation = this.getUniformLocation("u_mask");
     this.opacityUniformLocation = this.getUniformLocation("u_opacity");
 
     if (this.texCoordAttributeLocation < 0) {
@@ -31,6 +35,14 @@ export class TexturedShaderProgram extends ShaderProgram {
 
   setTextureUnit(textureUnit: number) {
     this.gl.uniform1i(this.textureUniformLocation, textureUnit);
+  }
+
+  setMaskEnabled(enabled: boolean) {
+    this.gl.uniform1i(this.maskEnabledUniformLocation, enabled ? 1 : 0);
+  }
+
+  setMaskTextureUnit(textureUnit: number) {
+    this.gl.uniform1i(this.maskUniformLocation, textureUnit);
   }
 
   setOpacity(opacity: number) {

@@ -1,8 +1,10 @@
 import { Renderer } from "../webgl/Renderer";
 import { InputController } from "../tools/InputController";
+import type { MaskBrushOptions } from "../tools/MaskBrushTool";
 import type { ToolPointerEvent } from "../tools/MoveTool";
 import { Camera2D } from "./Camera2D";
 import { Scene } from "./Scene";
+import type { LayerMaskAction } from "./Scene";
 import { exportScenePackage, importScenePackage } from "./ProjectPackage";
 import { ImageLayer } from "../layers/ImageLayer";
 
@@ -19,6 +21,7 @@ export type LayerUpdate = Parameters<Scene["updateLayer"]>[1];
 export type LayerCommand =
   | { type: "delete"; layerId: string }
   | { type: "duplicate"; layerId: string }
+  | { type: "mask"; action: LayerMaskAction; layerId: string }
   | { type: "move-down"; layerId: string }
   | { type: "move-up"; layerId: string }
   | { type: "select"; layerId: string }
@@ -211,6 +214,10 @@ export class EditorApp {
     this.inputController.setSelectedTool(tool);
   }
 
+  setMaskBrushOptions(options: Partial<MaskBrushOptions>) {
+    this.inputController.setMaskBrushOptions(options);
+  }
+
   selectLayer(layerId: string | null) {
     return this.scene.selectLayer(layerId);
   }
@@ -221,6 +228,8 @@ export class EditorApp {
         return this.scene.removeLayer(command.layerId);
       case "duplicate":
         return this.scene.duplicateLayer(command.layerId);
+      case "mask":
+        return this.scene.updateLayerMask(command.layerId, command.action);
       case "move-down":
         return this.scene.moveLayerBackward(command.layerId);
       case "move-up":
@@ -258,6 +267,10 @@ export class EditorApp {
 
   cancelInput() {
     this.inputController.cancel();
+  }
+
+  undoLastMaskStroke() {
+    return this.inputController.undoLastMaskStroke();
   }
 
   getCursor(clientX: number, clientY: number) {

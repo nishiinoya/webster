@@ -26,6 +26,7 @@ type UseProjectFileActionsOptions = {
   } | null;
   projectSaveRequest: { id: number; mode: "save" | "save-as" } | null;
   setWebglError: (error: string | null) => void;
+  selectedTool: string;
 };
 
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -42,6 +43,7 @@ export function useProjectFileActions({
   onSceneChange,
   projectFileRequest,
   projectSaveRequest,
+  selectedTool,
   setWebglError
 }: UseProjectFileActionsOptions) {
   const projectFileHandleRef = useRef<WebsterFileHandle | null>(null);
@@ -114,7 +116,16 @@ export function useProjectFileActions({
   }, []);
 
   useEditorKeyboardShortcuts({
-    onSaveProject: () => saveCurrentProject("save")
+    onSaveProject: () => saveCurrentProject("save"),
+    onUndo: () => {
+      if (selectedTool !== "Mask Brush" || !editorAppRef.current) {
+        return;
+      }
+
+      if (editorAppRef.current.undoLastMaskStroke()) {
+        onLayersChange(editorAppRef.current.getLayerSummaries());
+      }
+    }
   });
 
   useEffect(() => {

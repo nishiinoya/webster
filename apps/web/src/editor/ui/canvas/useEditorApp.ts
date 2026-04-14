@@ -1,21 +1,25 @@
 import { MutableRefObject, useEffect, useRef, useState } from "react";
 import type { LayerSummary } from "../../core/EditorApp";
 import { EditorApp } from "../../core/EditorApp";
+import type { MaskBrushOptions } from "../../tools/MaskBrushTool";
 
 type UseEditorAppOptions = {
   canvasRef: MutableRefObject<HTMLCanvasElement | null>;
   onLayersChange: (layers: LayerSummary[]) => void;
   onZoomChange: (zoomPercentage: number) => void;
+  maskBrushOptions: MaskBrushOptions;
   selectedTool: string;
 };
 
 export function useEditorApp({
   canvasRef,
+  maskBrushOptions,
   onLayersChange,
   onZoomChange,
   selectedTool
 }: UseEditorAppOptions) {
   const editorAppRef = useRef<EditorApp | null>(null);
+  const maskBrushOptionsRef = useRef(maskBrushOptions);
   const selectedToolRef = useRef(selectedTool);
   const [editorReadyId, setEditorReadyId] = useState(0);
   const [webglError, setWebglError] = useState<string | null>(null);
@@ -24,6 +28,11 @@ export function useEditorApp({
     selectedToolRef.current = selectedTool;
     editorAppRef.current?.setSelectedTool(selectedTool);
   }, [selectedTool]);
+
+  useEffect(() => {
+    maskBrushOptionsRef.current = maskBrushOptions;
+    editorAppRef.current?.setMaskBrushOptions(maskBrushOptions);
+  }, [maskBrushOptions]);
 
   useEffect(() => {
     if (!canvasRef.current) {
@@ -44,6 +53,7 @@ export function useEditorApp({
 
           editorAppRef.current = editorApp;
           editorApp.setSelectedTool(selectedToolRef.current);
+          editorApp.setMaskBrushOptions(maskBrushOptionsRef.current);
           editorApp.start();
           onLayersChange(editorApp.getLayerSummaries());
           onZoomChange(Math.round(editorApp.getCameraSnapshot().zoom * 100));

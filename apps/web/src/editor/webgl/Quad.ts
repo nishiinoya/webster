@@ -1,6 +1,10 @@
 import { ShaderProgram } from "./ShaderProgram";
 import { TexturedShaderProgram } from "./TexturedShaderProgram";
 
+type TexturedDrawableProgram = ShaderProgram & {
+  texCoordAttributeLocation: number;
+};
+
 export class Quad {
   private readonly vertexBuffer: WebGLBuffer;
   private readonly textureCoordinateBuffer: WebGLBuffer;
@@ -33,7 +37,7 @@ export class Quad {
     this.gl.drawArrays(this.gl.TRIANGLES, 0, 6);
   }
 
-  drawTextured(shaderProgram: TexturedShaderProgram) {
+  drawTextured(shaderProgram: TexturedDrawableProgram | TexturedShaderProgram) {
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.vertexBuffer);
     this.gl.enableVertexAttribArray(shaderProgram.positionAttributeLocation);
     this.gl.vertexAttribPointer(

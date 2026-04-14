@@ -129,6 +129,16 @@ export function PropertiesPanel({
             {selectedLayer?.locked ? "Locked" : "Unlocked"}
           </button>
         </div>
+        <div>
+          <span>Mask</span>
+          <strong>
+            {selectedLayer?.hasMask
+              ? selectedLayer.maskEnabled
+                ? "Enabled"
+                : "Disabled"
+              : "None"}
+          </strong>
+        </div>
       </div>
     </section>
   );

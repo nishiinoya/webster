@@ -101,6 +101,37 @@
   font-size: var(--editor-font-size);
 }
 
+.mask-brush-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 6px;
+}
+
+.mask-brush-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #c9cdd2;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mask-brush-toolbar input,
+.mask-brush-toolbar select {
+  width: 74px;
+  border: 1px solid #33373d;
+  border-radius: 6px;
+  background: #101113;
+  color: #eef1f4;
+  font: inherit;
+  padding: 6px 7px;
+}
+
+.mask-brush-toolbar select {
+  width: 122px;
+}
+
 .toolbar-menu {
   position: relative;
 }
@@ -733,6 +764,13 @@
 }
 
 .layer-row-controls {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.layer-mask-controls {
   display: grid;
   grid-column: 1 / -1;
   grid-template-columns: repeat(5, minmax(0, 1fr));

@@ -1,6 +1,7 @@
 import { ImageLayer } from "../layers/ImageLayer";
 import { Layer } from "../layers/Layer";
 import type { SerializedLayer } from "../layers/Layer";
+import { LayerMask } from "../layers/LayerMask";
 import { ShapeLayer } from "../layers/ShapeLayer";
 
 export type DocumentBounds = {
@@ -227,6 +228,16 @@ export class Scene {
     return layer;
   }
 
+  updateLayerMask(layerId: string, action: LayerMaskAction) {
+    const layer = this.getLayer(layerId);
+
+    if (!layer || layer.locked) {
+      return null;
+    }
+
+    return applyLayerMaskAction(layer, action);
+  }
+
   duplicateLayer(layerId: string) {
     const layer = this.getLayer(layerId);
 
@@ -288,10 +299,12 @@ export class Scene {
   getLayerSummaries() {
     return this.layers
       .map((layer) => ({
+        hasMask: Boolean(layer.mask),
         id: layer.id,
         isSelected: layer.id === this.selectedLayerId,
         isVisible: layer.visible,
         locked: layer.locked,
+        maskEnabled: layer.mask?.enabled ?? false,
         name: layer.name,
         opacity: layer.opacity,
         rotation: layer.rotation,
@@ -338,6 +351,7 @@ function cloneLayer(layer: Layer) {
     height: layer.height,
     id: crypto.randomUUID(),
     locked: false,
+    mask: layer.mask?.clone() ?? null,
     name: `${layer.name} copy`,
     opacity: layer.opacity,
     rotation: layer.rotation,
@@ -365,6 +379,61 @@ function cloneLayer(layer: Layer) {
   }
 
   throw new Error(`Unsupported layer type: ${layer.type}`);
+}
+
+export type LayerMaskAction =
+  | "add"
+  | "clear-black"
+  | "clear-white"
+  | "delete"
+  | "disable"
+  | "enable"
+  | "invert"
+  | "toggle-enabled";
+
+function applyLayerMaskAction(layer: Layer, action: LayerMaskAction) {
+  if (action === "delete") {
+    layer.mask = null;
+    return layer;
+  }
+
+  if (action === "add" && !layer.mask) {
+    layer.mask = new LayerMask({
+      height: layer.height,
+      width: layer.width
+    });
+    return layer;
+  }
+
+  if (!layer.mask) {
+    return layer;
+  }
+
+  if (action === "enable") {
+    layer.mask.enabled = true;
+  }
+
+  if (action === "disable") {
+    layer.mask.enabled = false;
+  }
+
+  if (action === "toggle-enabled") {
+    layer.mask.enabled = !layer.mask.enabled;
+  }
+
+  if (action === "invert") {
+    layer.mask.invert();
+  }
+
+  if (action === "clear-white") {
+    layer.mask.clear(255);
+  }
+
+  if (action === "clear-black") {
+    layer.mask.clear(0);
+  }
+
+  return layer;
 }
 
 function isPointInsideLayer(layer: Layer, x: number, y: number) {

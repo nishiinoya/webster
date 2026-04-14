@@ -5,6 +5,7 @@ import {
 } from "./canvas/projectFiles";
 import type { WebsterFileHandle } from "./canvas/projectFiles";
 import type { SaveStatus } from "./canvas/useProjectFileActions";
+import type { MaskBrushOptions } from "../tools/MaskBrushTool";
 
 type ToolbarProps = {
   canEditDocument: boolean;
@@ -14,6 +15,8 @@ type ToolbarProps = {
   onSaveAsProject: () => void;
   onSaveProject: () => void;
   onUploadImage: (file: File) => void;
+  maskBrushOptions: MaskBrushOptions;
+  onMaskBrushOptionsChange: (options: Partial<MaskBrushOptions>) => void;
   saveStatus: SaveStatus;
   selectedTool: string;
   zoomPercentage: number;
@@ -29,6 +32,8 @@ export function Toolbar({
   onSaveAsProject,
   onSaveProject,
   onUploadImage,
+  maskBrushOptions,
+  onMaskBrushOptionsChange,
   saveStatus,
   selectedTool,
   zoomPercentage
@@ -134,6 +139,48 @@ export function Toolbar({
             {action}
           </button>
         ))}
+        {selectedTool === "Mask Brush" ? (
+          <div className="mask-brush-toolbar" aria-label="Mask brush options">
+            <label>
+              Size
+              <input
+                min="1"
+                max="256"
+                onChange={(event) =>
+                  onMaskBrushOptionsChange({ size: Number(event.target.value) })
+                }
+                type="number"
+                value={maskBrushOptions.size}
+              />
+            </label>
+            <label>
+              Opacity
+              <input
+                min="1"
+                max="100"
+                onChange={(event) =>
+                  onMaskBrushOptionsChange({ opacity: Number(event.target.value) / 100 })
+                }
+                type="number"
+                value={Math.round(maskBrushOptions.opacity * 100)}
+              />
+            </label>
+            <label>
+              Mode
+              <select
+                onChange={(event) =>
+                  onMaskBrushOptionsChange({
+                    mode: event.target.value === "hide" ? "hide" : "reveal"
+                  })
+                }
+                value={maskBrushOptions.mode}
+              >
+                <option value="reveal">Reveal white</option>
+                <option value="hide">Hide black</option>
+              </select>
+            </label>
+          </div>
+        ) : null}
         <input
           ref={fileInputRef}
           accept="image/*"

@@ -2,9 +2,10 @@ import { useEffect } from "react";
 
 type EditorKeyboardShortcutHandlers = {
   onSaveProject: () => Promise<void> | void;
+  onUndo: () => Promise<void> | void;
 };
 
-export function useEditorKeyboardShortcuts({ onSaveProject }: EditorKeyboardShortcutHandlers) {
+export function useEditorKeyboardShortcuts({ onSaveProject, onUndo }: EditorKeyboardShortcutHandlers) {
   useEffect(() => {
     async function handleKeyDown(event: KeyboardEvent) {
       const key = event.key.toLowerCase();
@@ -13,6 +14,11 @@ export function useEditorKeyboardShortcuts({ onSaveProject }: EditorKeyboardShor
         event.preventDefault();
         await onSaveProject();
       }
+
+      if ((event.ctrlKey || event.metaKey) && key === "z" && !event.shiftKey) {
+        event.preventDefault();
+        await onUndo();
+      }
     }
 
     window.addEventListener("keydown", handleKeyDown);
@@ -20,5 +26,5 @@ export function useEditorKeyboardShortcuts({ onSaveProject }: EditorKeyboardShor
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [onSaveProject]);
+  }, [onSaveProject, onUndo]);
 }

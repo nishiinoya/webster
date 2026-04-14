@@ -3,6 +3,7 @@
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { LayerCommand, LayerSummary } from "@/editor/core/EditorApp";
+import type { MaskBrushOptions } from "../tools/MaskBrushTool";
 import {
   canPickProjectFileHandle,
   pickProjectFileWithHandle
@@ -27,7 +28,7 @@ import { ToolsPanel } from "./ToolsPanel";
 
 const initialTabs: EditorDocumentTab[] = [];
 
-const mockTools = ["Move", "Pan", "Marquee", "Brush", "Eraser", "Text", "Zoom"];
+const mockTools = ["Move", "Pan", "Mask Brush", "Marquee", "Brush", "Eraser", "Text", "Zoom"];
 
 const initialLayers: LayerSummary[] = [];
 
@@ -58,6 +59,11 @@ export function EditorPage() {
   const sidePanelsRef = useRef<HTMLElement | null>(null);
   const documentCounterRef = useRef(1);
   const [selectedTool, setSelectedTool] = useState("Move");
+  const [maskBrushOptions, setMaskBrushOptions] = useState<MaskBrushOptions>({
+    mode: "reveal",
+    opacity: 1,
+    size: 48
+  });
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [zoomPercentage, setZoomPercentage] = useState(100);
   const [tabs, setTabs] = useState<EditorDocumentTab[]>(initialTabs);
@@ -385,6 +391,13 @@ export function EditorPage() {
         onSaveAsProject={() => setProjectSaveRequest({ id: Date.now(), mode: "save-as" })}
         onSaveProject={() => setProjectSaveRequest({ id: Date.now(), mode: "save" })}
         onUploadImage={(file) => setUploadRequest({ file, id: Date.now() })}
+        maskBrushOptions={maskBrushOptions}
+        onMaskBrushOptionsChange={(options) =>
+          setMaskBrushOptions((currentOptions) => ({
+            ...currentOptions,
+            ...options
+          }))
+        }
         saveStatus={saveStatus}
         selectedTool={selectedTool}
         zoomPercentage={zoomPercentage}
@@ -413,6 +426,7 @@ export function EditorPage() {
               activeDocument={activeDocument}
               closedDocumentRequest={closedDocumentRequest}
               layerCommandRequest={layerCommandRequest}
+              maskBrushOptions={maskBrushOptions}
               onLayersChange={setLayers}
               onLayerCommandRequestHandled={(requestId) =>
                 setLayerCommandRequest((request) => (request?.id === requestId ? null : request))

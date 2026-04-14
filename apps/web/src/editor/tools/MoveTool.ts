@@ -24,6 +24,7 @@ export type ToolCursor =
   | "nesw-resize"
   | "grab"
   | "grabbing"
+  | `mask-brush-${number}-${"hide" | "reveal"}`
   | `rotate-${number}`;
 
 type DragState = {
