@@ -31,8 +31,10 @@ export class EditorApp {
   private readonly inputController: InputController;
   private animationFrameId: number | null = null;
   private isDisposed = false;
+  private activeDocumentId: string | null = null;
   private lastCameraSnapshot: CameraSnapshot | null = null;
   private selectedTool = "Move";
+  private readonly tabScenes = new Map<string, Scene>();
 
   static async create(
     canvas: HTMLCanvasElement,
@@ -47,7 +49,7 @@ export class EditorApp {
     private readonly onCameraChange?: (camera: CameraSnapshot) => void
   ) {
     this.renderer = renderer;
-    this.scene = new Scene();
+    this.scene = new Scene({ createDefaultLayer: false });
     this.camera = new Camera2D();
     this.camera.setBounds(this.scene.document);
     this.inputController = new InputController(canvas, this.scene, this.camera);
@@ -81,6 +83,12 @@ export class EditorApp {
     }
 
     this.renderer.dispose();
+    for (const tabScene of this.tabScenes.values()) {
+      if (tabScene !== this.scene) {
+        tabScene.dispose();
+      }
+    }
+    this.tabScenes.clear();
     this.scene.dispose();
     this.camera.dispose();
   }
@@ -109,16 +117,91 @@ export class EditorApp {
     return this.scene.getLayerSummaries();
   }
 
+  getScene() {
+    return this.scene;
+  }
+
+  createDocument(width: number, height: number) {
+    this.replaceScene(
+      new Scene({
+        createDefaultLayer: false,
+        documentHeight: height,
+        documentWidth: width
+      })
+    );
+
+    return this.scene;
+  }
+
+  replaceScene(nextScene: Scene, options: { disposeCurrent?: boolean } = {}) {
+    if (nextScene === this.scene) {
+      return this.scene;
+    }
+
+    if (options.disposeCurrent ?? true) {
+      this.scene.dispose();
+    }
+
+    this.scene = nextScene;
+    this.camera.setBounds(this.scene.document);
+    this.inputController.setScene(this.scene);
+    this.notifyCameraChange();
+
+    return this.scene;
+  }
+
+  switchDocument(document: { height: number; id: string; width: number }) {
+    if (this.activeDocumentId === document.id) {
+      return this.scene;
+    }
+
+    if (this.activeDocumentId) {
+      this.tabScenes.set(this.activeDocumentId, this.scene);
+    }
+
+    let nextScene = this.tabScenes.get(document.id);
+
+    if (!nextScene) {
+      nextScene = new Scene({
+        createDefaultLayer: false,
+        documentHeight: document.height,
+        documentWidth: document.width
+      });
+    }
+
+    this.tabScenes.set(document.id, nextScene);
+    this.replaceScene(nextScene, { disposeCurrent: false });
+    this.activeDocumentId = document.id;
+
+    return this.scene;
+  }
+
+  rememberDocument(documentId: string) {
+    this.activeDocumentId = documentId;
+    this.tabScenes.set(documentId, this.scene);
+  }
+
+  forgetDocument(documentId: string) {
+    const scene = this.tabScenes.get(documentId);
+
+    if (scene && scene !== this.scene) {
+      scene.dispose();
+    }
+
+    this.tabScenes.delete(documentId);
+
+    if (this.activeDocumentId === documentId) {
+      this.activeDocumentId = null;
+    }
+  }
+
   async exportProjectFile() {
     return exportScenePackage(this.scene);
   }
 
   async importProjectFile(file: File) {
     const nextScene = await importScenePackage(file);
-    this.scene.dispose();
-    this.scene = nextScene;
-    this.camera.setBounds(this.scene.document);
-    this.inputController.setScene(this.scene);
+    this.replaceScene(nextScene);
 
     return this.scene;
   }

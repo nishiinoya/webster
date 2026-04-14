@@ -31,12 +31,21 @@ export class Scene {
   readonly layers: Layer[] = [];
   selectedLayerId: string | null = null;
 
-  constructor(options: { createDefaultLayer?: boolean } = {}) {
+  constructor(
+    options: {
+      createDefaultLayer?: boolean;
+      documentHeight?: number;
+      documentWidth?: number;
+    } = {}
+  ) {
+    const documentWidth = options.documentWidth ?? 800;
+    const documentHeight = options.documentHeight ?? 600;
+
     this.document = {
-      x: -400,
-      y: -300,
-      width: 800,
-      height: 600,
+      x: -documentWidth / 2,
+      y: -documentHeight / 2,
+      width: documentWidth,
+      height: documentHeight,
       color: [0.96, 0.97, 0.94, 1]
     };
 

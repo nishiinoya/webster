@@ -3,43 +3,32 @@
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { useRef, useState } from "react";
 import type { LayerCommand, LayerSummary } from "@/editor/core/EditorApp";
+import type { WebsterFileHandle } from "./canvas/projectFiles";
+import { readRememberedProjectFileHandle } from "./canvas/projectFileHandleStore";
+import type { SaveStatus } from "./canvas/useProjectFileActions";
 import { CanvasView } from "./CanvasView";
+import type { EditorDocumentTab, NewDocumentSize } from "./editorDocuments";
 import "./EditorPage.css";
 import { HistoryPanel } from "./HistoryPanel";
 import { LayersPanel } from "./LayersPanel";
+import { NewDocumentDialog } from "./NewDocumentDialog";
 import { PropertiesPanel } from "./PropertiesPanel";
 import { TabsBar } from "./TabsBar";
 import { Toolbar } from "./Toolbar";
 import { ToolsPanel } from "./ToolsPanel";
 
-const mockTabs = [
-  {
-    id: "untitled",
-    title: "Untitled",
-    isActive: true
-  }
-];
+const initialTabs: EditorDocumentTab[] = [];
 
 const mockTools = ["Move", "Pan", "Marquee", "Brush", "Eraser", "Text", "Zoom"];
 
-const initialLayers: LayerSummary[] = [
-  {
-    id: "default-shape",
-    isVisible: true,
-    isSelected: true,
-    locked: false,
-    name: "Rectangle",
-    opacity: 1,
-    rotation: 0,
-    type: "shape",
-    x: -110,
-    y: -60,
-    width: 260,
-    height: 160
-  }
-];
+const initialLayers: LayerSummary[] = [];
 
 const mockHistory = ["New document", "Selected Move tool"];
+const documentPresets: Array<NewDocumentSize & { label: string }> = [
+  { height: 800, label: "Canvas 1200 x 800", width: 1200 },
+  { height: 1080, label: "HD 1920 x 1080", width: 1920 },
+  { height: 1080, label: "Square 1080 x 1080", width: 1080 }
+];
 const layersPanelMinHeight = 120;
 const propertiesPanelMinHeight = 150;
 const historyPanelMinHeight = 120;
@@ -58,8 +47,13 @@ function clamp(value: number, min: number, max: number) {
 
 export function EditorPage() {
   const sidePanelsRef = useRef<HTMLElement | null>(null);
+  const documentCounterRef = useRef(1);
   const [selectedTool, setSelectedTool] = useState("Move");
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [zoomPercentage, setZoomPercentage] = useState(100);
+  const [tabs, setTabs] = useState<EditorDocumentTab[]>(initialTabs);
+  const [isNewDocumentDialogOpen, setIsNewDocumentDialogOpen] = useState(false);
+  const [recentProjectError, setRecentProjectError] = useState<string | null>(null);
   const [layers, setLayers] = useState<LayerSummary[]>(initialLayers);
   const [uploadRequest, setUploadRequest] = useState<{ file: File; id: number } | null>(null);
   const [selectLayerRequest, setSelectLayerRequest] = useState<{
@@ -73,9 +67,16 @@ export function EditorPage() {
   const [projectFileRequest, setProjectFileRequest] = useState<{
     id: number;
     file: File;
+    handle?: WebsterFileHandle | null;
+    tabId: string;
   } | null>(null);
   const [projectSaveRequest, setProjectSaveRequest] = useState<{
     id: number;
+    mode: "save" | "save-as";
+  } | null>(null);
+  const [closedDocumentRequest, setClosedDocumentRequest] = useState<{
+    id: number;
+    tabId: string;
   } | null>(null);
   const [toolsPanelWidth, setToolsPanelWidth] = useState(88);
   const [rightPanelWidth, setRightPanelWidth] = useState(380);
@@ -89,9 +90,134 @@ export function EditorPage() {
     "--properties-panel-height": `${propertiesPanelHeight}px`
   };
   const selectedLayer = layers.find((layer) => layer.isSelected) ?? null;
+  const activeDocument = tabs.find((tab) => tab.isActive) ?? tabs[0] ?? null;
 
   function runLayerCommand(command: LayerCommand) {
     setLayerCommandRequest({ command, id: Date.now() });
+  }
+
+  function activateTab(tabId: string) {
+    setTabs((currentTabs) =>
+      currentTabs.map((tab) => ({
+        ...tab,
+        isActive: tab.id === tabId
+      }))
+    );
+  }
+
+  function createDocumentTab(size: NewDocumentSize) {
+    documentCounterRef.current += 1;
+
+    const tab: EditorDocumentTab = {
+      height: size.height,
+      id: `document-${documentCounterRef.current}`,
+      isActive: true,
+      title: `Untitled ${documentCounterRef.current}`,
+      width: size.width
+    };
+
+    setTabs((currentTabs) => [
+      ...currentTabs.map((currentTab) => ({ ...currentTab, isActive: false })),
+      tab
+    ]);
+    setIsNewDocumentDialogOpen(false);
+  }
+
+  function closeDocumentTab(tabId: string) {
+    setTabs((currentTabs) => {
+      const closedIndex = currentTabs.findIndex((tab) => tab.id === tabId);
+
+      if (closedIndex < 0) {
+        return currentTabs;
+      }
+
+      const closingActiveTab = currentTabs[closedIndex].isActive;
+      const remainingTabs = currentTabs.filter((tab) => tab.id !== tabId);
+
+      if (remainingTabs.length === 0) {
+        setLayers([]);
+        setZoomPercentage(100);
+        return [];
+      }
+
+      if (!closingActiveTab) {
+        return remainingTabs;
+      }
+
+      const nextActiveIndex = Math.min(closedIndex, remainingTabs.length - 1);
+
+      return remainingTabs.map((tab, index) => ({
+        ...tab,
+        isActive: index === nextActiveIndex
+      }));
+    });
+    setClosedDocumentRequest({ id: Date.now(), tabId });
+  }
+
+  function renameDocumentTab(tabId: string, title: string) {
+    setTabs((currentTabs) =>
+      currentTabs.map((tab) =>
+        tab.id === tabId
+          ? {
+              ...tab,
+              title
+            }
+          : tab
+      )
+    );
+  }
+
+  function openProjectInNewTab(file: File, handle?: WebsterFileHandle | null) {
+    documentCounterRef.current += 1;
+
+    const tab: EditorDocumentTab = {
+      height: 800,
+      id: `document-${documentCounterRef.current}`,
+      isActive: true,
+      title: file.name.replace(/\.webster$/i, "") || `Untitled ${documentCounterRef.current}`,
+      width: 1200
+    };
+
+    setTabs((currentTabs) => [
+      ...currentTabs.map((currentTab) => ({ ...currentTab, isActive: false })),
+      tab
+    ]);
+    setProjectFileRequest({
+      file,
+      handle,
+      id: Date.now(),
+      tabId: tab.id
+    });
+    setRecentProjectError(null);
+  }
+
+  async function openRecentProject() {
+    try {
+      const handle = await readRememberedProjectFileHandle();
+
+      if (!handle?.getFile) {
+        setRecentProjectError("No recent project is saved in this browser yet.");
+        return;
+      }
+
+      const permission = handle.queryPermission
+        ? await handle.queryPermission({ mode: "read" })
+        : "granted";
+      const grantedPermission =
+        permission === "granted" ||
+        (handle.requestPermission
+          ? (await handle.requestPermission({ mode: "read" })) === "granted"
+          : false);
+
+      if (!grantedPermission) {
+        setRecentProjectError("Browser permission is needed to reopen the recent project.");
+        return;
+      }
+
+      openProjectInNewTab(await handle.getFile(), handle);
+    } catch {
+      setRecentProjectError("Unable to open the recent project.");
+    }
   }
 
   function getSidePanelHeight() {
@@ -183,10 +309,14 @@ export function EditorPage() {
   return (
     <main className="editor-page">
       <Toolbar
-        documentTitle="Untitled"
-        onOpenProject={(file) => setProjectFileRequest({ file, id: Date.now() })}
-        onSaveProject={() => setProjectSaveRequest({ id: Date.now() })}
+        canEditDocument={Boolean(activeDocument)}
+        documentTitle={activeDocument?.title ?? "No document"}
+        onNewDocument={() => setIsNewDocumentDialogOpen(true)}
+        onOpenProject={openProjectInNewTab}
+        onSaveAsProject={() => setProjectSaveRequest({ id: Date.now(), mode: "save-as" })}
+        onSaveProject={() => setProjectSaveRequest({ id: Date.now(), mode: "save" })}
         onUploadImage={(file) => setUploadRequest({ file, id: Date.now() })}
+        saveStatus={saveStatus}
         selectedTool={selectedTool}
         zoomPercentage={zoomPercentage}
       />
@@ -203,18 +333,74 @@ export function EditorPage() {
           type="button"
         />
         <div className="editor-center">
-          <TabsBar tabs={mockTabs} />
-          <CanvasView
-            activeTabTitle="Untitled"
-            layerCommandRequest={layerCommandRequest}
-            onLayersChange={setLayers}
-            onZoomChange={setZoomPercentage}
-            projectFileRequest={projectFileRequest}
-            projectSaveRequest={projectSaveRequest}
-            selectLayerRequest={selectLayerRequest}
-            selectedTool={selectedTool}
-            uploadRequest={uploadRequest}
+          <TabsBar
+            onCloseTab={closeDocumentTab}
+            onRenameTab={renameDocumentTab}
+            onSelectTab={activateTab}
+            tabs={tabs}
           />
+          {activeDocument ? (
+            <CanvasView
+              activeDocument={activeDocument}
+              closedDocumentRequest={closedDocumentRequest}
+              layerCommandRequest={layerCommandRequest}
+              onLayersChange={setLayers}
+              onLayerCommandRequestHandled={(requestId) =>
+                setLayerCommandRequest((request) => (request?.id === requestId ? null : request))
+              }
+              onProjectFileRequestHandled={(requestId) =>
+                setProjectFileRequest((request) => (request?.id === requestId ? null : request))
+              }
+              onProjectSaveRequestHandled={(requestId) =>
+                setProjectSaveRequest((request) => (request?.id === requestId ? null : request))
+              }
+              onSaveStatusChange={setSaveStatus}
+              onSelectLayerRequestHandled={(requestId) =>
+                setSelectLayerRequest((request) => (request?.id === requestId ? null : request))
+              }
+              onUploadRequestHandled={(requestId) =>
+                setUploadRequest((request) => (request?.id === requestId ? null : request))
+              }
+              onZoomChange={setZoomPercentage}
+              projectFileRequest={projectFileRequest}
+              projectSaveRequest={projectSaveRequest}
+              selectLayerRequest={selectLayerRequest}
+              selectedTool={selectedTool}
+              uploadRequest={uploadRequest}
+            />
+          ) : (
+            <section className="empty-workspace" aria-label="No open documents">
+              <div className="empty-workspace-content">
+                <p className="empty-workspace-kicker">No open documents</p>
+                <h2>Start a Webster project</h2>
+                <div className="empty-workspace-actions">
+                  <button onClick={openRecentProject} type="button">
+                    Open recent
+                  </button>
+                  <button onClick={() => setIsNewDocumentDialogOpen(true)} type="button">
+                    Create new
+                  </button>
+                </div>
+                {recentProjectError ? (
+                  <p className="empty-workspace-error">{recentProjectError}</p>
+                ) : null}
+                <div className="empty-workspace-presets" aria-label="Create new presets">
+                  {documentPresets.map((preset) => (
+                    <button
+                      key={preset.label}
+                      onClick={() => createDocumentTab(preset)}
+                      type="button"
+                    >
+                      <span>{preset.label}</span>
+                      <strong>
+                        {preset.width} x {preset.height}
+                      </strong>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </section>
+          )}
         </div>
         <button
           aria-label="Resize side panels"
@@ -248,6 +434,12 @@ export function EditorPage() {
           <HistoryPanel entries={mockHistory} />
         </aside>
       </section>
+      {isNewDocumentDialogOpen ? (
+        <NewDocumentDialog
+          onClose={() => setIsNewDocumentDialogOpen(false)}
+          onCreate={createDocumentTab}
+        />
+      ) : null}
     </main>
   );
 }
