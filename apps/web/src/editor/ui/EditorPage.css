@@ -563,7 +563,8 @@
   gap: 8px;
 }
 
-.empty-workspace-presets button {
+.empty-workspace-presets button,
+.empty-workspace-recent-list button {
   display: flex;
   min-height: 52px;
   align-items: center;
@@ -573,16 +574,54 @@
   text-align: left;
 }
 
-.empty-workspace-presets span {
+.empty-workspace-presets span,
+.empty-workspace-recent-list span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.empty-workspace-presets strong {
+.empty-workspace-presets strong,
+.empty-workspace-recent-list strong {
   color: #9aa1ab;
   font-size: 12px;
   white-space: nowrap;
+}
+
+.empty-workspace-recent {
+  display: grid;
+  width: min(540px, 100%);
+  gap: 8px;
+  margin-top: 2px;
+  text-align: left;
+}
+
+.empty-workspace-recent h3 {
+  margin: 0;
+  color: #d9dde3;
+  font-size: 13px;
+}
+
+.empty-workspace-recent p {
+  margin: 0;
+  color: #8b929b;
+  font-size: 13px;
+}
+
+.empty-workspace-recent-list {
+  display: grid;
+  gap: 8px;
+}
+
+.empty-workspace-recent-list button {
+  width: 100%;
+  border: 1px solid #30353d;
+  border-radius: 8px;
+  background: #17191d;
+  color: #eef1f4;
+  font: inherit;
+  font-weight: 750;
+  padding: 10px 12px;
 }
 
 .editor-side-panels {

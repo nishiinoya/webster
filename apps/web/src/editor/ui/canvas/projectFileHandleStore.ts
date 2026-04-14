@@ -4,27 +4,43 @@ const databaseName = "webster.editor";
 const databaseVersion = 1;
 const storeName = "fileHandles";
 const lastProjectKey = "lastProject";
+const recentProjectPrefix = "recentProject:";
 
 type StoredProjectHandle = {
   filename: string;
   handle: WebsterFileHandle;
-  id: typeof lastProjectKey;
+  id: string;
+  savedAt: string;
+};
+
+export type RecentProjectHandle = {
+  filename: string;
+  handle: WebsterFileHandle;
+  id: string;
   savedAt: string;
 };
 
 export async function rememberProjectFileHandle(handle: WebsterFileHandle) {
   const database = await openDatabase();
+  const filename = handle.name ?? "untitled.webster";
+  const savedAt = new Date().toISOString();
+  const store = database.transaction(storeName, "readwrite").objectStore(storeName);
 
   await runStoreRequest(
-    database
-      .transaction(storeName, "readwrite")
-      .objectStore(storeName)
-      .put({
-        filename: handle.name ?? "untitled.webster",
-        handle,
-        id: lastProjectKey,
-        savedAt: new Date().toISOString()
-      } satisfies StoredProjectHandle)
+    store.put({
+      filename,
+      handle,
+      id: lastProjectKey,
+      savedAt
+    } satisfies StoredProjectHandle)
+  );
+  await runStoreRequest(
+    store.put({
+      filename,
+      handle,
+      id: `${recentProjectPrefix}${filename}`,
+      savedAt
+    } satisfies StoredProjectHandle)
   );
   database.close();
 }
@@ -37,6 +53,25 @@ export async function readRememberedProjectFileHandle() {
 
   database.close();
   return stored?.handle ?? null;
+}
+
+export async function listRememberedProjectFiles() {
+  const database = await openDatabase();
+  const stored = await runStoreRequest<StoredProjectHandle[]>(
+    database.transaction(storeName, "readonly").objectStore(storeName).getAll()
+  );
+
+  database.close();
+
+  return stored
+    .filter((project) => project.id.startsWith(recentProjectPrefix))
+    .sort((left, right) => right.savedAt.localeCompare(left.savedAt))
+    .map((project) => ({
+      filename: project.filename,
+      handle: project.handle,
+      id: project.id,
+      savedAt: project.savedAt
+    } satisfies RecentProjectHandle));
 }
 
 export async function forgetRememberedProjectFileHandle() {

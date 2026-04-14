@@ -1,10 +1,18 @@
 "use client";
 
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { LayerCommand, LayerSummary } from "@/editor/core/EditorApp";
+import {
+  canPickProjectFileHandle,
+  pickProjectFileWithHandle
+} from "./canvas/projectFiles";
 import type { WebsterFileHandle } from "./canvas/projectFiles";
-import { readRememberedProjectFileHandle } from "./canvas/projectFileHandleStore";
+import {
+  listRememberedProjectFiles,
+  readRememberedProjectFileHandle
+} from "./canvas/projectFileHandleStore";
+import type { RecentProjectHandle } from "./canvas/projectFileHandleStore";
 import type { SaveStatus } from "./canvas/useProjectFileActions";
 import { CanvasView } from "./CanvasView";
 import type { EditorDocumentTab, NewDocumentSize } from "./editorDocuments";
@@ -46,6 +54,7 @@ function clamp(value: number, min: number, max: number) {
 }
 
 export function EditorPage() {
+  const emptyProjectInputRef = useRef<HTMLInputElement | null>(null);
   const sidePanelsRef = useRef<HTMLElement | null>(null);
   const documentCounterRef = useRef(1);
   const [selectedTool, setSelectedTool] = useState("Move");
@@ -53,6 +62,7 @@ export function EditorPage() {
   const [zoomPercentage, setZoomPercentage] = useState(100);
   const [tabs, setTabs] = useState<EditorDocumentTab[]>(initialTabs);
   const [isNewDocumentDialogOpen, setIsNewDocumentDialogOpen] = useState(false);
+  const [recentProjects, setRecentProjects] = useState<RecentProjectHandle[]>([]);
   const [recentProjectError, setRecentProjectError] = useState<string | null>(null);
   const [layers, setLayers] = useState<LayerSummary[]>(initialLayers);
   const [uploadRequest, setUploadRequest] = useState<{ file: File; id: number } | null>(null);
@@ -91,6 +101,24 @@ export function EditorPage() {
   };
   const selectedLayer = layers.find((layer) => layer.isSelected) ?? null;
   const activeDocument = tabs.find((tab) => tab.isActive) ?? tabs[0] ?? null;
+
+  useEffect(() => {
+    let didCancel = false;
+
+    async function loadRecentProjects() {
+      const projects = await listRememberedProjectFiles().catch(() => []);
+
+      if (!didCancel) {
+        setRecentProjects(projects);
+      }
+    }
+
+    void loadRecentProjects();
+
+    return () => {
+      didCancel = true;
+    };
+  }, [tabs.length]);
 
   function runLayerCommand(command: LayerCommand) {
     setLayerCommandRequest({ command, id: Date.now() });
@@ -155,16 +183,30 @@ export function EditorPage() {
   }
 
   function renameDocumentTab(tabId: string, title: string) {
+    const currentTab = tabs.find((tab) => tab.id === tabId);
+    const nextTitle = title.trim() || "Untitled";
+
+    if (!currentTab || currentTab.title === nextTitle) {
+      return;
+    }
+
     setTabs((currentTabs) =>
       currentTabs.map((tab) =>
         tab.id === tabId
           ? {
               ...tab,
-              title
+              title: nextTitle
             }
           : tab
       )
     );
+
+    if (
+      currentTab.isActive &&
+      window.confirm(`Save this project as "${getProjectFilename(nextTitle)}"?`)
+    ) {
+      setProjectSaveRequest({ id: Date.now(), mode: "save-as" });
+    }
   }
 
   function openProjectInNewTab(file: File, handle?: WebsterFileHandle | null) {
@@ -191,10 +233,8 @@ export function EditorPage() {
     setRecentProjectError(null);
   }
 
-  async function openRecentProject() {
+  async function openProjectHandle(handle: WebsterFileHandle | null) {
     try {
-      const handle = await readRememberedProjectFileHandle();
-
       if (!handle?.getFile) {
         setRecentProjectError("No recent project is saved in this browser yet.");
         return;
@@ -218,6 +258,35 @@ export function EditorPage() {
     } catch {
       setRecentProjectError("Unable to open the recent project.");
     }
+  }
+
+  async function openRecentProject() {
+    await openProjectHandle(await readRememberedProjectFileHandle());
+  }
+
+  async function openProjectPickerFromEmptyState() {
+    setRecentProjectError(null);
+
+    if (canPickProjectFileHandle()) {
+      try {
+        const pickedProject = await pickProjectFileWithHandle();
+
+        if (pickedProject) {
+          openProjectInNewTab(pickedProject.file, pickedProject.handle);
+        }
+
+        return;
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+
+        setRecentProjectError("Unable to open project.");
+        return;
+      }
+    }
+
+    emptyProjectInputRef.current?.click();
   }
 
   function getSidePanelHeight() {
@@ -374,11 +443,11 @@ export function EditorPage() {
                 <p className="empty-workspace-kicker">No open documents</p>
                 <h2>Start a Webster project</h2>
                 <div className="empty-workspace-actions">
-                  <button onClick={openRecentProject} type="button">
-                    Open recent
+                  <button onClick={openProjectPickerFromEmptyState} type="button">
+                    Open...
                   </button>
                   <button onClick={() => setIsNewDocumentDialogOpen(true)} type="button">
-                    Create new
+                    New...
                   </button>
                 </div>
                 {recentProjectError ? (
@@ -398,6 +467,39 @@ export function EditorPage() {
                     </button>
                   ))}
                 </div>
+                <div className="empty-workspace-recent" aria-label="Previous projects">
+                  <h3>Previous projects</h3>
+                  {recentProjects.length > 0 ? (
+                    <div className="empty-workspace-recent-list">
+                      {recentProjects.map((project) => (
+                        <button
+                          key={project.id}
+                          onClick={() => openProjectHandle(project.handle)}
+                          type="button"
+                        >
+                          <span>{project.filename}</span>
+                          <strong>{formatRecentProjectDate(project.savedAt)}</strong>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p>No previous projects yet.</p>
+                  )}
+                </div>
+                <input
+                  ref={emptyProjectInputRef}
+                  accept=".webster,application/zip,application/vnd.webster.project"
+                  className="visually-hidden"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+
+                    if (file) {
+                      openProjectInNewTab(file, null);
+                      event.target.value = "";
+                    }
+                  }}
+                  type="file"
+                />
               </div>
             </section>
           )}
@@ -442,4 +544,23 @@ export function EditorPage() {
       ) : null}
     </main>
   );
+}
+
+function formatRecentProjectDate(savedAt: string) {
+  const date = new Date(savedAt);
+
+  if (Number.isNaN(date.getTime())) {
+    return "recent";
+  }
+
+  return date.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short"
+  });
+}
+
+function getProjectFilename(title: string) {
+  const safeTitle = (title.trim() || "untitled").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-");
+
+  return safeTitle.toLowerCase().endsWith(".webster") ? safeTitle : `${safeTitle}.webster`;
 }
