@@ -219,9 +219,9 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 
 function getImageExportFilename(title: string, format: ImageExportFormat) {
-  const extension = format === "jpeg" ? "jpg" : "png";
+  const extension = format === "jpeg" ? "jpg" : format;
   const safeTitle = (title.trim() || "untitled").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-");
-  const withoutImageExtension = safeTitle.replace(/\.(png|jpe?g)$/i, "");
+  const withoutImageExtension = safeTitle.replace(/\.(pdf|png|jpe?g)$/i, "");
 
   return `${withoutImageExtension}.${extension}`;
 }

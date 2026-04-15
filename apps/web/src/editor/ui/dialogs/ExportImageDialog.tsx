@@ -8,13 +8,13 @@ type ExportImageDialogProps = {
 
 export function ExportImageDialog({ onClose, onExport }: ExportImageDialogProps) {
   const [format, setFormat] = useState<ImageExportFormat>("png");
-  const [jpegBackground, setJpegBackground] = useState<"checkerboard" | "white">("white");
+  const [opaqueBackground, setOpaqueBackground] = useState<"checkerboard" | "white">("white");
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     onExport({
-      background: format === "png" ? "transparent" : jpegBackground,
+      background: format === "png" ? "transparent" : opaqueBackground,
       format
     });
   }
@@ -48,21 +48,30 @@ export function ExportImageDialog({ onClose, onExport }: ExportImageDialogProps)
             <span>JPEG</span>
             <strong>Choose white or checkerboard</strong>
           </label>
-        </fieldset>
-        <fieldset className="dialog-fieldset" disabled={format !== "jpeg"}>
-          <legend>JPEG background</legend>
           <label className="dialog-radio">
             <input
-              checked={jpegBackground === "white"}
-              onChange={() => setJpegBackground("white")}
+              checked={format === "pdf"}
+              onChange={() => setFormat("pdf")}
+              type="radio"
+            />
+            <span>PDF</span>
+            <strong>Single-page document</strong>
+          </label>
+        </fieldset>
+        <fieldset className="dialog-fieldset" disabled={format === "png"}>
+          <legend>Opaque background</legend>
+          <label className="dialog-radio">
+            <input
+              checked={opaqueBackground === "white"}
+              onChange={() => setOpaqueBackground("white")}
               type="radio"
             />
             <span>White</span>
           </label>
           <label className="dialog-radio">
             <input
-              checked={jpegBackground === "checkerboard"}
-              onChange={() => setJpegBackground("checkerboard")}
+              checked={opaqueBackground === "checkerboard"}
+              onChange={() => setOpaqueBackground("checkerboard")}
               type="radio"
             />
             <span>Checkerboard</span>
