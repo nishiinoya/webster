@@ -1,5 +1,5 @@
-import { LayerMask } from "./LayerMask";
-import type { SerializedLayerMask } from "./LayerMask";
+import { LayerMask } from "../masks/LayerMask";
+import type { SerializedLayerMask } from "../masks/LayerMask";
 
 export type LayerType = "shape" | "image";
 

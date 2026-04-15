@@ -1,7 +1,7 @@
 import { MutableRefObject, useEffect, useRef, useState } from "react";
-import type { LayerSummary } from "../../core/EditorApp";
-import { EditorApp } from "../../core/EditorApp";
-import type { MaskBrushOptions } from "../../tools/MaskBrushTool";
+import type { LayerSummary } from "../../app/EditorApp";
+import { EditorApp } from "../../app/EditorApp";
+import type { MaskBrushOptions } from "../../tools/mask-brush/MaskBrushTypes";
 
 type UseEditorAppOptions = {
   canvasRef: MutableRefObject<HTMLCanvasElement | null>;

@@ -2,33 +2,86 @@
 
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { useEffect, useRef, useState } from "react";
-import type { LayerCommand, LayerSummary } from "@/editor/core/EditorApp";
-import type { MaskBrushOptions } from "../tools/MaskBrushTool";
+import type {
+  ImageExportBackground,
+  ImageExportFormat,
+  LayerCommand,
+  LayerSummary,
+  SelectionCommand
+} from "@/editor/app/EditorApp";
+import type { MaskBrushOptions } from "../tools/mask-brush/MaskBrushTypes";
 import {
   canPickProjectFileHandle,
   pickProjectFileWithHandle
-} from "./canvas/projectFiles";
-import type { WebsterFileHandle } from "./canvas/projectFiles";
+} from "../projects/projectFiles";
+import type { WebsterFileHandle } from "../projects/projectFiles";
 import {
   listRememberedProjectFiles,
   readRememberedProjectFileHandle
-} from "./canvas/projectFileHandleStore";
-import type { RecentProjectHandle } from "./canvas/projectFileHandleStore";
-import type { SaveStatus } from "./canvas/useProjectFileActions";
+} from "../projects/projectFileHandleStore";
+import type { RecentProjectHandle } from "../projects/projectFileHandleStore";
+import type { SaveStatus } from "./hooks/useProjectFileActions";
 import { CanvasView } from "./CanvasView";
 import type { EditorDocumentTab, NewDocumentSize } from "./editorDocuments";
 import "./EditorPage.css";
-import { HistoryPanel } from "./HistoryPanel";
-import { LayersPanel } from "./LayersPanel";
-import { NewDocumentDialog } from "./NewDocumentDialog";
-import { PropertiesPanel } from "./PropertiesPanel";
-import { TabsBar } from "./TabsBar";
-import { Toolbar } from "./Toolbar";
-import { ToolsPanel } from "./ToolsPanel";
+import { HistoryPanel } from "./panels/HistoryPanel";
+import { LayersPanel } from "./panels/LayersPanel";
+import { ExportImageDialog } from "./dialogs/ExportImageDialog";
+import { NewDocumentDialog } from "./dialogs/NewDocumentDialog";
+import { PropertiesPanel } from "./panels/PropertiesPanel";
+import { TabsBar } from "./toolbar/TabsBar";
+import { Toolbar } from "./toolbar/Toolbar";
+import { ToolsPanel } from "./toolbar/ToolsPanel";
+import type { ToolDefinition } from "./toolbar/ToolsPanel";
 
 const initialTabs: EditorDocumentTab[] = [];
 
-const mockTools = ["Move", "Pan", "Mask Brush", "Marquee", "Brush", "Eraser", "Text", "Zoom"];
+const editorTools: ToolDefinition[] = [
+  {
+    description: "Pick, move, and transform layers.",
+    icon: "M",
+    label: "Move",
+    value: "Move"
+  },
+  {
+    description: "Drag the workspace without editing artwork.",
+    icon: "P",
+    label: "Pan",
+    value: "Pan"
+  },
+  {
+    description: "Paint the selected layer mask.",
+    icon: "B",
+    label: "Mask Brush",
+    value: "Mask Brush"
+  },
+  {
+    description: "Drag a box selection.",
+    icon: "R",
+    label: "Rectangle Select",
+    value: "Rectangle Select"
+  },
+  {
+    description: "Drag an oval selection.",
+    icon: "E",
+    label: "Ellipse Select",
+    value: "Ellipse Select"
+  },
+  {
+    description: "Freehand selection placeholder.",
+    icon: "L",
+    label: "Lasso Select",
+    status: "later",
+    value: "Lasso Select"
+  },
+  {
+    description: "Color-based selection placeholder.",
+    icon: "W",
+    label: "Magic Select",
+    status: "later",
+    value: "Magic Select"
+  }
+];
 
 const initialLayers: LayerSummary[] = [];
 
@@ -60,13 +113,14 @@ export function EditorPage() {
   const documentCounterRef = useRef(1);
   const [selectedTool, setSelectedTool] = useState("Move");
   const [maskBrushOptions, setMaskBrushOptions] = useState<MaskBrushOptions>({
-    mode: "reveal",
+    mode: "hide",
     opacity: 1,
     size: 48
   });
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [zoomPercentage, setZoomPercentage] = useState(100);
   const [tabs, setTabs] = useState<EditorDocumentTab[]>(initialTabs);
+  const [isExportImageDialogOpen, setIsExportImageDialogOpen] = useState(false);
   const [isNewDocumentDialogOpen, setIsNewDocumentDialogOpen] = useState(false);
   const [recentProjects, setRecentProjects] = useState<RecentProjectHandle[]>([]);
   const [recentProjectError, setRecentProjectError] = useState<string | null>(null);
@@ -90,11 +144,21 @@ export function EditorPage() {
     id: number;
     mode: "save" | "save-as";
   } | null>(null);
+  const [imageExportRequest, setImageExportRequest] = useState<{
+    background: ImageExportBackground;
+    format: ImageExportFormat;
+    id: number;
+    title: string;
+  } | null>(null);
+  const [selectionCommandRequest, setSelectionCommandRequest] = useState<{
+    command: SelectionCommand;
+    id: number;
+  } | null>(null);
   const [closedDocumentRequest, setClosedDocumentRequest] = useState<{
     id: number;
     tabId: string;
   } | null>(null);
-  const [toolsPanelWidth, setToolsPanelWidth] = useState(88);
+  const [toolsPanelWidth, setToolsPanelWidth] = useState(220);
   const [rightPanelWidth, setRightPanelWidth] = useState(380);
   const [layersPanelHeight, setLayersPanelHeight] = useState(190);
   const [propertiesPanelHeight, setPropertiesPanelHeight] = useState(250);
@@ -334,7 +398,7 @@ export function EditorPage() {
     const startWidth = toolsPanelWidth;
 
     function resize(moveEvent: PointerEvent) {
-      setToolsPanelWidth(clamp(startWidth + moveEvent.clientX - startX, 68, 180));
+      setToolsPanelWidth(clamp(startWidth + moveEvent.clientX - startX, 150, 280));
     }
 
     startResize(resize);
@@ -387,9 +451,11 @@ export function EditorPage() {
         canEditDocument={Boolean(activeDocument)}
         documentTitle={activeDocument?.title ?? "No document"}
         onNewDocument={() => setIsNewDocumentDialogOpen(true)}
+        onOpenExportDialog={() => setIsExportImageDialogOpen(true)}
         onOpenProject={openProjectInNewTab}
         onSaveAsProject={() => setProjectSaveRequest({ id: Date.now(), mode: "save-as" })}
         onSaveProject={() => setProjectSaveRequest({ id: Date.now(), mode: "save" })}
+        onSelectionCommand={(command) => setSelectionCommandRequest({ command, id: Date.now() })}
         onUploadImage={(file) => setUploadRequest({ file, id: Date.now() })}
         maskBrushOptions={maskBrushOptions}
         onMaskBrushOptionsChange={(options) =>
@@ -402,11 +468,15 @@ export function EditorPage() {
         selectedTool={selectedTool}
         zoomPercentage={zoomPercentage}
       />
-      <section className="editor-shell" style={layoutStyle} aria-label="Editor workspace">
+      <section
+        className={`editor-shell${activeDocument ? " has-document" : " has-no-document"}`}
+        style={layoutStyle}
+        aria-label="Editor workspace"
+      >
         <ToolsPanel
           onSelectTool={setSelectedTool}
           selectedTool={selectedTool}
-          tools={mockTools}
+          tools={editorTools}
         />
         <button
           aria-label="Resize tools panel"
@@ -427,6 +497,7 @@ export function EditorPage() {
               closedDocumentRequest={closedDocumentRequest}
               layerCommandRequest={layerCommandRequest}
               maskBrushOptions={maskBrushOptions}
+              imageExportRequest={imageExportRequest}
               onLayersChange={setLayers}
               onLayerCommandRequestHandled={(requestId) =>
                 setLayerCommandRequest((request) => (request?.id === requestId ? null : request))
@@ -437,7 +508,15 @@ export function EditorPage() {
               onProjectSaveRequestHandled={(requestId) =>
                 setProjectSaveRequest((request) => (request?.id === requestId ? null : request))
               }
+              onImageExportRequestHandled={(requestId) =>
+                setImageExportRequest((request) => (request?.id === requestId ? null : request))
+              }
               onSaveStatusChange={setSaveStatus}
+              onSelectionCommandRequestHandled={(requestId) =>
+                setSelectionCommandRequest((request) =>
+                  request?.id === requestId ? null : request
+                )
+              }
               onSelectLayerRequestHandled={(requestId) =>
                 setSelectLayerRequest((request) => (request?.id === requestId ? null : request))
               }
@@ -448,6 +527,7 @@ export function EditorPage() {
               projectFileRequest={projectFileRequest}
               projectSaveRequest={projectSaveRequest}
               selectLayerRequest={selectLayerRequest}
+              selectionCommandRequest={selectionCommandRequest}
               selectedTool={selectedTool}
               uploadRequest={uploadRequest}
             />
@@ -554,6 +634,20 @@ export function EditorPage() {
         <NewDocumentDialog
           onClose={() => setIsNewDocumentDialogOpen(false)}
           onCreate={createDocumentTab}
+        />
+      ) : null}
+      {isExportImageDialogOpen ? (
+        <ExportImageDialog
+          onClose={() => setIsExportImageDialogOpen(false)}
+          onExport={({ background, format }) => {
+            setImageExportRequest({
+              background,
+              format,
+              id: Date.now(),
+              title: activeDocument?.title ?? "untitled"
+            });
+            setIsExportImageDialogOpen(false);
+          }}
         />
       ) : null}
     </main>

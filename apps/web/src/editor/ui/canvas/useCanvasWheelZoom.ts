@@ -1,5 +1,5 @@
 import { MutableRefObject, useEffect } from "react";
-import { EditorApp } from "../../core/EditorApp";
+import { EditorApp } from "../../app/EditorApp";
 
 type UseCanvasWheelZoomOptions = {
   canvasRef: MutableRefObject<HTMLCanvasElement | null>;

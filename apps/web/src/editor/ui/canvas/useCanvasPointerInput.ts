@@ -4,8 +4,8 @@ import {
   useRef,
   useState
 } from "react";
-import { EditorApp } from "../../core/EditorApp";
-import type { LayerSummary } from "../../core/EditorApp";
+import { EditorApp } from "../../app/EditorApp";
+import type { LayerSummary } from "../../app/EditorApp";
 
 type UseCanvasPointerInputOptions = {
   editorAppRef: MutableRefObject<EditorApp | null>;
@@ -71,7 +71,7 @@ export function useCanvasPointerInput({
           return;
         }
 
-        if (selectedTool === "Move" || selectedTool === "Mask Brush") {
+        if (isCanvasInputTool(selectedTool)) {
           const didHandleInput = editorAppRef.current?.pointerDown({
             button: event.button,
             clientX: event.clientX,
@@ -116,4 +116,14 @@ export function useCanvasPointerInput({
       }
     }
   };
+}
+
+function isCanvasInputTool(tool: string) {
+  return (
+    tool === "Move" ||
+    tool === "Mask Brush" ||
+    tool === "Marquee" ||
+    tool === "Rectangle Select" ||
+    tool === "Ellipse Select"
+  );
 }
