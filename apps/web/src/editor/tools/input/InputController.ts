@@ -96,6 +96,10 @@ export class InputController {
   }
 
   getCursor(clientX: number, clientY: number): ToolCursor {
+    if (this.selectedTool === "Text") {
+      return "text";
+    }
+
     if (this.selectedTool === "Mask Brush") {
       return this.maskBrushTool.getCursor();
     }

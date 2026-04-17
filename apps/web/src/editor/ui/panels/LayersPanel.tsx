@@ -1,4 +1,5 @@
-import type { ChangeEvent, MouseEvent } from "react";
+import { useEffect, useState } from "react";
+import type { CSSProperties, ChangeEvent, MouseEvent } from "react";
 import type { LayerCommand, LayerSummary } from "../../app/EditorApp";
 
 type LayersPanelProps = {
@@ -8,12 +9,64 @@ type LayersPanelProps = {
 };
 
 export function LayersPanel({ layers, onLayerCommand, onSelectLayer }: LayersPanelProps) {
+  const [openMenu, setOpenMenu] = useState<{
+    layerId: string;
+    left: number;
+    top: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!openMenu) {
+      return;
+    }
+
+    function closeMenu() {
+      setOpenMenu(null);
+    }
+
+    function closeMenuOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpenMenu(null);
+      }
+    }
+
+    window.addEventListener("pointerdown", closeMenu);
+    window.addEventListener("keydown", closeMenuOnEscape);
+
+    return () => {
+      window.removeEventListener("pointerdown", closeMenu);
+      window.removeEventListener("keydown", closeMenuOnEscape);
+    };
+  }, [openMenu]);
+
   function stopPanelControl(event: MouseEvent<HTMLElement>) {
     event.stopPropagation();
   }
 
   function updateLayer(layerId: string, updates: Extract<LayerCommand, { type: "update" }>["updates"]) {
     onLayerCommand({ type: "update", layerId, updates });
+  }
+
+  function runLayerMenuCommand(command: LayerCommand) {
+    onLayerCommand(command);
+    setOpenMenu(null);
+  }
+
+  function toggleLayerMenu(event: MouseEvent<HTMLButtonElement>, layerId: string) {
+    stopPanelControl(event);
+
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const menuWidth = 190;
+
+    setOpenMenu((currentMenu) =>
+      currentMenu?.layerId === layerId
+        ? null
+        : {
+            layerId,
+            left: Math.min(window.innerWidth - menuWidth - 8, Math.max(8, bounds.right - menuWidth)),
+            top: Math.min(window.innerHeight - 340, bounds.bottom + 6)
+          }
+    );
   }
 
   return (
@@ -93,87 +146,15 @@ export function LayersPanel({ layers, onLayerCommand, onSelectLayer }: LayersPan
                 ) : null}
               </div>
             </div>
-            <details className="layer-more-menu" onClick={stopPanelControl}>
-              <summary aria-label={`Layer actions for ${layer.name}`}>...</summary>
-              <div className="layer-more-menu-content">
-                <button
-                  onClick={() => onLayerCommand({ type: "move-up", layerId: layer.id })}
-                  type="button"
-                >
-                  Move up
-                </button>
-                <button
-                  onClick={() => onLayerCommand({ type: "move-down", layerId: layer.id })}
-                  type="button"
-                >
-                  Move down
-                </button>
-                <button
-                  onClick={() => onLayerCommand({ type: "duplicate", layerId: layer.id })}
-                  type="button"
-                >
-                  Duplicate
-                </button>
-                <button
-                  className="layer-danger-action"
-                  onClick={() => onLayerCommand({ type: "delete", layerId: layer.id })}
-                  type="button"
-                >
-                  Delete layer
-                </button>
-                <span className="layer-menu-separator" />
-                <button
-                  onClick={() =>
-                    onLayerCommand({
-                      action: layer.hasMask ? "delete" : "add",
-                      layerId: layer.id,
-                      type: "mask"
-                    })
-                  }
-                  type="button"
-                >
-                  {layer.hasMask ? "Delete mask" : "Add mask"}
-                </button>
-                <button
-                  disabled={!layer.hasMask}
-                  onClick={() =>
-                    onLayerCommand({
-                      action: "toggle-enabled",
-                      layerId: layer.id,
-                      type: "mask"
-                    })
-                  }
-                  type="button"
-                >
-                  {layer.maskEnabled ? "Disable mask" : "Enable mask"}
-                </button>
-                <button
-                  disabled={!layer.hasMask}
-                  onClick={() => onLayerCommand({ action: "invert", layerId: layer.id, type: "mask" })}
-                  type="button"
-                >
-                  Invert mask
-                </button>
-                <button
-                  disabled={!layer.hasMask}
-                  onClick={() =>
-                    onLayerCommand({ action: "clear-white", layerId: layer.id, type: "mask" })
-                  }
-                  type="button"
-                >
-                  Clear mask white
-                </button>
-                <button
-                  disabled={!layer.hasMask}
-                  onClick={() =>
-                    onLayerCommand({ action: "clear-black", layerId: layer.id, type: "mask" })
-                  }
-                  type="button"
-                >
-                  Clear mask black
-                </button>
-              </div>
-            </details>
+            <button
+              aria-expanded={openMenu?.layerId === layer.id}
+              aria-label={`Layer actions for ${layer.name}`}
+              className="layer-more-button"
+              onClick={(event) => toggleLayerMenu(event, layer.id)}
+              type="button"
+            >
+              ...
+            </button>
             <label className="layer-opacity-control" onClick={stopPanelControl}>
               <span>Opacity</span>
               <input
@@ -191,7 +172,99 @@ export function LayersPanel({ layers, onLayerCommand, onSelectLayer }: LayersPan
           </div>
         ))}
       </div>
+      {openMenu ? (
+        <LayerMenu
+          layer={layers.find((layer) => layer.id === openMenu.layerId) ?? null}
+          onCommand={runLayerMenuCommand}
+          onPointerDown={(event) => event.stopPropagation()}
+          style={{ left: openMenu.left, top: openMenu.top }}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function LayerMenu({
+  layer,
+  onCommand,
+  onPointerDown,
+  style
+}: {
+  layer: LayerSummary | null;
+  onCommand: (command: LayerCommand) => void;
+  onPointerDown: (event: MouseEvent<HTMLDivElement>) => void;
+  style: CSSProperties;
+}) {
+  if (!layer) {
+    return null;
+  }
+
+  return (
+    <div className="layer-more-menu-content" onPointerDown={onPointerDown} style={style}>
+      <button onClick={() => onCommand({ type: "move-up", layerId: layer.id })} type="button">
+        Move up
+      </button>
+      <button onClick={() => onCommand({ type: "move-down", layerId: layer.id })} type="button">
+        Move down
+      </button>
+      <button onClick={() => onCommand({ type: "duplicate", layerId: layer.id })} type="button">
+        Duplicate
+      </button>
+      <button
+        className="layer-danger-action"
+        onClick={() => onCommand({ type: "delete", layerId: layer.id })}
+        type="button"
+      >
+        Delete layer
+      </button>
+      <span className="layer-menu-separator" />
+      <button
+        onClick={() =>
+          onCommand({
+            action: layer.hasMask ? "delete" : "add",
+            layerId: layer.id,
+            type: "mask"
+          })
+        }
+        type="button"
+      >
+        {layer.hasMask ? "Delete mask" : "Add mask"}
+      </button>
+      <button
+        disabled={!layer.hasMask}
+        onClick={() =>
+          onCommand({
+            action: "toggle-enabled",
+            layerId: layer.id,
+            type: "mask"
+          })
+        }
+        type="button"
+      >
+        {layer.maskEnabled ? "Disable mask" : "Enable mask"}
+      </button>
+      <button
+        disabled={!layer.hasMask}
+        onClick={() => onCommand({ action: "invert", layerId: layer.id, type: "mask" })}
+        type="button"
+      >
+        Invert mask
+      </button>
+      <button
+        disabled={!layer.hasMask}
+        onClick={() => onCommand({ action: "clear-white", layerId: layer.id, type: "mask" })}
+        type="button"
+      >
+        Clear mask white
+      </button>
+      <button
+        disabled={!layer.hasMask}
+        onClick={() => onCommand({ action: "clear-black", layerId: layer.id, type: "mask" })}
+        type="button"
+      >
+        Clear mask black
+      </button>
+    </div>
   );
 }
 

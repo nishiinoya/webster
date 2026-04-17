@@ -3,7 +3,9 @@ import { Layer } from "../layers/Layer";
 import type { SerializedLayer } from "../layers/Layer";
 import { LayerMask } from "../masks/LayerMask";
 import { ShapeLayer } from "../layers/ShapeLayer";
+import { TextLayer } from "../layers/TextLayer"
 import { SelectionManager } from "../selection/SelectionManager";
+import { getTextMaskFrame } from "../rendering/text/BitmapText";
 
 export type DocumentBounds = {
   x: number;
@@ -61,7 +63,10 @@ export class Scene {
           y: -60,
           width: 260,
           height: 160,
-          color: [0.18, 0.49, 0.44, 1]
+          shape: "rectangle",
+          fillColor: [0.18, 0.49, 0.44, 1],
+          strokeColor: [0.07, 0.08, 0.09, 1],
+          strokeWidth: 0
         })
       );
     }
@@ -172,16 +177,27 @@ export class Scene {
   updateLayer(
     layerId: string,
     updates: Partial<{
+      align: "left" | "center" | "right";
+      bold: boolean;
+      color: [number, number, number, number];
+      fillColor: [number, number, number, number];
+      fontFamily: string;
+      fontSize: number;
       height: number;
+      italic: boolean;
       locked: boolean;
       name: string;
       opacity: number;
       rotation: number;
+      shape: "rectangle" | "ellipse" | "line";
+      strokeColor: [number, number, number, number];
+      strokeWidth: number;
+      text: string;
       visible: boolean;
       width: number;
       x: number;
       y: number;
-    }>
+  }>
   ) {
     const layer = this.getLayer(layerId);
 
@@ -218,12 +234,70 @@ export class Scene {
         layer.rotation = normalizeRotation(updates.rotation);
       }
 
-      if (updates.width !== undefined) {
+      if (updates.width !== undefined && !(layer instanceof TextLayer)) {
         layer.scaleX = Math.max(1, updates.width) / layer.width;
       }
 
-      if (updates.height !== undefined) {
+      if (updates.height !== undefined && !(layer instanceof TextLayer)) {
         layer.scaleY = Math.max(1, updates.height) / layer.height;
+      }
+    }
+
+    if (layer instanceof ShapeLayer && !layer.locked) {
+      if (updates.shape !== undefined) {
+        layer.shape = updates.shape;
+      }
+
+      if (updates.fillColor !== undefined) {
+        layer.fillColor = updates.fillColor;
+      }
+
+      if (updates.strokeColor !== undefined) {
+        layer.strokeColor = updates.strokeColor;
+      }
+
+      if (updates.strokeWidth !== undefined) {
+        layer.strokeWidth = Math.max(0, updates.strokeWidth);
+      }
+    }
+
+    if (layer instanceof TextLayer && !layer.locked) {
+      if (updates.text !== undefined) {
+        layer.text = updates.text;
+      }
+
+      if (updates.fontSize !== undefined) {
+        layer.fontSize = Math.max(1, updates.fontSize);
+      }
+
+      if (updates.fontFamily !== undefined) {
+        layer.fontFamily = updates.fontFamily;
+      }
+
+      if (updates.color !== undefined) {
+        layer.color = updates.color;
+      }
+
+      if (updates.bold !== undefined) {
+        layer.bold = updates.bold;
+      }
+
+      if (updates.italic !== undefined) {
+        layer.italic = updates.italic;
+      }
+
+      if (updates.align !== undefined) {
+        layer.align = updates.align;
+      }
+
+      if (updates.width !== undefined) {
+        layer.width = Math.max(1, updates.width);
+        layer.scaleX = 1;
+      }
+
+      if (updates.height !== undefined) {
+        layer.height = Math.max(1, updates.height);
+        layer.scaleY = 1;
       }
     }
 
@@ -299,24 +373,7 @@ export class Scene {
   }
 
   getLayerSummaries() {
-    return this.layers
-      .map((layer) => ({
-        hasMask: Boolean(layer.mask),
-        id: layer.id,
-        isSelected: layer.id === this.selectedLayerId,
-        isVisible: layer.visible,
-        locked: layer.locked,
-        maskEnabled: layer.mask?.enabled ?? false,
-        name: layer.name,
-        opacity: layer.opacity,
-        rotation: layer.rotation,
-        type: layer.type,
-        x: layer.x,
-        y: layer.y,
-        width: layer.width * layer.scaleX,
-        height: layer.height * layer.scaleY
-      }))
-      .reverse();
+    return this.layers.map((layer) => getLayerSummary(layer, this.selectedLayerId)).reverse();
   }
 
   async toJSON(): Promise<SerializedScene> {
@@ -368,7 +425,10 @@ function cloneLayer(layer: Layer) {
   if (layer instanceof ShapeLayer) {
     return new ShapeLayer({
       ...options,
-      color: [...layer.color]
+      fillColor: [...layer.fillColor],
+      shape: layer.shape,
+      strokeColor: [...layer.strokeColor],
+      strokeWidth: layer.strokeWidth
     });
   }
 
@@ -379,6 +439,20 @@ function cloneLayer(layer: Layer) {
       objectUrl: ""
     });
   }
+
+  if (layer instanceof TextLayer) {
+    return new TextLayer({
+      ...options,
+      align: layer.align,
+      bold: layer.bold,
+      color: [...layer.color],
+      fontFamily: layer.fontFamily,
+      fontSize: layer.fontSize,
+      italic: layer.italic,
+      text: layer.text
+    });
+  }
+
 
   throw new Error(`Unsupported layer type: ${layer.type}`);
 }
@@ -400,9 +474,11 @@ function applyLayerMaskAction(layer: Layer, action: LayerMaskAction) {
   }
 
   if (action === "add" && !layer.mask) {
+    const textMaskFrame = layer instanceof TextLayer ? layer.lastTextMaskFrame ?? getTextMaskFrame(layer) : null;
+
     layer.mask = new LayerMask({
-      height: layer.height,
-      width: layer.width
+      height: textMaskFrame?.height ?? layer.height,
+      width: textMaskFrame?.width ?? layer.width
     });
     return layer;
   }
@@ -469,4 +545,48 @@ function clamp(value: number, min: number, max: number) {
 
 function normalizeRotation(rotation: number) {
   return ((rotation % 360) + 360) % 360;
+}
+
+function getLayerSummary(layer: Layer, selectedLayerId: string | null) {
+  const baseSummary = {
+    hasMask: Boolean(layer.mask),
+    id: layer.id,
+    isSelected: layer.id === selectedLayerId,
+    isVisible: layer.visible,
+    locked: layer.locked,
+    maskEnabled: layer.mask?.enabled ?? false,
+    name: layer.name,
+    opacity: layer.opacity,
+    rotation: layer.rotation,
+    type: layer.type,
+    x: layer.x,
+    y: layer.y,
+    width: layer.width * layer.scaleX,
+    height: layer.height * layer.scaleY
+  };
+
+  if (layer instanceof ShapeLayer) {
+    return {
+      ...baseSummary,
+      fillColor: layer.fillColor,
+      shape: layer.shape,
+      strokeColor: layer.strokeColor,
+      strokeWidth: layer.strokeWidth
+    };
+  }
+
+  if (layer instanceof TextLayer) {
+    return {
+      ...baseSummary,
+      align: layer.align,
+      bold: layer.bold,
+      color: layer.color,
+      fontFamily: layer.fontFamily,
+      fontSize: layer.fontSize,
+      italic: layer.italic,
+      text: layer.text
+    };
+  }
+
+  return baseSummary;
 }

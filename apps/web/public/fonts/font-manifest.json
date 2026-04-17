@@ -1,0 +1,102 @@
+{
+  "fonts": [
+    {
+      "family": "Almarai",
+      "style": "Regular",
+      "weight": 400,
+      "italic": false,
+      "url": "/fonts/source/almarai-400.ttf"
+    },
+    {
+      "family": "Basic",
+      "style": "Regular",
+      "weight": 400,
+      "italic": false,
+      "url": "/fonts/source/basic-400.ttf"
+    },
+    {
+      "family": "Lato",
+      "style": "Regular",
+      "weight": 400,
+      "italic": false,
+      "url": "/fonts/source/lato-400.ttf"
+    },
+    {
+      "family": "Lato",
+      "style": "Italic",
+      "weight": 400,
+      "italic": true,
+      "url": "/fonts/source/lato-400-italic.ttf"
+    },
+    {
+      "family": "Lato",
+      "style": "Bold",
+      "weight": 700,
+      "italic": false,
+      "url": "/fonts/source/lato-700.ttf"
+    },
+    {
+      "family": "Lato",
+      "style": "BoldItalic",
+      "weight": 700,
+      "italic": true,
+      "url": "/fonts/source/lato-700-italic.ttf"
+    },
+    {
+      "family": "Lobster",
+      "style": "Regular",
+      "weight": 400,
+      "italic": false,
+      "url": "/fonts/source/lobster-400.ttf"
+    },
+    {
+      "family": "NanumGothic",
+      "style": "Regular",
+      "weight": 400,
+      "italic": false,
+      "url": "/fonts/source/nanumgothic-400.ttf"
+    },
+    {
+      "family": "Nosifer",
+      "style": "Regular",
+      "weight": 400,
+      "italic": false,
+      "url": "/fonts/source/nosifer-400.ttf"
+    },
+    {
+      "family": "Pacifico",
+      "style": "Regular",
+      "weight": 400,
+      "italic": false,
+      "url": "/fonts/source/pacifico-400.ttf"
+    },
+    {
+      "family": "Poppins",
+      "style": "Regular",
+      "weight": 400,
+      "italic": false,
+      "url": "/fonts/source/poppins-400.ttf"
+    },
+    {
+      "family": "Poppins",
+      "style": "Italic",
+      "weight": 400,
+      "italic": true,
+      "url": "/fonts/source/poppins-400-italic.ttf"
+    },
+    {
+      "family": "Poppins",
+      "style": "Bold",
+      "weight": 700,
+      "italic": false,
+      "url": "/fonts/source/poppins-700.ttf"
+    },
+    {
+      "family": "Poppins",
+      "style": "BoldItalic",
+      "weight": 700,
+      "italic": true,
+      "url": "/fonts/source/poppins-700-italic.ttf"
+    }
+  ]
+}

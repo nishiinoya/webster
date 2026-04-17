@@ -8,6 +8,7 @@ import {
   TransformHandleId
 } from "../../geometry/TransformGeometry";
 import { Layer } from "../../layers/Layer";
+import { TextLayer } from "../../layers/TextLayer";
 
 export type ToolPointerEvent = {
   button: number;
@@ -25,6 +26,7 @@ export type ToolCursor =
   | "grab"
   | "grabbing"
   | "crosshair"
+  | "text"
   | `mask-brush-${number}-${"hide" | "reveal"}`
   | `rotate-${number}`;
 
@@ -321,8 +323,16 @@ export class MoveTool {
       y: state.anchorWorld.y + centerWorldOffset.y
     };
 
-    state.layer.scaleX = width / state.layer.width;
-    state.layer.scaleY = height / state.layer.height;
+    if (state.layer instanceof TextLayer) {
+      state.layer.width = width;
+      state.layer.height = height;
+      state.layer.scaleX = 1;
+      state.layer.scaleY = 1;
+    } else {
+      state.layer.scaleX = width / state.layer.width;
+      state.layer.scaleY = height / state.layer.height;
+    }
+
     state.layer.x = centerWorld.x - width / 2;
     state.layer.y = centerWorld.y - height / 2;
   }

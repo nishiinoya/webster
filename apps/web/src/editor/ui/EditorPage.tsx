@@ -56,6 +56,12 @@ const editorTools: ToolDefinition[] = [
     value: "Mask Brush"
   },
   {
+    description: "Click the canvas to place and edit live text.",
+    icon: "T",
+    label: "Text",
+    value: "Text"
+  },
+  {
     description: "Drag a box selection.",
     icon: "R",
     label: "Rectangle Select",
@@ -91,9 +97,9 @@ const documentPresets: Array<NewDocumentSize & { label: string }> = [
   { height: 1080, label: "HD 1920 x 1080", width: 1920 },
   { height: 1080, label: "Square 1080 x 1080", width: 1080 }
 ];
-const layersPanelMinHeight = 120;
-const propertiesPanelMinHeight = 150;
-const historyPanelMinHeight = 120;
+const layersPanelMinHeight = 170;
+const propertiesPanelMinHeight = 260;
+const historyPanelMinHeight = 72;
 const sidePanelHandleHeight = 12;
 
 type EditorLayoutVars = CSSProperties & {
@@ -159,9 +165,9 @@ export function EditorPage() {
     tabId: string;
   } | null>(null);
   const [toolsPanelWidth, setToolsPanelWidth] = useState(220);
-  const [rightPanelWidth, setRightPanelWidth] = useState(380);
-  const [layersPanelHeight, setLayersPanelHeight] = useState(190);
-  const [propertiesPanelHeight, setPropertiesPanelHeight] = useState(250);
+  const [rightPanelWidth, setRightPanelWidth] = useState(420);
+  const [layersPanelHeight, setLayersPanelHeight] = useState(280);
+  const [propertiesPanelHeight, setPropertiesPanelHeight] = useState(360);
 
   const layoutStyle: EditorLayoutVars = {
     "--tools-panel-width": `${toolsPanelWidth}px`,
@@ -409,7 +415,7 @@ export function EditorPage() {
     const startWidth = rightPanelWidth;
 
     function resize(moveEvent: PointerEvent) {
-      setRightPanelWidth(clamp(startWidth - (moveEvent.clientX - startX), 320, 620));
+      setRightPanelWidth(clamp(startWidth - (moveEvent.clientX - startX), 320, 760));
     }
 
     startResize(resize);

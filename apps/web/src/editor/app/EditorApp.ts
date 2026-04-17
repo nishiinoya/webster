@@ -7,6 +7,8 @@ import { Scene } from "../scene/Scene";
 import type { LayerMaskAction } from "../scene/Scene";
 import { exportScenePackage, importScenePackage } from "../projects/ProjectPackage";
 import { ImageLayer } from "../layers/ImageLayer";
+import { TextLayer } from "../layers/TextLayer";
+
 
 export type CameraSnapshot = {
   x: number;
@@ -43,6 +45,10 @@ export class EditorApp {
   private activeDocumentId: string | null = null;
   private lastCameraSnapshot: CameraSnapshot | null = null;
   private selectedTool = "Move";
+  private textEditLayerId: string | null = null;
+  private textCaretIndex = 0;
+  private textSelectionEnd: number | null = null;
+  private textSelectionStart: number | null = null;
   private readonly tabScenes = new Map<string, Scene>();
 
   static async create(
@@ -76,7 +82,15 @@ export class EditorApp {
 
       this.renderer.render(this.scene, this.camera, {
         ...editorRenderOptions,
-        showSelectionOutline: shouldShowSelectionOutline(this.selectedTool)
+        showSelectionOutline: shouldShowSelectionOutline(this.selectedTool),
+        textEdit: this.textEditLayerId
+          ? {
+              caretIndex: this.textCaretIndex,
+              layerId: this.textEditLayerId,
+              selectionEnd: this.textSelectionEnd,
+              selectionStart: this.textSelectionStart
+            }
+          : null
       });
       this.animationFrameId = window.requestAnimationFrame(tick);
     };
@@ -210,6 +224,8 @@ export class EditorApp {
   }
 
   async exportImageFile(format: ImageExportFormat, background: ImageExportBackground) {
+    this.finishTextEdit();
+
     const canvas = document.createElement("canvas");
     const renderer = await Renderer.create(canvas, {
       alpha: format === "png" && background === "transparent",
@@ -224,6 +240,8 @@ export class EditorApp {
     camera.zoom = 1;
 
     try {
+      await renderer.prepareSceneFonts(this.scene);
+
       renderer.renderToSize(
         this.scene,
         camera,
@@ -258,6 +276,10 @@ export class EditorApp {
   setSelectedTool(tool: string) {
     this.selectedTool = tool;
     this.inputController.setSelectedTool(tool);
+
+    if (tool !== "Text") {
+      this.finishTextEdit();
+    }
   }
 
   setMaskBrushOptions(options: Partial<MaskBrushOptions>) {
@@ -342,6 +364,215 @@ export class EditorApp {
     return this.inputController.getCursor(clientX, clientY);
   }
 
+  startTextEditAtClientPoint(clientX: number, clientY: number) {
+    const screenPoint = this.getCanvasPoint(clientX, clientY);
+    const worldPoint = this.camera.screenToWorld(screenPoint.x, screenPoint.y);
+    const layer = this.scene.hitTestLayer(worldPoint.x, worldPoint.y);
+
+    if (layer instanceof TextLayer) {
+      this.scene.selectLayer(layer.id);
+      this.textEditLayerId = layer.id;
+      this.textCaretIndex = layer.text.length;
+      this.clearTextSelection();
+
+      return layer;
+    }
+
+    const width = 360;
+    const height = 120;
+    const nextLayer = new TextLayer({
+      id: crypto.randomUUID(),
+      name: "Text",
+      x: worldPoint.x,
+      y: worldPoint.y - height,
+      width,
+      height,
+      text: "",
+      fontSize: 48,
+      fontFamily: "Arial",
+      color: [0.05, 0.06, 0.07, 1],
+      bold: false,
+      italic: false,
+      align: "left"
+    });
+
+    this.scene.addLayer(nextLayer);
+    this.textEditLayerId = nextLayer.id;
+    this.textCaretIndex = 0;
+    this.clearTextSelection();
+
+    return nextLayer;
+  }
+
+  startTextSelectionAtClientPoint(clientX: number, clientY: number) {
+    const layer = this.startTextEditAtClientPoint(clientX, clientY);
+
+    if (!layer) {
+      return false;
+    }
+
+    const index = this.getTextIndexAtClientPoint(layer, clientX, clientY);
+
+    this.textCaretIndex = index;
+    this.textSelectionStart = index;
+    this.textSelectionEnd = index;
+
+    return true;
+  }
+
+  updateTextSelectionAtClientPoint(clientX: number, clientY: number) {
+    const layer = this.getActiveTextEditLayer();
+
+    if (!layer || this.textSelectionStart === null) {
+      return false;
+    }
+
+    this.textSelectionEnd = this.getTextIndexAtClientPoint(layer, clientX, clientY);
+    this.textCaretIndex = this.textSelectionEnd;
+
+    return true;
+  }
+
+  endTextSelection() {
+    return this.textSelectionStart !== null;
+  }
+
+  finishTextEdit() {
+    this.textEditLayerId = null;
+    this.textCaretIndex = 0;
+    this.clearTextSelection();
+  }
+
+  insertTextInput(text: string) {
+    const layer = this.getActiveTextEditLayer();
+
+    if (!layer || layer.locked || !text) {
+      return false;
+    }
+
+    const selection = this.getTextSelectionRange(layer);
+    const insertStart = selection?.start ?? this.textCaretIndex;
+    const insertEnd = selection?.end ?? this.textCaretIndex;
+
+    layer.text = layer.text.slice(0, insertStart) + text + layer.text.slice(insertEnd);
+    this.textCaretIndex = insertStart + text.length;
+    this.clearTextSelection();
+
+    return true;
+  }
+
+  deleteTextBackward() {
+    const layer = this.getActiveTextEditLayer();
+
+    if (!layer || layer.locked) {
+      return false;
+    }
+
+    const selection = this.getTextSelectionRange(layer);
+
+    if (selection) {
+      layer.text = layer.text.slice(0, selection.start) + layer.text.slice(selection.end);
+      this.textCaretIndex = selection.start;
+      this.clearTextSelection();
+      return true;
+    }
+
+    if (this.textCaretIndex <= 0) {
+      return false;
+    }
+
+    layer.text =
+      layer.text.slice(0, this.textCaretIndex - 1) + layer.text.slice(this.textCaretIndex);
+    this.textCaretIndex -= 1;
+    this.clearTextSelection();
+
+    return true;
+  }
+
+  deleteTextForward() {
+    const layer = this.getActiveTextEditLayer();
+
+    if (!layer || layer.locked) {
+      return false;
+    }
+
+    const selection = this.getTextSelectionRange(layer);
+
+    if (selection) {
+      layer.text = layer.text.slice(0, selection.start) + layer.text.slice(selection.end);
+      this.textCaretIndex = selection.start;
+      this.clearTextSelection();
+      return true;
+    }
+
+    if (this.textCaretIndex >= layer.text.length) {
+      return false;
+    }
+
+    layer.text =
+      layer.text.slice(0, this.textCaretIndex) + layer.text.slice(this.textCaretIndex + 1);
+    this.clearTextSelection();
+
+    return true;
+  }
+
+  getSelectedTextInput() {
+    const layer = this.getActiveTextEditLayer();
+
+    if (!layer) {
+      return null;
+    }
+
+    const selection = this.getTextSelectionRange(layer);
+
+    return selection ? layer.text.slice(selection.start, selection.end) : null;
+  }
+
+  selectAllTextInput() {
+    const layer = this.getActiveTextEditLayer();
+
+    if (!layer) {
+      return false;
+    }
+
+    this.textSelectionStart = 0;
+    this.textSelectionEnd = layer.text.length;
+    this.textCaretIndex = layer.text.length;
+
+    return true;
+  }
+
+  moveTextCaret(direction: "end" | "home" | "left" | "right") {
+    const layer = this.getActiveTextEditLayer();
+
+    if (!layer) {
+      return false;
+    }
+
+    if (direction === "home") {
+      this.textCaretIndex = 0;
+      this.clearTextSelection();
+      return true;
+    }
+
+    if (direction === "end") {
+      this.textCaretIndex = layer.text.length;
+      this.clearTextSelection();
+      return true;
+    }
+
+    if (direction === "left") {
+      this.textCaretIndex = Math.max(0, this.textCaretIndex - 1);
+      this.clearTextSelection();
+      return true;
+    }
+
+    this.textCaretIndex = Math.min(layer.text.length, this.textCaretIndex + 1);
+    this.clearTextSelection();
+
+    return true;
+  }
+
   async addImageFile(file: File) {
     const image = await loadImageElement(file);
     const width = image.naturalWidth || image.width;
@@ -393,10 +624,115 @@ export class EditorApp {
     this.lastCameraSnapshot = snapshot;
     this.onCameraChange?.(snapshot);
   }
+
+  addTextLayer() {
+    const layer = new TextLayer({
+      id: crypto.randomUUID(),
+      name: "Text",
+      x: -160,
+      y: -60,
+      width: 320,
+      height: 120,
+      text: "Text",
+      fontSize: 48,
+      fontFamily: "Arial",
+      color: [0.05, 0.06, 0.07, 1],
+      bold: false,
+      italic: false,
+      align: "left"
+    });
+
+    this.scene.addLayer(layer);
+
+    return layer;
+  }
+
+  private getActiveTextEditLayer() {
+    if (!this.textEditLayerId) {
+      return null;
+    }
+
+    const layer = this.scene.getLayer(this.textEditLayerId);
+
+    if (!(layer instanceof TextLayer)) {
+      this.finishTextEdit();
+      return null;
+    }
+
+    return layer;
+  }
+
+  private getTextIndexAtClientPoint(layer: TextLayer, clientX: number, clientY: number) {
+    const screenPoint = this.getCanvasPoint(clientX, clientY);
+    const worldPoint = this.camera.screenToWorld(screenPoint.x, screenPoint.y);
+    const width = layer.width * layer.scaleX;
+    const height = layer.height * layer.scaleY;
+    const centerX = layer.x + width / 2;
+    const centerY = layer.y + height / 2;
+    const radians = (-layer.rotation * Math.PI) / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    const dx = worldPoint.x - centerX;
+    const dy = worldPoint.y - centerY;
+    const localX = (dx * cos - dy * sin + width / 2) / Math.max(1e-6, layer.scaleX);
+    const localY = (dx * sin + dy * cos + height / 2) / Math.max(1e-6, layer.scaleY);
+    const boxes = layer.lastTextCharacterBoxes;
+
+    if (boxes.length === 0) {
+      return layer.text.length;
+    }
+
+    let nearestIndex = layer.text.length;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+
+    for (const box of boxes) {
+      const centerY = box.y + box.height / 2;
+      const lineDistance = Math.abs(localY - centerY);
+      const xIndex = localX < box.x + box.width / 2 ? box.index : box.index + 1;
+      const xDistance =
+        localX < box.x
+          ? box.x - localX
+          : localX > box.x + box.width
+            ? localX - (box.x + box.width)
+            : 0;
+      const distance = lineDistance * 4 + xDistance;
+
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestIndex = xIndex;
+      }
+    }
+
+    return Math.max(0, Math.min(layer.text.length, nearestIndex));
+  }
+
+  private clearTextSelection() {
+    this.textSelectionStart = null;
+    this.textSelectionEnd = null;
+  }
+
+  private getTextSelectionRange(layer: TextLayer) {
+    if (this.textSelectionStart === null || this.textSelectionEnd === null) {
+      return null;
+    }
+
+    const start = Math.max(0, Math.min(layer.text.length, this.textSelectionStart));
+    const end = Math.max(0, Math.min(layer.text.length, this.textSelectionEnd));
+
+    if (start === end) {
+      return null;
+    }
+
+    return {
+      end: Math.max(start, end),
+      start: Math.min(start, end)
+    };
+  }
+
 }
 
 function shouldShowSelectionOutline(tool: string) {
-  return tool === "Move";
+  return tool === "Move" || tool === "Text";
 }
 
 function getExportRenderBackground(

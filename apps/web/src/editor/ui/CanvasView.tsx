@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import type {
   ImageExportBackground,
   ImageExportFormat,
@@ -88,6 +89,7 @@ export function CanvasView({
   const { canvasCursor, pointerHandlers } = useCanvasPointerInput({
     editorAppRef,
     onLayersChange,
+    onTextToolPointerDown: handleTextToolPointerDown,
     selectedTool
   });
   const { rememberActiveScene } = useEditorDocumentTabs({
@@ -126,6 +128,73 @@ export function CanvasView({
     selectedTool,
     setWebglError
   });
+
+  function handleTextToolPointerDown(event: ReactPointerEvent<HTMLCanvasElement>) {
+    if (event.button !== 0 || !editorAppRef.current) {
+      return false;
+    }
+
+    editorAppRef.current.startTextEditAtClientPoint(event.clientX, event.clientY);
+    onLayersChange(editorAppRef.current.getLayerSummaries());
+
+    return true;
+  }
+
+  async function handleTextKeyDown(event: ReactKeyboardEvent<HTMLCanvasElement>) {
+    if (selectedTool !== "Text" || !editorAppRef.current) {
+      return;
+    }
+
+    let didEdit = false;
+    const isShortcut = event.ctrlKey || event.metaKey;
+    const shortcutKey = event.key.toLowerCase();
+
+    if (isShortcut && (shortcutKey === "a" || shortcutKey === "c" || shortcutKey === "v")) {
+      event.preventDefault();
+    }
+
+    if (isShortcut && shortcutKey === "a") {
+      didEdit = editorAppRef.current.selectAllTextInput();
+    } else if (isShortcut && shortcutKey === "c") {
+      const selectedText = editorAppRef.current.getSelectedTextInput();
+
+      if (selectedText !== null) {
+        await writeClipboardText(selectedText);
+        didEdit = true;
+      }
+    } else if (isShortcut && shortcutKey === "v") {
+      const pastedText = await readClipboardText();
+
+      if (pastedText) {
+        didEdit = editorAppRef.current.insertTextInput(pastedText);
+      }
+    } else if (event.key === "Escape") {
+      editorAppRef.current.finishTextEdit();
+      didEdit = true;
+    } else if (event.key === "Backspace") {
+      didEdit = editorAppRef.current.deleteTextBackward();
+    } else if (event.key === "Delete") {
+      didEdit = editorAppRef.current.deleteTextForward();
+    } else if (event.key === "ArrowLeft") {
+      didEdit = editorAppRef.current.moveTextCaret("left");
+    } else if (event.key === "ArrowRight") {
+      didEdit = editorAppRef.current.moveTextCaret("right");
+    } else if (event.key === "Home") {
+      didEdit = editorAppRef.current.moveTextCaret("home");
+    } else if (event.key === "End") {
+      didEdit = editorAppRef.current.moveTextCaret("end");
+    } else if (event.key === "Enter") {
+      didEdit = editorAppRef.current.insertTextInput("\n");
+    } else if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.length === 1) {
+      didEdit = editorAppRef.current.insertTextInput(event.key);
+    }
+
+    if (!didEdit) {
+      return;
+    }
+
+    onLayersChange(editorAppRef.current.getLayerSummaries());
+  }
 
   useEffect(() => {
     if (!imageExportRequest || !editorAppRef.current) {
@@ -195,6 +264,8 @@ export function CanvasView({
               ref={canvasRef}
               aria-label="WebGL editor canvas"
               className={`webgl-canvas${selectedTool === "Pan" ? " is-pan-tool" : ""}`}
+              onKeyDown={handleTextKeyDown}
+              tabIndex={0}
               style={{ cursor: getCanvasCursorStyle(canvasCursor) }}
               {...pointerHandlers}
             />
@@ -216,6 +287,22 @@ function downloadBlob(blob: Blob, filename: string) {
   anchor.download = filename;
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+async function readClipboardText() {
+  try {
+    return await navigator.clipboard.readText();
+  } catch {
+    return "";
+  }
+}
+
+async function writeClipboardText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Some browsers block clipboard writes outside secure contexts.
+  }
 }
 
 function getImageExportFilename(title: string, format: ImageExportFormat) {

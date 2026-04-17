@@ -5,6 +5,7 @@ export class TextureManager {
   private readonly maskTextureRevisions = new Map<string, number>();
   private readonly textures = new Map<string, WebGLTexture>();
 
+
   constructor(private readonly gl: WebGLRenderingContext) {}
 
   getTexture(layer: ImageLayer) {

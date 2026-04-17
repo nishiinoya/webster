@@ -1,7 +1,7 @@
 import { LayerMask } from "../masks/LayerMask";
 import type { SerializedLayerMask } from "../masks/LayerMask";
 
-export type LayerType = "shape" | "image";
+export type LayerType = "shape" | "image" | "text";
 
 export type SerializedLayerBase = {
   height: number;
@@ -21,7 +21,10 @@ export type SerializedLayerBase = {
 };
 
 export type SerializedShapeLayer = SerializedLayerBase & {
-  color: [number, number, number, number];
+  fillColor: [number, number, number, number];
+  shape: "rectangle" | "ellipse" | "line";
+  strokeColor:[number, number, number, number];
+  strokeWidth: number;
   type: "shape";
 };
 
@@ -32,7 +35,18 @@ export type SerializedImageLayer = SerializedLayerBase & {
   type: "image";
 };
 
-export type SerializedLayer = SerializedShapeLayer | SerializedImageLayer;
+export type SerializedTextLayer = SerializedLayerBase & {
+  align: "left" | "center" | "right";
+  bold: boolean;
+  color: [number, number, number, number];
+  fontFamily: string;
+  fontSize: number;
+  italic: boolean;
+  text: string;
+  type: "text";
+};
+
+export type SerializedLayer = SerializedShapeLayer | SerializedImageLayer | SerializedTextLayer;
 
 export type LayerOptions = {
   id: string;
@@ -87,10 +101,16 @@ export abstract class Layer {
   static async fromJSON(data: SerializedLayer, assets = new Map<string, Blob>()) {
     if (data.type === "shape") {
       const { ShapeLayer } = await import("./ShapeLayer");
+      const legacyShapeData = data as SerializedShapeLayer & {
+        color?: [number, number, number, number];
+      };
 
       return new ShapeLayer({
         ...getLayerOptions(data),
-        color: data.color
+        fillColor: data.fillColor ?? legacyShapeData.color,
+        shape: data.shape ?? "rectangle",
+        strokeColor: data.strokeColor ?? [0.07, 0.08, 0.09, 1],
+        strokeWidth: data.strokeWidth ?? 0
       });
     }
 
@@ -111,6 +131,21 @@ export abstract class Layer {
         mimeType: data.mimeType,
         image,
         objectUrl
+      });
+    }
+
+    if (data.type === "text") {
+      const { TextLayer } = await import("./TextLayer");
+      
+      return new TextLayer({
+        ...getLayerOptions(data),
+        align: data.align,
+        bold: data.bold,
+        color: data.color,
+        fontFamily: data.fontFamily,
+        fontSize: data.fontSize,
+        italic: data.italic,
+        text: data.text
       });
     }
 

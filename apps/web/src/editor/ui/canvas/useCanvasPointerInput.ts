@@ -10,15 +10,18 @@ import type { LayerSummary } from "../../app/EditorApp";
 type UseCanvasPointerInputOptions = {
   editorAppRef: MutableRefObject<EditorApp | null>;
   onLayersChange: (layers: LayerSummary[]) => void;
+  onTextToolPointerDown?: (event: ReactPointerEvent<HTMLCanvasElement>) => boolean;
   selectedTool: string;
 };
 
 export function useCanvasPointerInput({
   editorAppRef,
   onLayersChange,
+  onTextToolPointerDown,
   selectedTool
 }: UseCanvasPointerInputOptions) {
   const panStateRef = useRef<{ x: number; y: number } | null>(null);
+  const textSelectionPointerIdRef = useRef<number | null>(null);
   const [canvasCursor, setCanvasCursor] = useState("default");
 
   function startPan(clientX: number, clientY: number) {
@@ -71,6 +74,20 @@ export function useCanvasPointerInput({
           return;
         }
 
+        if (selectedTool === "Text") {
+          event.preventDefault();
+          event.currentTarget.focus();
+          if (editorAppRef.current?.startTextSelectionAtClientPoint(event.clientX, event.clientY)) {
+            textSelectionPointerIdRef.current = event.pointerId;
+            event.currentTarget.setPointerCapture(event.pointerId);
+            onLayersChange(editorAppRef.current.getLayerSummaries());
+            updateCanvasCursor(event.clientX, event.clientY);
+          } else if (onTextToolPointerDown?.(event)) {
+            updateCanvasCursor(event.clientX, event.clientY);
+          }
+          return;
+        }
+
         if (isCanvasInputTool(selectedTool)) {
           const didHandleInput = editorAppRef.current?.pointerDown({
             button: event.button,
@@ -88,6 +105,19 @@ export function useCanvasPointerInput({
       onPointerLeave: () => setCanvasCursor("default"),
       onPointerMove: (event: ReactPointerEvent<HTMLCanvasElement>) => {
         panTo(event.clientX, event.clientY);
+
+        if (selectedTool === "Text" && textSelectionPointerIdRef.current === event.pointerId) {
+          event.preventDefault();
+
+          if (
+            editorAppRef.current?.updateTextSelectionAtClientPoint(event.clientX, event.clientY)
+          ) {
+            onLayersChange(editorAppRef.current.getLayerSummaries());
+          }
+
+          updateCanvasCursor(event.clientX, event.clientY);
+          return;
+        }
 
         const didHandleInput = editorAppRef.current?.pointerMove({
           button: event.button,
@@ -107,6 +137,11 @@ export function useCanvasPointerInput({
         }
 
         stopPan();
+
+        if (textSelectionPointerIdRef.current === event.pointerId) {
+          textSelectionPointerIdRef.current = null;
+          editorAppRef.current?.endTextSelection();
+        }
 
         if (editorAppRef.current?.pointerUp()) {
           onLayersChange(editorAppRef.current.getLayerSummaries());
