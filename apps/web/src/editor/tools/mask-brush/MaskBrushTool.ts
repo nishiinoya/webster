@@ -59,15 +59,21 @@ export class MaskBrushTool {
     if (!layer || layer.locked) {
       return false;
     }
-
+const TEXT_MASK_SCALE = 4;
     if (!layer.mask) {
-      const textMaskFrame = layer instanceof TextLayer ? getCurrentTextMaskFrame(layer) : null;
+  const textMaskFrame = layer instanceof TextLayer ? getCurrentTextMaskFrame(layer) : null;
 
-      layer.mask = new LayerMask({
-        height: textMaskFrame?.height ?? layer.height,
-        width: textMaskFrame?.width ?? layer.width
-      });
-    }
+  layer.mask = new LayerMask({
+    height: Math.max(
+      1,
+      Math.ceil((textMaskFrame?.height ?? layer.height) * (layer instanceof TextLayer ? TEXT_MASK_SCALE : 1))
+    ),
+    width: Math.max(
+      1,
+      Math.ceil((textMaskFrame?.width ?? layer.width) * (layer instanceof TextLayer ? TEXT_MASK_SCALE : 1))
+    )
+  });
+}
 
     const mask = layer.mask;
 

@@ -56,11 +56,16 @@ export class TextureManager {
     }
 
     this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+
+    // for raw Uint8Array mask uploads
+    this.gl.pixelStorei(this.gl.UNPACK_ALIGNMENT, 1);
     this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, true);
+
     this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
     this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
     this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR);
     this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.LINEAR);
+
     this.gl.texImage2D(
       this.gl.TEXTURE_2D,
       0,
