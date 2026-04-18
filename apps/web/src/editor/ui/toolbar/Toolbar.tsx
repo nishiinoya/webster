@@ -7,6 +7,7 @@ import type { WebsterFileHandle } from "../../projects/projectFiles";
 import type { SaveStatus } from "../hooks/useProjectFileActions";
 import type { MaskBrushOptions } from "../../tools/mask-brush/MaskBrushTypes";
 import type { SelectionCommand } from "../../app/EditorApp";
+import { cn } from "../classNames";
 
 type ToolbarProps = {
   canEditDocument: boolean;
@@ -77,22 +78,35 @@ export function Toolbar({
   }
 
   return (
-    <header className="editor-toolbar" aria-label="Top toolbar">
-      <div className="toolbar-brand">
-        <span className="toolbar-mark" aria-hidden="true">
+    <header
+      className="grid grid-cols-[minmax(180px,auto)_minmax(0,1fr)_auto] items-center gap-[18px] border-b border-[#2a2d31] bg-[#17191d] px-4 py-2.5 max-[980px]:grid-cols-[minmax(160px,auto)_minmax(0,1fr)] max-[760px]:min-h-[118px] max-[760px]:grid-cols-1"
+      aria-label="Top toolbar"
+    >
+      <div className="flex min-w-0 items-center gap-3">
+        <span
+          className="grid h-9 w-9 flex-none place-items-center rounded-lg border border-[#4aa391] bg-[#276f63] font-extrabold text-white"
+          aria-hidden="true"
+        >
           W
         </span>
         <div>
-          <p className="toolbar-kicker">Webster</p>
-          <h1>{documentTitle}</h1>
+          <p className="m-0 mb-0.5 text-[11px] font-bold uppercase tracking-normal text-[#8b929b]">
+            Webster
+          </p>
+          <h1 className="m-0 truncate text-[17px] font-bold tracking-normal text-[#f2f4f7]">
+            {documentTitle}
+          </h1>
         </div>
       </div>
-      <nav className="toolbar-actions" aria-label="Editor menus">
-        <details className="toolbar-menu" ref={fileMenuRef}>
-          <summary className="toolbar-button">File</summary>
-          <div className="toolbar-menu-content" role="menu">
+      <nav
+        className="flex items-center justify-start gap-2 max-[980px]:overflow-x-auto max-[760px]:overflow-x-auto"
+        aria-label="Editor menus"
+      >
+        <details className="toolbar-menu relative" ref={fileMenuRef}>
+          <summary className={toolbarButtonClass}>File</summary>
+          <div className={toolbarMenuClass} role="menu">
             <button
-              className="toolbar-menu-item"
+              className={toolbarMenuItemClass}
               onClick={() => {
                 fileMenuRef.current?.removeAttribute("open");
                 onNewDocument();
@@ -101,11 +115,11 @@ export function Toolbar({
             >
               New
             </button>
-            <button className="toolbar-menu-item" onClick={openProjectPicker} type="button">
+            <button className={toolbarMenuItemClass} onClick={openProjectPicker} type="button">
               Open .webster...
             </button>
             <button
-              className="toolbar-menu-item"
+              className={toolbarMenuItemClass}
               disabled={!canEditDocument}
               onClick={openImagePicker}
               type="button"
@@ -113,7 +127,7 @@ export function Toolbar({
               Import image as layer...
             </button>
             <button
-              className="toolbar-menu-item"
+              className={toolbarMenuItemClass}
               disabled={!canEditDocument}
               onClick={() => {
                 fileMenuRef.current?.removeAttribute("open");
@@ -124,7 +138,7 @@ export function Toolbar({
               Save
             </button>
             <button
-              className="toolbar-menu-item"
+              className={toolbarMenuItemClass}
               disabled={!canEditDocument}
               onClick={() => {
                 fileMenuRef.current?.removeAttribute("open");
@@ -135,7 +149,7 @@ export function Toolbar({
               Save as .webster...
             </button>
             <button
-              className="toolbar-menu-item"
+              className={toolbarMenuItemClass}
               disabled={!canEditDocument}
               onClick={() => {
                 fileMenuRef.current?.removeAttribute("open");
@@ -148,15 +162,15 @@ export function Toolbar({
           </div>
         </details>
         {toolbarActions.map((action) => (
-          <button className="toolbar-button" key={action} type="button">
+          <button className={toolbarButtonClass} key={action} type="button">
             {action}
           </button>
         ))}
-        <details className="toolbar-menu">
-          <summary className="toolbar-button">Select</summary>
-          <div className="toolbar-menu-content" role="menu">
+        <details className="toolbar-menu relative">
+          <summary className={toolbarButtonClass}>Select</summary>
+          <div className={toolbarMenuClass} role="menu">
             <button
-              className="toolbar-menu-item"
+              className={toolbarMenuItemClass}
               disabled={!canEditDocument}
               onClick={() => onSelectionCommand("clear")}
               type="button"
@@ -164,7 +178,7 @@ export function Toolbar({
               Clear selection
             </button>
             <button
-              className="toolbar-menu-item"
+              className={toolbarMenuItemClass}
               disabled={!canEditDocument}
               onClick={() => onSelectionCommand("invert")}
               type="button"
@@ -172,7 +186,7 @@ export function Toolbar({
               Invert selection
             </button>
             <button
-              className="toolbar-menu-item"
+              className={toolbarMenuItemClass}
               disabled={!canEditDocument}
               onClick={() => onSelectionCommand("convert-to-mask")}
               type="button"
@@ -182,10 +196,11 @@ export function Toolbar({
           </div>
         </details>
         {selectedTool === "Mask Brush" ? (
-          <div className="mask-brush-toolbar" aria-label="Mask brush options">
-            <label>
+          <div className="flex items-center gap-2 pl-1.5" aria-label="Mask brush options">
+            <label className="flex items-center gap-[5px] text-xs font-bold text-[#c9cdd2]">
               Size
               <input
+                className={maskBrushInputClass}
                 min="1"
                 max="256"
                 onChange={(event) =>
@@ -195,9 +210,10 @@ export function Toolbar({
                 value={maskBrushOptions.size}
               />
             </label>
-            <label>
+            <label className="flex items-center gap-[5px] text-xs font-bold text-[#c9cdd2]">
               Opacity
               <input
+                className={maskBrushInputClass}
                 min="1"
                 max="100"
                 onChange={(event) =>
@@ -207,9 +223,10 @@ export function Toolbar({
                 value={Math.round(maskBrushOptions.opacity * 100)}
               />
             </label>
-            <label>
+            <label className="flex items-center gap-[5px] text-xs font-bold text-[#c9cdd2]">
               Mode
               <select
+                className={cn(maskBrushInputClass, "w-[122px]")}
                 onChange={(event) =>
                   onMaskBrushOptionsChange({
                     mode: event.target.value === "hide" ? "hide" : "reveal"
@@ -226,7 +243,7 @@ export function Toolbar({
         <input
           ref={fileInputRef}
           accept="image/*"
-          className="visually-hidden"
+          className="absolute h-px w-px overflow-hidden whitespace-nowrap [clip:rect(0_0_0_0)]"
           onChange={(event) => {
             const file = event.target.files?.[0];
 
@@ -240,7 +257,7 @@ export function Toolbar({
         <input
           ref={projectInputRef}
           accept=".webster,application/zip,application/vnd.webster.project"
-          className="visually-hidden"
+          className="absolute h-px w-px overflow-hidden whitespace-nowrap [clip:rect(0_0_0_0)]"
           onChange={(event) => {
             const file = event.target.files?.[0];
 
@@ -252,14 +269,31 @@ export function Toolbar({
           type="file"
         />
       </nav>
-      <div className="toolbar-status" aria-label="Current editor status">
-        {saveStatus !== "idle" ? <span>{getSaveStatusLabel(saveStatus)}</span> : null}
-        <span>{selectedTool}</span>
-        <span>{zoomPercentage}%</span>
+      <div
+        className="flex items-center justify-end gap-2 text-[13px] text-[#c9cdd2] max-[980px]:hidden"
+        aria-label="Current editor status"
+      >
+        {saveStatus !== "idle" ? <span className={statusPillClass}>{getSaveStatusLabel(saveStatus)}</span> : null}
+        <span className={statusPillClass}>{selectedTool}</span>
+        <span className={statusPillClass}>{zoomPercentage}%</span>
       </div>
     </header>
   );
 }
+
+const toolbarButtonClass =
+  "block cursor-default list-none rounded-lg border border-transparent bg-transparent px-2.5 py-2 text-[13px] text-[#d9dde3] hover:border-[#4c535c] hover:bg-[#252930] focus-visible:border-[#4c535c] focus-visible:bg-[#252930] [&::-webkit-details-marker]:hidden [.toolbar-menu[open]_&]:border-[#4c535c] [.toolbar-menu[open]_&]:bg-[#252930]";
+
+const toolbarMenuClass =
+  "absolute left-0 top-[calc(100%+6px)] z-10 grid w-[220px] rounded-lg border border-[#33373d] bg-[#17191d] p-1.5 shadow-[0_18px_34px_rgba(0,0,0,0.35)]";
+
+const toolbarMenuItemClass =
+  "w-full rounded-lg border border-transparent bg-transparent px-2.5 py-2 text-left text-[13px] text-[#eef1f4] hover:border-[#4c535c] hover:bg-[#252930] focus-visible:border-[#4c535c] focus-visible:bg-[#252930] disabled:cursor-not-allowed disabled:text-[#6f7680] disabled:hover:border-transparent disabled:hover:bg-transparent";
+
+const maskBrushInputClass =
+  "w-[74px] rounded-md border border-[#33373d] bg-[#101113] px-[7px] py-1.5 text-[#eef1f4] font-[inherit]";
+
+const statusPillClass = "rounded-lg border border-[#33373d] bg-[#22252a] px-2.5 py-[7px]";
 
 function getSaveStatusLabel(status: SaveStatus) {
   if (status === "saving") {

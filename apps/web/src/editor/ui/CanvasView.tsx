@@ -20,6 +20,7 @@ import type { SaveStatus } from "./hooks/useProjectFileActions";
 import type { WebsterFileHandle } from "../projects/projectFiles";
 import type { EditorDocumentTab } from "./editorDocuments";
 import type { MaskBrushOptions } from "../tools/mask-brush/MaskBrushTypes";
+import { cn } from "./classNames";
 
 type CanvasViewProps = {
   activeDocument: EditorDocumentTab;
@@ -254,25 +255,45 @@ export function CanvasView({
   ]);
 
   return (
-    <section className="canvas-view" aria-label="Main canvas">
-      <div className="canvas-ruler canvas-ruler-horizontal" aria-hidden="true" />
-      <div className="canvas-ruler canvas-ruler-vertical" aria-hidden="true" />
-      <div className="canvas-stage">
-        <div className="canvas-placeholder">
-          <div className="canvas-frame">
+    <section
+      className="relative min-h-0 min-w-0 overflow-hidden bg-[#101113] bg-[length:32px_32px]"
+      aria-label="Main canvas"
+    >
+      <div
+        className="absolute left-7 right-0 top-0 z-[1] h-7 border-b border-[#2a2d31] bg-[#17191d]"
+        aria-hidden="true"
+      />
+      <div
+        className="absolute bottom-0 left-0 top-0 z-[1] w-7 border-r border-[#2a2d31] bg-[#17191d]"
+        aria-hidden="true"
+      />
+      <div className="relative grid min-h-full p-0">
+        <div className="relative min-h-0 min-w-0">
+          <div className="absolute inset-0 grid overflow-hidden bg-transparent">
             <canvas
               ref={canvasRef}
               aria-label="WebGL editor canvas"
-              className={`webgl-canvas${selectedTool === "Pan" ? " is-pan-tool" : ""}`}
+              className={cn(
+                "block h-full w-full touch-none cursor-crosshair",
+                selectedTool === "Pan" && "cursor-grab"
+              )}
               onKeyDown={handleTextKeyDown}
               tabIndex={0}
               style={{ cursor: getCanvasCursorStyle(canvasCursor) }}
               {...pointerHandlers}
             />
-            {webglError ? <p className="canvas-error">{webglError}</p> : null}
+            {webglError ? (
+              <p className="absolute inset-4 m-0 grid place-items-center rounded-lg border border-[#b96a6a] bg-[rgba(28,20,20,0.94)] text-center text-[13px] font-bold text-[#ffd0d0]">
+                {webglError}
+              </p>
+            ) : null}
           </div>
-          <p className="canvas-label">{activeDocument.title}</p>
-          <p className="canvas-meta">Workspace - {selectedTool} tool selected</p>
+          <p className="pointer-events-none absolute left-1/2 top-12 z-[2] m-0 -translate-x-1/2 rounded-lg border border-white/10 bg-[rgba(23,25,29,0.9)] px-3 py-2 text-[13px] font-bold text-[#eef1f4]">
+            {activeDocument.title}
+          </p>
+          <p className="pointer-events-none absolute bottom-[18px] right-[18px] z-[2] m-0 rounded-lg border border-white/10 bg-[rgba(23,25,29,0.9)] px-3 py-2 text-[13px] font-semibold text-[#eef1f4]">
+            Workspace - {selectedTool} tool selected
+          </p>
         </div>
       </div>
     </section>

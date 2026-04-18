@@ -283,7 +283,7 @@ This section maps the expected demo requirements to current project status.
 | Modify user profile | Planned | No user profile system yet. |
 | Project templates | Partial | Built-in document presets exist. User templates are planned. |
 | Create new project | Present | New document dialog exists. |
-| Add/work with text | Planned | Text tool/layers are not implemented. |
+| Add/work with text | Present | Text tool/layers are not implemented. |
 | Free drawing/pencil | Planned | General drawing tool is not implemented. |
 | Shape elements | Partial | Basic shape layer exists; more shapes and insertion UI are planned. |
 | Add pictures as elements | Present | Import image as layer works. |

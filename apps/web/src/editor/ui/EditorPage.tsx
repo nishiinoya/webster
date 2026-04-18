@@ -22,8 +22,8 @@ import {
 import type { RecentProjectHandle } from "../projects/projectFileHandleStore";
 import type { SaveStatus } from "./hooks/useProjectFileActions";
 import { CanvasView } from "./CanvasView";
+import { cn } from "./classNames";
 import type { EditorDocumentTab, NewDocumentSize } from "./editorDocuments";
-import "./EditorPage.css";
 import { HistoryPanel } from "./panels/HistoryPanel";
 import { LayersPanel } from "./panels/LayersPanel";
 import { ExportImageDialog } from "./dialogs/ExportImageDialog";
@@ -101,6 +101,9 @@ const layersPanelMinHeight = 170;
 const propertiesPanelMinHeight = 260;
 const historyPanelMinHeight = 72;
 const sidePanelHandleHeight = 12;
+const collapsedSidePanelHeight = 42;
+
+type SidePanelId = "history" | "layers" | "properties";
 
 type EditorLayoutVars = CSSProperties & {
   "--tools-panel-width": string;
@@ -168,6 +171,11 @@ export function EditorPage() {
   const [rightPanelWidth, setRightPanelWidth] = useState(420);
   const [layersPanelHeight, setLayersPanelHeight] = useState(280);
   const [propertiesPanelHeight, setPropertiesPanelHeight] = useState(360);
+  const [collapsedSidePanels, setCollapsedSidePanels] = useState<Record<SidePanelId, boolean>>({
+    history: false,
+    layers: false,
+    properties: false
+  });
 
   const layoutStyle: EditorLayoutVars = {
     "--tools-panel-width": `${toolsPanelWidth}px`,
@@ -373,8 +381,8 @@ export function EditorPage() {
     return Math.max(
       layersPanelMinHeight,
       getSidePanelHeight() -
-        propertiesPanelHeight -
-        historyPanelMinHeight -
+        getPanelHeightForResize("properties", propertiesPanelHeight, propertiesPanelMinHeight) -
+        getPanelHeightForResize("history", historyPanelMinHeight, historyPanelMinHeight) -
         sidePanelHandleHeight
     );
   }
@@ -382,8 +390,22 @@ export function EditorPage() {
   function getMaxPropertiesPanelHeight() {
     return Math.max(
       propertiesPanelMinHeight,
-      getSidePanelHeight() - layersPanelHeight - historyPanelMinHeight - sidePanelHandleHeight
+      getSidePanelHeight() -
+        getPanelHeightForResize("layers", layersPanelHeight, layersPanelMinHeight) -
+        getPanelHeightForResize("history", historyPanelMinHeight, historyPanelMinHeight) -
+        sidePanelHandleHeight
     );
+  }
+
+  function getPanelHeightForResize(id: SidePanelId, height: number, minHeight: number) {
+    return collapsedSidePanels[id] ? collapsedSidePanelHeight : Math.max(height, minHeight);
+  }
+
+  function toggleSidePanelCollapsed(id: SidePanelId) {
+    setCollapsedSidePanels((currentPanels) => ({
+      ...currentPanels,
+      [id]: !currentPanels[id]
+    }));
   }
 
   function startResize(onMove: (moveEvent: PointerEvent) => void) {
@@ -452,7 +474,7 @@ export function EditorPage() {
   }
 
   return (
-    <main className="editor-page">
+    <main className="grid h-screen min-h-0 grid-rows-[64px_1fr] overflow-hidden bg-[#101113] text-[13px] text-[#e7e9ec] min-[1400px]:text-[14px] max-[760px]:h-[100svh] max-[760px]:grid-rows-[118px_1fr]">
       <Toolbar
         canEditDocument={Boolean(activeDocument)}
         documentTitle={activeDocument?.title ?? "No document"}
@@ -475,7 +497,13 @@ export function EditorPage() {
         zoomPercentage={zoomPercentage}
       />
       <section
-        className={`editor-shell${activeDocument ? " has-document" : " has-no-document"}`}
+        className={cn(
+          "grid min-h-0 transition-[grid-template-columns] duration-[220ms] ease-in-out",
+          activeDocument ? "has-document" : "has-no-document",
+          activeDocument
+            ? "grid-cols-[var(--tools-panel-width)_6px_minmax(360px,1fr)_6px_var(--right-panel-width)] max-[980px]:grid-cols-[minmax(150px,var(--tools-panel-width))_6px_minmax(300px,1fr)_6px_minmax(280px,var(--right-panel-width))] max-[760px]:grid-cols-[68px_6px_minmax(0,1fr)] max-[760px]:grid-rows-[minmax(0,1fr)_220px]"
+            : "grid-cols-[0_0_minmax(360px,1fr)_0_0] max-[980px]:grid-cols-[0_0_minmax(300px,1fr)_0_0] max-[760px]:grid-cols-[0_0_minmax(0,1fr)_0_0]"
+        )}
         style={layoutStyle}
         aria-label="Editor workspace"
       >
@@ -484,13 +512,18 @@ export function EditorPage() {
           selectedTool={selectedTool}
           tools={editorTools}
         />
-        <button
+        <ResizeHandle
           aria-label="Resize tools panel"
-          className="resize-handle resize-handle-vertical"
+          hidden={!activeDocument}
           onPointerDown={startToolsResize}
-          type="button"
+          orientation="vertical"
         />
-        <div className="editor-center">
+        <div
+          className={cn(
+            "grid min-h-0 min-w-0 transition-[grid-template-rows] duration-[220ms] ease-in-out",
+            activeDocument ? "grid-rows-[42px_1fr]" : "grid-rows-[0_1fr]"
+          )}
+        >
           <TabsBar
             onCloseTab={closeDocumentTab}
             onRenameTab={renameDocumentTab}
@@ -538,58 +571,80 @@ export function EditorPage() {
               uploadRequest={uploadRequest}
             />
           ) : (
-            <section className="empty-workspace" aria-label="No open documents">
-              <div className="empty-workspace-content">
-                <p className="empty-workspace-kicker">No open documents</p>
-                <h2>Start a Webster project</h2>
-                <div className="empty-workspace-actions">
-                  <button onClick={openProjectPickerFromEmptyState} type="button">
+            <section
+              className="grid min-h-0 min-w-0 place-items-center bg-[#101113] p-7"
+              aria-label="No open documents"
+            >
+              <div className="grid w-[min(680px,100%)] justify-items-center gap-[18px] text-center">
+                <p className="m-0 text-xs font-extrabold uppercase tracking-normal text-[#8b929b]">
+                  No open documents
+                </p>
+                <h2 className="m-0 text-[34px] font-bold leading-[1.12] text-[#f2f4f7]">
+                  Start a Webster project
+                </h2>
+                <div className="flex flex-wrap justify-center gap-2.5">
+                  <button
+                    className="min-w-40 rounded-lg border border-[#4aa391] bg-[#203731] px-[18px] py-3.5 font-extrabold text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]"
+                    onClick={openProjectPickerFromEmptyState}
+                    type="button"
+                  >
                     Open...
                   </button>
-                  <button onClick={() => setIsNewDocumentDialogOpen(true)} type="button">
+                  <button
+                    className="min-w-40 rounded-lg border border-[#333941] bg-[#202329] px-[18px] py-3.5 font-extrabold text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]"
+                    onClick={() => setIsNewDocumentDialogOpen(true)}
+                    type="button"
+                  >
                     New...
                   </button>
                 </div>
                 {recentProjectError ? (
-                  <p className="empty-workspace-error">{recentProjectError}</p>
+                  <p className="m-0 text-[13px] font-bold text-[#ffb9b9]">{recentProjectError}</p>
                 ) : null}
-                <div className="empty-workspace-presets" aria-label="Create new presets">
+                <div className="grid w-[min(540px,100%)] gap-2" aria-label="Create new presets">
                   {documentPresets.map((preset) => (
                     <button
+                      className="flex min-h-[52px] items-center justify-between gap-4 rounded-lg border border-[#333941] bg-[#202329] px-3 py-2.5 text-left font-extrabold text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]"
                       key={preset.label}
                       onClick={() => createDocumentTab(preset)}
                       type="button"
                     >
-                      <span>{preset.label}</span>
-                      <strong>
+                      <span className="truncate">{preset.label}</span>
+                      <strong className="whitespace-nowrap text-xs text-[#9aa1ab]">
                         {preset.width} x {preset.height}
                       </strong>
                     </button>
                   ))}
                 </div>
-                <div className="empty-workspace-recent" aria-label="Previous projects">
-                  <h3>Previous projects</h3>
+                <div
+                  className="mt-0.5 grid w-[min(540px,100%)] gap-2 text-left"
+                  aria-label="Previous projects"
+                >
+                  <h3 className="m-0 text-[13px] font-bold text-[#d9dde3]">Previous projects</h3>
                   {recentProjects.length > 0 ? (
-                    <div className="empty-workspace-recent-list">
+                    <div className="grid gap-2">
                       {recentProjects.map((project) => (
                         <button
+                          className="flex min-h-[52px] w-full items-center justify-between gap-4 rounded-lg border border-[#30353d] bg-[#17191d] px-3 py-2.5 text-left font-bold text-[#eef1f4]"
                           key={project.id}
                           onClick={() => openProjectHandle(project.handle)}
                           type="button"
                         >
-                          <span>{project.filename}</span>
-                          <strong>{formatRecentProjectDate(project.savedAt)}</strong>
+                          <span className="truncate">{project.filename}</span>
+                          <strong className="whitespace-nowrap text-xs text-[#9aa1ab]">
+                            {formatRecentProjectDate(project.savedAt)}
+                          </strong>
                         </button>
                       ))}
                     </div>
                   ) : (
-                    <p>No previous projects yet.</p>
+                    <p className="m-0 text-[13px] text-[#8b929b]">No previous projects yet.</p>
                   )}
                 </div>
                 <input
                   ref={emptyProjectInputRef}
                   accept=".webster,application/zip,application/vnd.webster.project"
-                  className="visually-hidden"
+                  className="absolute h-px w-px overflow-hidden whitespace-nowrap [clip:rect(0_0_0_0)]"
                   onChange={(event) => {
                     const file = event.target.files?.[0];
 
@@ -604,36 +659,79 @@ export function EditorPage() {
             </section>
           )}
         </div>
-        <button
+        <ResizeHandle
           aria-label="Resize side panels"
-          className="resize-handle resize-handle-vertical"
+          className="max-[760px]:hidden"
+          hidden={!activeDocument}
           onPointerDown={startRightPanelResize}
-          type="button"
+          orientation="vertical"
         />
-        <aside className="editor-side-panels" aria-label="Editor panels" ref={sidePanelsRef}>
-          <LayersPanel
-            layers={layers}
-            onLayerCommand={runLayerCommand}
-            onSelectLayer={(layerId) => setSelectLayerRequest({ id: Date.now(), layerId })}
-          />
-          <button
+        <aside
+          className={cn(
+            "flex min-h-0 flex-col overflow-x-hidden overflow-y-auto bg-[#17191d] opacity-100 overscroll-contain transition-[opacity,transform] duration-[220ms] ease-in-out max-[760px]:col-[1/-1] max-[760px]:row-start-2 max-[760px]:grid max-[760px]:grid-cols-3 max-[760px]:grid-rows-[220px] max-[760px]:overflow-x-auto max-[760px]:overflow-y-hidden max-[760px]:border-t max-[760px]:border-[#2a2d31]",
+            activeDocument
+              ? ""
+              : "pointer-events-none translate-x-3 opacity-0 max-[760px]:col-start-5 max-[760px]:row-start-1"
+          )}
+          aria-label="Editor panels"
+          ref={sidePanelsRef}
+        >
+          <div
+            className={cn(
+              "flex-none overflow-hidden max-[760px]:min-h-0",
+              collapsedSidePanels.layers ? "h-[42px]" : "h-[var(--layers-panel-height)]"
+            )}
+          >
+            <LayersPanel
+              isCollapsed={collapsedSidePanels.layers}
+              layers={layers}
+              onLayerCommand={runLayerCommand}
+              onSelectLayer={(layerId) => setSelectLayerRequest({ id: Date.now(), layerId })}
+              onToggleCollapsed={() => toggleSidePanelCollapsed("layers")}
+            />
+          </div>
+          <ResizeHandle
             aria-label="Resize layers panel"
-            className="resize-handle resize-handle-horizontal"
+            className="flex-none max-[760px]:hidden"
+            hidden={collapsedSidePanels.layers}
             onPointerDown={startLayersResize}
-            type="button"
+            orientation="horizontal"
           />
-          <PropertiesPanel
-            onLayerCommand={runLayerCommand}
-            selectedLayer={selectedLayer}
-            selectedTool={selectedTool}
-          />
-          <button
+          <div
+            className={cn(
+              "flex-none overflow-hidden max-[760px]:min-h-0",
+              collapsedSidePanels.properties
+                ? "h-[42px]"
+                : "h-[var(--properties-panel-height)]"
+            )}
+          >
+            <PropertiesPanel
+              isCollapsed={collapsedSidePanels.properties}
+              onLayerCommand={runLayerCommand}
+              onToggleCollapsed={() => toggleSidePanelCollapsed("properties")}
+              selectedLayer={selectedLayer}
+              selectedTool={selectedTool}
+            />
+          </div>
+          <ResizeHandle
             aria-label="Resize properties panel"
-            className="resize-handle resize-handle-horizontal"
+            className="flex-none max-[760px]:hidden"
+            hidden={collapsedSidePanels.properties}
             onPointerDown={startPropertiesResize}
-            type="button"
+            orientation="horizontal"
           />
-          <HistoryPanel entries={mockHistory} />
+          <div
+            className={cn(
+              "flex-none overflow-hidden",
+              collapsedSidePanels.history ? "h-[42px]" : ""
+            )}
+          >
+            <HistoryPanel
+              entries={mockHistory}
+              isCollapsed={collapsedSidePanels.history}
+              onToggleCollapsed={() => toggleSidePanelCollapsed("history")}
+            />
+          </div>
         </aside>
       </section>
       {isNewDocumentDialogOpen ? (
@@ -677,4 +775,42 @@ function getProjectFilename(title: string) {
   const safeTitle = (title.trim() || "untitled").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-");
 
   return safeTitle.toLowerCase().endsWith(".webster") ? safeTitle : `${safeTitle}.webster`;
+}
+
+function ResizeHandle({
+  className,
+  hidden,
+  onPointerDown,
+  orientation,
+  ...buttonProps
+}: {
+  "aria-label": string;
+  className?: string;
+  hidden?: boolean;
+  onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  orientation: "horizontal" | "vertical";
+}) {
+  return (
+    <button
+      className={cn(
+        "group relative z-[3] border-0 bg-[#2a2d31] p-0 opacity-100 transition-[background,opacity] duration-150 hover:bg-[#39404a] focus-visible:bg-[#39404a] [.is-resizing-editor_&]:bg-[#39404a]",
+        hidden && "pointer-events-none opacity-0",
+        orientation === "vertical" ? "w-1.5 cursor-col-resize" : "h-1.5 cursor-row-resize",
+        className
+      )}
+      onPointerDown={onPointerDown}
+      type="button"
+      {...buttonProps}
+    >
+      <span
+        className={cn(
+          "absolute rounded-full bg-[#777f8a] opacity-0 transition-opacity duration-150 group-hover:opacity-100",
+          orientation === "vertical"
+            ? "left-0.5 top-1/2 h-9 w-0.5 -translate-y-1/2"
+            : "left-1/2 top-0.5 h-0.5 w-[42px] -translate-x-1/2"
+        )}
+        aria-hidden="true"
+      />
+    </button>
+  );
 }
