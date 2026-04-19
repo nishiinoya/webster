@@ -5,7 +5,7 @@ import type { DrawingToolOptions } from "../tools/drawing/DrawingTool";
 import type { ToolPointerEvent } from "../tools/move/MoveTool";
 import { Camera2D } from "../geometry/Camera2D";
 import { Scene } from "../scene/Scene";
-import type { LayerMaskAction } from "../scene/Scene";
+import type { DocumentResizeAnchor, LayerMaskAction } from "../scene/Scene";
 import { exportScenePackage, importScenePackage } from "../projects/ProjectPackage";
 import { ImageLayer } from "../layers/ImageLayer";
 import { TextLayer } from "../layers/TextLayer";
@@ -21,6 +21,25 @@ export type CameraSnapshot = {
 export type LayerSummary = ReturnType<Scene["getLayerSummaries"]>[number];
 
 export type LayerUpdate = Parameters<Scene["updateLayer"]>[1];
+
+export type DocumentCommand = {
+  anchor?: DocumentResizeAnchor;
+  height: number;
+  type: "resize";
+  width: number;
+};
+
+export type ImageLayerCommand =
+  | {
+      height: number;
+      layerId: string;
+      type: "resample";
+      width: number;
+    }
+  | {
+      layerId: string;
+      type: "restore-original";
+    };
 
 export type LayerCommand =
   | { type: "add-adjustment" }
@@ -48,6 +67,7 @@ export class EditorApp {
   private activeDocumentId: string | null = null;
   private lastCameraSnapshot: CameraSnapshot | null = null;
   private selectedTool = "Move";
+  private showCanvasBorder = true;
   private textEditLayerId: string | null = null;
   private textCaretIndex = 0;
   private textSelectionEnd: number | null = null;
@@ -85,6 +105,7 @@ export class EditorApp {
 
       this.renderer.render(this.scene, this.camera, {
         ...editorRenderOptions,
+        showCanvasBorder: this.showCanvasBorder,
         showSelectionOutline: shouldShowSelectionOutline(this.selectedTool),
         textEdit: this.textEditLayerId
           ? {
@@ -148,6 +169,15 @@ export class EditorApp {
     return this.scene;
   }
 
+  getDocumentSnapshot() {
+    return {
+      height: this.scene.document.height,
+      width: this.scene.document.width,
+      x: this.scene.document.x,
+      y: this.scene.document.y
+    };
+  }
+
   createDocument(width: number, height: number) {
     this.replaceScene(
       new Scene({
@@ -158,6 +188,38 @@ export class EditorApp {
     );
 
     return this.scene;
+  }
+
+  async createImageDocument(file: File) {
+    const image = await loadImageElement(file);
+    const width = image.naturalWidth || image.width;
+    const height = image.naturalHeight || image.height;
+    const scene = new Scene({
+      createDefaultLayer: false,
+      documentHeight: height,
+      documentWidth: width
+    });
+
+    scene.addLayer(
+      new ImageLayer({
+        assetId: crypto.randomUUID(),
+        id: crypto.randomUUID(),
+        image,
+        mimeType: file.type || "image/png",
+        name: getImageLayerName(file),
+        objectUrl: image.src,
+        x: scene.document.x,
+        y: scene.document.y,
+        width,
+        height
+      })
+    );
+
+    this.replaceScene(scene);
+    this.camera.fitBounds(scene.document);
+    this.notifyCameraChange();
+
+    return scene;
   }
 
   replaceScene(nextScene: Scene, options: { disposeCurrent?: boolean } = {}) {
@@ -286,6 +348,10 @@ export class EditorApp {
     }
   }
 
+  setShowCanvasBorder(showCanvasBorder: boolean) {
+    this.showCanvasBorder = showCanvasBorder;
+  }
+
   setMaskBrushOptions(options: Partial<MaskBrushOptions>) {
     this.inputController.setMaskBrushOptions(options);
   }
@@ -321,6 +387,25 @@ export class EditorApp {
       case "update":
         return this.scene.updateLayer(command.layerId, command.updates);
     }
+  }
+
+  applyDocumentCommand(command: DocumentCommand) {
+    if (command.type === "resize") {
+      const document = this.scene.resizeDocument(command.width, command.height, command.anchor);
+
+      this.camera.setBounds(document);
+      this.notifyCameraChange();
+
+      return document;
+    }
+  }
+
+  async applyImageLayerCommand(command: ImageLayerCommand) {
+    if (command.type === "resample") {
+      return this.resampleImageLayer(command.layerId, command.width, command.height);
+    }
+
+    return this.restoreOriginalImageLayer(command.layerId);
   }
 
   applySelectionCommand(command: SelectionCommand) {
@@ -597,7 +682,7 @@ export class EditorApp {
     const layer = new ImageLayer({
       assetId: crypto.randomUUID(),
       id: crypto.randomUUID(),
-      name: file.name || "Image",
+      name: getImageLayerName(file),
       image,
       mimeType: file.type || "image/png",
       objectUrl: image.src,
@@ -610,6 +695,74 @@ export class EditorApp {
     });
 
     this.scene.addLayer(layer);
+
+    return layer;
+  }
+
+  private async resampleImageLayer(layerId: string, width: number, height: number) {
+    const layer = this.scene.getLayer(layerId);
+
+    if (!(layer instanceof ImageLayer) || layer.locked) {
+      return null;
+    }
+
+    const currentPixelWidth = layer.image.naturalWidth || layer.image.width;
+    const currentPixelHeight = layer.image.naturalHeight || layer.image.height;
+    const nextPixelWidth = clampImagePixels(width);
+    const nextPixelHeight = clampImagePixels(height);
+
+    if (nextPixelWidth === currentPixelWidth && nextPixelHeight === currentPixelHeight) {
+      return layer;
+    }
+
+    const visibleWidth = layer.width * layer.scaleX;
+    const visibleHeight = layer.height * layer.scaleY;
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      throw new Error("Unable to resample image layer.");
+    }
+
+    canvas.width = nextPixelWidth;
+    canvas.height = nextPixelHeight;
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality =
+      nextPixelWidth * nextPixelHeight >= currentPixelWidth * currentPixelHeight
+        ? "high"
+        : "medium";
+    context.drawImage(layer.image, 0, 0, nextPixelWidth, nextPixelHeight);
+
+    const blob = await canvasToBlob(canvas, getSerializableImageMimeType(layer.mimeType), 0.92);
+    const image = await loadImageElementFromBlob(blob);
+
+    layer.replaceImage(image, image.src, {
+      assetId: crypto.randomUUID(),
+      mimeType: blob.type || getSerializableImageMimeType(layer.mimeType)
+    });
+    layer.width = nextPixelWidth;
+    layer.height = nextPixelHeight;
+    layer.scaleX = visibleWidth / nextPixelWidth;
+    layer.scaleY = visibleHeight / nextPixelHeight;
+
+    return layer;
+  }
+
+  private restoreOriginalImageLayer(layerId: string) {
+    const layer = this.scene.getLayer(layerId);
+
+    if (!(layer instanceof ImageLayer) || layer.locked) {
+      return null;
+    }
+
+    const originalPixelWidth = layer.originalImage.naturalWidth || layer.originalImage.width;
+    const originalPixelHeight = layer.originalImage.naturalHeight || layer.originalImage.height;
+
+    layer.restoreOriginalImage();
+    layer.width = originalPixelWidth;
+    layer.height = originalPixelHeight;
+    layer.scaleX = 1;
+    layer.scaleY = 1;
 
     return layer;
   }
@@ -760,6 +913,22 @@ function getExportRenderBackground(
   return background;
 }
 
+function getImageLayerName(file: File) {
+  return file.name.replace(/\.[^.]+$/u, "") || "Image";
+}
+
+function clampImagePixels(value: number) {
+  if (!Number.isFinite(value)) {
+    return 1;
+  }
+
+  return Math.min(Math.max(Math.round(value), 1), 12000);
+}
+
+function getSerializableImageMimeType(mimeType: string) {
+  return mimeType === "image/jpeg" || mimeType === "image/webp" ? mimeType : "image/png";
+}
+
 async function loadImageElement(file: File) {
   const objectUrl = URL.createObjectURL(file);
   const image = new Image();
@@ -776,6 +945,12 @@ async function loadImageElement(file: File) {
   }
 
   return image;
+}
+
+async function loadImageElementFromBlob(blob: Blob) {
+  const file = new File([blob], "resampled-image", { type: blob.type || "image/png" });
+
+  return loadImageElement(file);
 }
 
 function canvasToBlob(canvas: HTMLCanvasElement, mimeType: string, quality?: number) {

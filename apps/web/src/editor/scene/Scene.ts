@@ -121,6 +121,23 @@ export class Scene {
     );
   }
 
+  resizeDocument(width: number, height: number, anchor: DocumentResizeAnchor = "center") {
+    const nextWidth = clampDocumentSize(width);
+    const nextHeight = clampDocumentSize(height);
+    const currentWidth = this.document.width;
+    const currentHeight = this.document.height;
+    const deltaWidth = nextWidth - currentWidth;
+    const deltaHeight = nextHeight - currentHeight;
+    const offset = getDocumentResizeOffset(deltaWidth, deltaHeight, anchor);
+
+    this.document.x += offset.x;
+    this.document.y += offset.y;
+    this.document.width = nextWidth;
+    this.document.height = nextHeight;
+
+    return this.document;
+  }
+
   removeLayer(layerId: string) {
     const layerIndex = this.layers.findIndex((layer) => layer.id === layerId);
 
@@ -473,8 +490,14 @@ function cloneLayer(layer: Layer) {
   if (layer instanceof ImageLayer) {
     return new ImageLayer({
       ...options,
+      assetId: layer.assetId,
       image: layer.image,
-      objectUrl: ""
+      mimeType: layer.mimeType,
+      objectUrl: "",
+      originalAssetId: layer.originalAssetId,
+      originalImage: layer.originalImage,
+      originalMimeType: layer.originalMimeType,
+      originalObjectUrl: ""
     });
   }
 
@@ -593,6 +616,44 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
+export type DocumentResizeAnchor =
+  | "bottom"
+  | "bottom-left"
+  | "bottom-right"
+  | "center"
+  | "left"
+  | "right"
+  | "top"
+  | "top-left"
+  | "top-right";
+
+function clampDocumentSize(value: number) {
+  if (!Number.isFinite(value)) {
+    return 800;
+  }
+
+  return Math.min(Math.max(Math.round(value), 1), 12000);
+}
+
+function getDocumentResizeOffset(
+  deltaWidth: number,
+  deltaHeight: number,
+  anchor: DocumentResizeAnchor
+) {
+  const horizontal = anchor.includes("left")
+    ? 0
+    : anchor.includes("right")
+      ? -deltaWidth
+      : -deltaWidth / 2;
+  const vertical = anchor.includes("bottom")
+    ? 0
+    : anchor.includes("top")
+      ? -deltaHeight
+      : -deltaHeight / 2;
+
+  return { x: horizontal, y: vertical };
+}
+
 function normalizeRotation(rotation: number) {
   return ((rotation % 360) + 360) % 360;
 }
@@ -645,6 +706,17 @@ function getLayerSummary(layer: Layer, selectedLayerId: string | null) {
       color: layer.color,
       strokeStyle: layer.strokeStyle,
       strokeWidth: layer.strokeWidth
+    };
+  }
+
+  if (layer instanceof ImageLayer) {
+    return {
+      ...baseSummary,
+      canRestoreOriginalPixels: layer.hasWorkingImageChanges,
+      imagePixelHeight: layer.image.naturalHeight || layer.image.height,
+      imagePixelWidth: layer.image.naturalWidth || layer.image.width,
+      originalImagePixelHeight: layer.originalImage.naturalHeight || layer.originalImage.height,
+      originalImagePixelWidth: layer.originalImage.naturalWidth || layer.originalImage.width
     };
   }
 

@@ -3,7 +3,9 @@ import { TextLayer } from "../layers/TextLayer";
 import { getTextMaskFrame } from "../rendering/text/BitmapText";
 import { LayerMask } from "./LayerMask";
 
-const MASK_RESOLUTION_SCALE = 4;
+const MASK_RESOLUTION_SCALE = 2;
+const MAX_MASK_EDGE = 4096;
+const MAX_MASK_PIXELS = 12_000_000;
 
 export function ensureLayerMaskResolution(layer: Layer) {
   const preferredSize = getPreferredLayerMaskSize(layer);
@@ -13,14 +15,14 @@ export function ensureLayerMaskResolution(layer: Layer) {
     return layer.mask;
   }
 
-  if (layer.mask.width >= preferredSize.width && layer.mask.height >= preferredSize.height) {
+  if (layer.mask.width === preferredSize.width && layer.mask.height === preferredSize.height) {
     return layer.mask;
   }
 
   layer.mask = resizeMask(
     layer.mask,
-    Math.max(layer.mask.width, preferredSize.width),
-    Math.max(layer.mask.height, preferredSize.height)
+    preferredSize.width,
+    preferredSize.height
   );
 
   return layer.mask;
@@ -29,9 +31,15 @@ export function ensureLayerMaskResolution(layer: Layer) {
 export function getPreferredLayerMaskSize(layer: Layer) {
   const frame = layer instanceof TextLayer ? layer.lastTextMaskFrame ?? getTextMaskFrame(layer) : layer;
 
+  const rawWidth = Math.max(1, Math.ceil(frame.width * MASK_RESOLUTION_SCALE));
+  const rawHeight = Math.max(1, Math.ceil(frame.height * MASK_RESOLUTION_SCALE));
+  const edgeScale = Math.min(1, MAX_MASK_EDGE / Math.max(rawWidth, rawHeight));
+  const pixelScale = Math.min(1, Math.sqrt(MAX_MASK_PIXELS / Math.max(1, rawWidth * rawHeight)));
+  const scale = Math.min(edgeScale, pixelScale);
+
   return {
-    height: Math.max(1, Math.ceil(frame.height * MASK_RESOLUTION_SCALE)),
-    width: Math.max(1, Math.ceil(frame.width * MASK_RESOLUTION_SCALE))
+    height: Math.max(1, Math.round(rawHeight * scale)),
+    width: Math.max(1, Math.round(rawWidth * scale))
   };
 }
 

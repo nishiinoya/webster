@@ -159,7 +159,7 @@ export class SelectionManager {
     }
 
     mask.enabled = true;
-    mask.revision += 1;
+    mask.markDirty();
 
     return true;
   }

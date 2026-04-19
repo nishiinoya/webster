@@ -54,6 +54,19 @@ export class Camera2D {
     this.updateProjectionMatrix();
   }
 
+  fitBounds(bounds: CameraBounds, padding = 96) {
+    const availableWidth = Math.max(1, this.viewportWidth - padding * 2);
+    const availableHeight = Math.max(1, this.viewportHeight - padding * 2);
+    const zoomX = availableWidth / Math.max(1, bounds.width);
+    const zoomY = availableHeight / Math.max(1, bounds.height);
+
+    this.x = bounds.x + bounds.width / 2;
+    this.y = bounds.y + bounds.height / 2;
+    this.zoom = Math.min(Math.max(Math.min(zoomX, zoomY), 0.05), 100);
+    this.clampToBounds();
+    this.updateProjectionMatrix();
+  }
+
   screenToWorld(x: number, y: number) {
     return {
       x: (x - this.viewportWidth / 2) / this.zoom + this.x,

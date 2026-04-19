@@ -17,6 +17,13 @@ export async function exportScenePackage(scene: Scene) {
 
       entries.push(await blobEntry(layerJson.assetPath, await layer.toAssetBlob()));
       addedAssets.add(layerJson.assetPath);
+
+      if (layerJson.originalAssetPath && !addedAssets.has(layerJson.originalAssetPath)) {
+        entries.push(
+          await blobEntry(layerJson.originalAssetPath, await layer.toOriginalAssetBlob())
+        );
+        addedAssets.add(layerJson.originalAssetPath);
+      }
     }
   }
 
@@ -35,6 +42,15 @@ export async function importScenePackage(file: Blob) {
       if (blob) {
         assets.set(asset.assetPath, blob);
         assets.set(asset.assetId, blob);
+      }
+
+      if (asset.originalAssetPath) {
+        const originalBlob = entries.get(asset.originalAssetPath);
+
+        if (originalBlob) {
+          assets.set(asset.originalAssetPath, originalBlob);
+          assets.set(asset.originalAssetId ?? asset.originalAssetPath, originalBlob);
+        }
       }
     }
   }

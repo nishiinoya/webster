@@ -6,6 +6,13 @@ export type SerializedLayerMask = {
   width: number;
 };
 
+export type MaskDirtyRect = {
+  height: number;
+  width: number;
+  x: number;
+  y: number;
+};
+
 export class LayerMask {
   readonly id: string;
   readonly data: Uint8Array;
@@ -13,6 +20,7 @@ export class LayerMask {
   readonly height: number;
   enabled: boolean;
   revision = 0;
+  private dirtyRect: MaskDirtyRect | null = null;
 
   constructor(options: {
     data?: Uint8Array;
@@ -40,7 +48,7 @@ export class LayerMask {
 
   clear(value: 0 | 255) {
     this.data.fill(value);
-    this.revision += 1;
+    this.markDirty();
   }
 
   clone() {
@@ -57,7 +65,32 @@ export class LayerMask {
       this.data[index] = 255 - this.data[index];
     }
 
+    this.markDirty();
+  }
+
+  markDirty(rect?: MaskDirtyRect) {
     this.revision += 1;
+
+    if (!rect) {
+      this.dirtyRect = { height: this.height, width: this.width, x: 0, y: 0 };
+      return;
+    }
+
+    const nextRect = clampDirtyRect(rect, this.width, this.height);
+
+    if (!nextRect) {
+      return;
+    }
+
+    this.dirtyRect = this.dirtyRect ? unionDirtyRects(this.dirtyRect, nextRect) : nextRect;
+  }
+
+  takeDirtyRect() {
+    const rect = this.dirtyRect;
+
+    this.dirtyRect = null;
+
+    return rect;
   }
 
   toJSON(): SerializedLayerMask {
@@ -69,6 +102,38 @@ export class LayerMask {
       width: this.width
     };
   }
+}
+
+function clampDirtyRect(rect: MaskDirtyRect, maskWidth: number, maskHeight: number) {
+  const left = Math.max(0, Math.floor(rect.x));
+  const top = Math.max(0, Math.floor(rect.y));
+  const right = Math.min(maskWidth, Math.ceil(rect.x + rect.width));
+  const bottom = Math.min(maskHeight, Math.ceil(rect.y + rect.height));
+
+  if (right <= left || bottom <= top) {
+    return null;
+  }
+
+  return {
+    height: bottom - top,
+    width: right - left,
+    x: left,
+    y: top
+  };
+}
+
+function unionDirtyRects(a: MaskDirtyRect, b: MaskDirtyRect) {
+  const left = Math.min(a.x, b.x);
+  const top = Math.min(a.y, b.y);
+  const right = Math.max(a.x + a.width, b.x + b.width);
+  const bottom = Math.max(a.y + a.height, b.y + b.height);
+
+  return {
+    height: bottom - top,
+    width: right - left,
+    x: left,
+    y: top
+  };
 }
 
 function encodeMaskData(data: Uint8Array) {

@@ -1,5 +1,6 @@
 import { Layer } from "../../layers/Layer";
 import { LayerMask } from "../../masks/LayerMask";
+import type { MaskDirtyRect } from "../../masks/LayerMask";
 import type { MaskBrushOptions } from "./MaskBrushTypes";
 
 export type MaskBrushPaintOptions = MaskBrushOptions;
@@ -47,6 +48,7 @@ export function paintMaskEllipse(
   const target = options.mode === "reveal" ? 255 : 0;
   const opacity = clamp(options.opacity, 0, 1);
   const edgeSoftness = 0.18;
+  let dirtyRect: MaskDirtyRect | null = null;
 
   for (let y = minY; y <= maxY; y += 1) {
     for (let x = minX; x <= maxX; x += 1) {
@@ -66,12 +68,38 @@ export function paintMaskEllipse(
       const amount = opacity * falloff;
       const pixelIndex = y * mask.width + x;
       const current = mask.data[pixelIndex];
+      const next = Math.round(current + (target - current) * amount);
 
-      mask.data[pixelIndex] = Math.round(current + (target - current) * amount);
+      if (next === current) {
+        continue;
+      }
+
+      mask.data[pixelIndex] = next;
+      dirtyRect = expandDirtyRect(dirtyRect, x, y);
     }
   }
+
+  return dirtyRect;
 }
 
 export function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
+}
+
+function expandDirtyRect(rect: MaskDirtyRect | null, x: number, y: number): MaskDirtyRect {
+  if (!rect) {
+    return { height: 1, width: 1, x, y };
+  }
+
+  const left = Math.min(rect.x, x);
+  const top = Math.min(rect.y, y);
+  const right = Math.max(rect.x + rect.width, x + 1);
+  const bottom = Math.max(rect.y + rect.height, y + 1);
+
+  return {
+    height: bottom - top,
+    width: right - left,
+    x: left,
+    y: top
+  };
 }

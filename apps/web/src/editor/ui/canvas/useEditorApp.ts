@@ -11,6 +11,7 @@ type UseEditorAppOptions = {
   onZoomChange: (zoomPercentage: number) => void;
   maskBrushOptions: MaskBrushOptions;
   selectedTool: string;
+  showCanvasBorder: boolean;
   selectedShape: ShapeKind;
   selectedStrokeColor: [number, number, number, number];
   selectedStrokeMode: "draw" | "erase";
@@ -26,6 +27,7 @@ export function useEditorApp({
   onLayersChange,
   onZoomChange,
   selectedShape,
+  showCanvasBorder,
   selectedStrokeColor,
   selectedStrokeMode,
   selectedStrokeStyle,
@@ -51,6 +53,10 @@ export function useEditorApp({
     selectedToolRef.current = selectedTool;
     editorAppRef.current?.setSelectedTool(selectedTool);
   }, [selectedTool]);
+
+  useEffect(() => {
+    editorAppRef.current?.setShowCanvasBorder(showCanvasBorder);
+  }, [showCanvasBorder]);
 
   useEffect(() => {
     selectedShapeRef.current = selectedShape;
@@ -105,6 +111,7 @@ export function useEditorApp({
 
           editorAppRef.current = editorApp;
           editorApp.setSelectedTool(selectedToolRef.current);
+          editorApp.setShowCanvasBorder(showCanvasBorder);
           editorApp.setShapeToolKind(selectedShapeRef.current);
           editorApp.setDrawingToolOptions({
             color: selectedStrokeColorRef.current,

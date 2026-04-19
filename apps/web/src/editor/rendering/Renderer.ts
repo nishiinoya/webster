@@ -49,6 +49,7 @@ export type RendererShaderSources = {
 
 export type RenderOptions = {
   documentBackground: "checkerboard" | "transparent" | "white";
+  showCanvasBorder: boolean;
   showSelectionOverlay: boolean;
   showSelectionOutline: boolean;
   textEdit?: {
@@ -94,6 +95,7 @@ type RenderTarget = {
 
 export const editorRenderOptions: RenderOptions = {
   documentBackground: "checkerboard",
+  showCanvasBorder: true,
   showSelectionOverlay: true,
   showSelectionOutline: true,
   textEdit: null
@@ -101,6 +103,7 @@ export const editorRenderOptions: RenderOptions = {
 
 export const imageExportRenderOptions: RenderOptions = {
   documentBackground: "transparent",
+  showCanvasBorder: false,
   showSelectionOverlay: false,
   showSelectionOutline: false,
   textEdit: null
@@ -346,6 +349,10 @@ export class Renderer {
   private drawEditorOverlays(scene: Scene, camera: Camera2D, options: RenderOptions) {
     const selectedLayer = scene.selectedLayerId ? scene.getLayer(scene.selectedLayerId) : null;
 
+    if (options.showCanvasBorder) {
+      this.drawCanvasBorder(scene, camera);
+    }
+
     if (options.showSelectionOutline && selectedLayer?.visible && selectedLayer.opacity > 0) {
       this.drawSelectionOutline(selectedLayer, camera);
     }
@@ -355,6 +362,44 @@ export class Renderer {
     if (options.showSelectionOverlay && selection) {
       this.selectionOverlayRenderer.render(selection, camera, scene.document);
     }
+  }
+
+  private drawCanvasBorder(scene: Scene, camera: Camera2D) {
+    const document = scene.document;
+    const left = document.x;
+    const right = document.x + document.width;
+    const bottom = document.y;
+    const top = document.y + document.height;
+    const glowWidth = Math.max(8 / camera.zoom, 1.4);
+    const midWidth = Math.max(4 / camera.zoom, 0.9);
+    const crispWidth = Math.max(1.5 / camera.zoom, 0.5);
+
+    this.solidColorShaderProgram.use();
+    this.solidColorShaderProgram.setProjection(camera.projectionMatrix);
+    this.solidColorShaderProgram.setFilters(defaultLayerFilters);
+    this.solidColorShaderProgram.setAdjustmentFilters([]);
+
+    this.solidColorShaderProgram.setColor([0.22, 1, 0.82, 0.1]);
+    this.drawDocumentBorderLines(left, right, bottom, top, glowWidth);
+
+    this.solidColorShaderProgram.setColor([0.3, 0.95, 0.82, 0.24]);
+    this.drawDocumentBorderLines(left, right, bottom, top, midWidth);
+
+    this.solidColorShaderProgram.setColor([0.64, 1, 0.9, 0.86]);
+    this.drawDocumentBorderLines(left, right, bottom, top, crispWidth);
+  }
+
+  private drawDocumentBorderLines(
+    left: number,
+    right: number,
+    bottom: number,
+    top: number,
+    width: number
+  ) {
+    this.drawLine({ x: left, y: bottom }, { x: right, y: bottom }, width);
+    this.drawLine({ x: right, y: bottom }, { x: right, y: top }, width);
+    this.drawLine({ x: right, y: top }, { x: left, y: top }, width);
+    this.drawLine({ x: left, y: top }, { x: left, y: bottom }, width);
   }
 
   private renderArtworkWithPostProcess(

@@ -1,5 +1,5 @@
-import type { MouseEvent as ReactMouseEvent } from "react";
-import { useRef } from "react";
+import type { MouseEvent as ReactMouseEvent, SyntheticEvent } from "react";
+import { useEffect, useRef } from "react";
 import {
   canPickProjectFileHandle,
   pickProjectFileWithHandle
@@ -14,15 +14,21 @@ import { cn } from "../classNames";
 
 type ToolbarProps = {
   canEditDocument: boolean;
+  canvasSize: { height: number; width: number } | null;
   documentTitle: string;
   onNewDocument: () => void;
+  onOpenCanvasResize: () => void;
+  onOpenImageDocument: (file: File) => void;
   onOpenExportDialog: () => void;
+  onOpenImageResize: () => void;
   onOpenProject: (file: File, handle?: WebsterFileHandle | null) => void;
+  onRestoreImageOriginal: () => void;
   onSaveAsProject: () => void;
   onSaveProject: () => void;
   onAddAdjustmentLayer: () => void;
   onSelectionCommand: (command: SelectionCommand) => void;
   onSelectTool: (tool: string) => void;
+  onShowCanvasBorderChange: (show: boolean) => void;
   onUploadImage: (file: File) => void;
   maskBrushOptions: MaskBrushOptions;
   onMaskBrushOptionsChange: (options: Partial<MaskBrushOptions>) => void;
@@ -32,6 +38,7 @@ type ToolbarProps = {
   onStrokeTargetChange: (target: StrokeTargetSelection) => void;
   onStrokeWidthChange: (width: number) => void;
   saveStatus: SaveStatus;
+  selectedLayer: LayerSummary | null;
   selectedStrokeColor: [number, number, number, number];
   selectedStrokeMode: "draw" | "erase";
   selectedStrokeStyle: StrokeStyle;
@@ -39,6 +46,7 @@ type ToolbarProps = {
   selectedStrokeTargetMode: "layer" | "new" | "selected";
   selectedStrokeWidth: number;
   selectedTool: string;
+  showCanvasBorder: boolean;
   strokeLayers: LayerSummary[];
   zoomPercentage: number;
 };
@@ -50,15 +58,21 @@ export type StrokeTargetSelection = {
 
 export function Toolbar({
   canEditDocument,
+  canvasSize,
   documentTitle,
   onNewDocument,
+  onOpenCanvasResize,
+  onOpenImageDocument,
   onOpenExportDialog,
+  onOpenImageResize,
   onOpenProject,
+  onRestoreImageOriginal,
   onSaveAsProject,
   onSaveProject,
   onAddAdjustmentLayer,
   onSelectionCommand,
   onSelectTool,
+  onShowCanvasBorderChange,
   onUploadImage,
   maskBrushOptions,
   onMaskBrushOptionsChange,
@@ -68,6 +82,7 @@ export function Toolbar({
   onStrokeTargetChange,
   onStrokeWidthChange,
   saveStatus,
+  selectedLayer,
   selectedStrokeColor,
   selectedStrokeMode,
   selectedStrokeStyle,
@@ -75,12 +90,44 @@ export function Toolbar({
   selectedStrokeTargetMode,
   selectedStrokeWidth,
   selectedTool,
+  showCanvasBorder,
   strokeLayers,
   zoomPercentage
 }: ToolbarProps) {
+  const toolbarRef = useRef<HTMLElement | null>(null);
+  const documentImageInputRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const fileMenuRef = useRef<HTMLDetailsElement | null>(null);
   const projectInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    function closeOpenMenus(event: PointerEvent) {
+      if (!toolbarRef.current || toolbarRef.current.contains(event.target as Node)) {
+        return;
+      }
+
+      closeAllMenus(toolbarRef.current);
+    }
+
+    function closeMenusOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape" && toolbarRef.current) {
+        closeAllMenus(toolbarRef.current);
+      }
+    }
+
+    document.addEventListener("pointerdown", closeOpenMenus);
+    document.addEventListener("keydown", closeMenusOnEscape);
+
+    return () => {
+      document.removeEventListener("pointerdown", closeOpenMenus);
+      document.removeEventListener("keydown", closeMenusOnEscape);
+    };
+  }, []);
+
+  function openImageDocumentPicker() {
+    fileMenuRef.current?.removeAttribute("open");
+    documentImageInputRef.current?.click();
+  }
 
   function openImagePicker() {
     fileMenuRef.current?.removeAttribute("open");
@@ -115,10 +162,25 @@ export function Toolbar({
     event.currentTarget.closest("details")?.removeAttribute("open");
   }
 
+  function closeSiblingMenus(event: SyntheticEvent<HTMLDetailsElement>) {
+    const openedMenu = event.currentTarget;
+
+    if (!openedMenu.open || !toolbarRef.current) {
+      return;
+    }
+
+    for (const menu of toolbarRef.current.querySelectorAll("details.toolbar-menu")) {
+      if (menu !== openedMenu) {
+        menu.removeAttribute("open");
+      }
+    }
+  }
+
   return (
     <header
       className="grid grid-cols-[minmax(180px,auto)_minmax(0,1fr)_auto] items-center gap-[18px] border-b border-[#2a2d31] bg-[#17191d] px-4 py-2.5 max-[980px]:grid-cols-[minmax(160px,auto)_minmax(0,1fr)] max-[760px]:min-h-[118px] max-[760px]:grid-cols-1"
       aria-label="Top toolbar"
+      ref={toolbarRef}
     >
       <div className="flex min-w-0 items-center gap-3">
         <span
@@ -140,7 +202,7 @@ export function Toolbar({
         className="flex items-center justify-start gap-2 max-[980px]:overflow-x-auto max-[760px]:overflow-x-auto"
         aria-label="Editor menus"
       >
-        <details className="toolbar-menu relative" ref={fileMenuRef}>
+        <details className="toolbar-menu relative" onToggle={closeSiblingMenus} ref={fileMenuRef}>
           <summary className={toolbarButtonClass}>File</summary>
           <div className={toolbarMenuClass} role="menu">
             <button
@@ -155,6 +217,9 @@ export function Toolbar({
             </button>
             <button className={toolbarMenuItemClass} onClick={openProjectPicker} type="button">
               Open .webster...
+            </button>
+            <button className={toolbarMenuItemClass} onClick={openImageDocumentPicker} type="button">
+              Open image as document...
             </button>
             <button
               className={toolbarMenuItemClass}
@@ -199,7 +264,7 @@ export function Toolbar({
             </button>
           </div>
         </details>
-        <details className="toolbar-menu relative">
+        <details className="toolbar-menu relative" onToggle={closeSiblingMenus}>
           <summary className={toolbarButtonClass}>Edit</summary>
           <div className={toolbarMenuClass} role="menu">
             <button className={toolbarMenuItemClass} disabled type="button">
@@ -232,6 +297,34 @@ export function Toolbar({
             </button>
             <button
               className={toolbarMenuItemClass}
+              disabled={!isImageLayerSummary(selectedLayer) || selectedLayer.locked}
+              onClick={(event) => {
+                closeMenu(event);
+                onOpenImageResize();
+              }}
+              type="button"
+            >
+              Resize image pixels...
+              <span className={toolbarMenuHintClass}>Image</span>
+            </button>
+            <button
+              className={toolbarMenuItemClass}
+              disabled={
+                !isImageLayerSummary(selectedLayer) ||
+                selectedLayer.locked ||
+                !selectedLayer.canRestoreOriginalPixels
+              }
+              onClick={(event) => {
+                closeMenu(event);
+                onRestoreImageOriginal();
+              }}
+              type="button"
+            >
+              Revert image to original pixels
+              <span className={toolbarMenuHintClass}>Image</span>
+            </button>
+            <button
+              className={toolbarMenuItemClass}
               disabled={!canEditDocument}
               onClick={(event) => {
                 closeMenu(event);
@@ -254,9 +347,24 @@ export function Toolbar({
             </button>
           </div>
         </details>
-        <details className="toolbar-menu relative">
+        <details className="toolbar-menu relative" onToggle={closeSiblingMenus}>
           <summary className={toolbarButtonClass}>View</summary>
           <div className={toolbarMenuClass} role="menu">
+            <button className={toolbarMenuItemClass} disabled type="button">
+              Canvas: {canvasSize ? formatCanvasSize(canvasSize) : "No document"}
+            </button>
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!canEditDocument}
+              onClick={(event) => {
+                closeMenu(event);
+                onOpenCanvasResize();
+              }}
+              type="button"
+            >
+              Resize canvas...
+            </button>
+            <MenuSeparator />
             <button className={toolbarMenuItemClass} disabled type="button">
               Zoom: {zoomPercentage}%
             </button>
@@ -284,12 +392,21 @@ export function Toolbar({
             <button className={toolbarMenuItemClass} disabled type="button">
               Toggle checkerboard <span className={toolbarMenuHintClass}>TODO</span>
             </button>
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!canEditDocument}
+              onClick={() => onShowCanvasBorderChange(!showCanvasBorder)}
+              type="button"
+            >
+              Canvas glow border
+              <span className={toolbarMenuHintClass}>{showCanvasBorder ? "On" : "Off"}</span>
+            </button>
             <button className={toolbarMenuItemClass} disabled type="button">
               Rulers and guides <span className={toolbarMenuHintClass}>TODO</span>
             </button>
           </div>
         </details>
-        <details className="toolbar-menu relative">
+        <details className="toolbar-menu relative" onToggle={closeSiblingMenus}>
           <summary className={toolbarButtonClass}>Filter</summary>
           <div className={toolbarMenuClass} role="menu">
             <button
@@ -325,13 +442,16 @@ export function Toolbar({
             </button>
           </div>
         </details>
-        <details className="toolbar-menu relative">
+        <details className="toolbar-menu relative" onToggle={closeSiblingMenus}>
           <summary className={toolbarButtonClass}>Select</summary>
           <div className={toolbarMenuClass} role="menu">
             <button
               className={toolbarMenuItemClass}
               disabled={!canEditDocument}
-              onClick={() => onSelectionCommand("clear")}
+              onClick={(event) => {
+                closeMenu(event);
+                onSelectionCommand("clear");
+              }}
               type="button"
             >
               Clear selection
@@ -339,7 +459,10 @@ export function Toolbar({
             <button
               className={toolbarMenuItemClass}
               disabled={!canEditDocument}
-              onClick={() => onSelectionCommand("invert")}
+              onClick={(event) => {
+                closeMenu(event);
+                onSelectionCommand("invert");
+              }}
               type="button"
             >
               Invert selection
@@ -347,7 +470,10 @@ export function Toolbar({
             <button
               className={toolbarMenuItemClass}
               disabled={!canEditDocument}
-              onClick={() => onSelectionCommand("convert-to-mask")}
+              onClick={(event) => {
+                closeMenu(event);
+                onSelectionCommand("convert-to-mask");
+              }}
               type="button"
             >
               Convert to mask
@@ -464,6 +590,20 @@ export function Toolbar({
           </div>
         ) : null}
         <input
+          ref={documentImageInputRef}
+          accept="image/*"
+          className="absolute h-px w-px overflow-hidden whitespace-nowrap [clip:rect(0_0_0_0)]"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+
+            if (file) {
+              onOpenImageDocument(file);
+              event.target.value = "";
+            }
+          }}
+          type="file"
+        />
+        <input
           ref={fileInputRef}
           accept="image/*"
           className="absolute h-px w-px overflow-hidden whitespace-nowrap [clip:rect(0_0_0_0)]"
@@ -497,6 +637,12 @@ export function Toolbar({
         aria-label="Current editor status"
       >
         {saveStatus !== "idle" ? <span className={statusPillClass}>{getSaveStatusLabel(saveStatus)}</span> : null}
+        {isImageLayerSummary(selectedLayer) ? (
+          <span className={statusPillClass}>
+            Image {selectedLayer.imagePixelWidth} x {selectedLayer.imagePixelHeight} px
+          </span>
+        ) : null}
+        {canvasSize ? <button className={statusButtonClass} onClick={onOpenCanvasResize} type="button">{formatCanvasSize(canvasSize)}</button> : null}
         <span className={statusPillClass}>{selectedTool}</span>
         <span className={statusPillClass}>{zoomPercentage}%</span>
       </div>
@@ -565,6 +711,26 @@ function MenuSeparator() {
   return <div className="my-1 h-px bg-[#2b3037]" role="separator" />;
 }
 
+function formatCanvasSize(size: { height: number; width: number }) {
+  return `${Math.round(size.width)} x ${Math.round(size.height)} px`;
+}
+
+function isImageLayerSummary(
+  layer: LayerSummary | null
+): layer is LayerSummary & {
+  canRestoreOriginalPixels: boolean;
+  imagePixelHeight: number;
+  imagePixelWidth: number;
+} {
+  return Boolean(layer && layer.type === "image" && "imagePixelWidth" in layer);
+}
+
+function closeAllMenus(root: HTMLElement) {
+  for (const menu of root.querySelectorAll("details.toolbar-menu")) {
+    menu.removeAttribute("open");
+  }
+}
+
 const toolbarButtonClass =
   "block cursor-default list-none rounded-lg border border-transparent bg-transparent px-2.5 py-2 text-[13px] text-[#d9dde3] hover:border-[#4c535c] hover:bg-[#252930] focus-visible:border-[#4c535c] focus-visible:bg-[#252930] [&::-webkit-details-marker]:hidden [.toolbar-menu[open]_&]:border-[#4c535c] [.toolbar-menu[open]_&]:bg-[#252930]";
 
@@ -580,6 +746,9 @@ const maskBrushInputClass =
   "w-[74px] rounded-md border border-[#33373d] bg-[#101113] px-[7px] py-1.5 text-[#eef1f4] font-[inherit]";
 
 const statusPillClass = "rounded-lg border border-[#33373d] bg-[#22252a] px-2.5 py-[7px]";
+
+const statusButtonClass =
+  "rounded-lg border border-[#33373d] bg-[#22252a] px-2.5 py-[7px] text-[#c9cdd2] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]";
 
 function getSaveStatusLabel(status: SaveStatus) {
   if (status === "saving") {

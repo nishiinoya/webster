@@ -78,6 +78,9 @@ export type SerializedImageLayer = SerializedLayerBase & {
   assetId: string;
   assetPath: string;
   mimeType: string;
+  originalAssetId?: string;
+  originalAssetPath?: string;
+  originalMimeType?: string;
   type: "image";
 };
 
@@ -193,10 +196,24 @@ export abstract class Layer {
 
       const objectUrl = URL.createObjectURL(asset);
       const image = await loadImageElement(objectUrl);
+      const originalAssetPath = data.originalAssetPath ?? data.assetPath;
+      const originalAssetId = data.originalAssetId ?? data.assetId;
+      const originalAsset =
+        assets.get(originalAssetPath) ?? assets.get(originalAssetId) ?? asset;
+      const sharesOriginalAsset =
+        originalAssetPath === data.assetPath || originalAssetId === data.assetId;
+      const originalObjectUrl = sharesOriginalAsset
+        ? objectUrl
+        : URL.createObjectURL(originalAsset);
+      const originalImage = sharesOriginalAsset ? image : await loadImageElement(originalObjectUrl);
 
       return new ImageLayer({
         ...getLayerOptions(data),
         assetId: data.assetId,
+        originalAssetId,
+        originalImage,
+        originalMimeType: data.originalMimeType ?? data.mimeType,
+        originalObjectUrl,
         mimeType: data.mimeType,
         image,
         objectUrl

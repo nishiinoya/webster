@@ -3,8 +3,10 @@
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import type {
+  DocumentCommand,
   ImageExportBackground,
   ImageExportFormat,
+  ImageLayerCommand,
   LayerCommand,
   LayerSummary,
   SelectionCommand
@@ -26,10 +28,13 @@ import type { SaveStatus } from "./hooks/useProjectFileActions";
 import { CanvasView } from "./CanvasView";
 import { cn } from "./classNames";
 import type { EditorDocumentTab, NewDocumentSize } from "./editorDocuments";
+import type { ImageLayerCommandPendingState } from "./hooks/useEditorSceneRequests";
 import { HistoryPanel } from "./panels/HistoryPanel";
 import { LayersPanel } from "./panels/LayersPanel";
 import { ExportImageDialog } from "./dialogs/ExportImageDialog";
 import { NewDocumentDialog } from "./dialogs/NewDocumentDialog";
+import { ResizeCanvasDialog } from "./dialogs/ResizeCanvasDialog";
+import { ResizeImageDialog } from "./dialogs/ResizeImageDialog";
 import { PropertiesPanel } from "./panels/PropertiesPanel";
 import { TabsBar } from "./toolbar/TabsBar";
 import { Toolbar } from "./toolbar/Toolbar";
@@ -131,10 +136,12 @@ function clamp(value: number, min: number, max: number) {
 }
 
 export function EditorPage() {
+  const emptyImageInputRef = useRef<HTMLInputElement | null>(null);
   const emptyProjectInputRef = useRef<HTMLInputElement | null>(null);
   const sidePanelsRef = useRef<HTMLElement | null>(null);
   const documentCounterRef = useRef(1);
   const [selectedTool, setSelectedTool] = useState("Move");
+  const [showCanvasBorder, setShowCanvasBorder] = useState(true);
   const [selectedShape, setSelectedShape] = useState<ShapeKind>("rectangle");
   const [selectedStrokeStyle, setSelectedStrokeStyle] = useState<StrokeStyle>("pencil");
   const [selectedStrokeColor, setSelectedStrokeColor] = useState<[number, number, number, number]>(
@@ -158,16 +165,33 @@ export function EditorPage() {
   const [tabs, setTabs] = useState<EditorDocumentTab[]>(initialTabs);
   const [isExportImageDialogOpen, setIsExportImageDialogOpen] = useState(false);
   const [isNewDocumentDialogOpen, setIsNewDocumentDialogOpen] = useState(false);
+  const [isResizeCanvasDialogOpen, setIsResizeCanvasDialogOpen] = useState(false);
+  const [isResizeImageDialogOpen, setIsResizeImageDialogOpen] = useState(false);
+  const [imageLayerCommandPendingState, setImageLayerCommandPendingState] =
+    useState<ImageLayerCommandPendingState | null>(null);
   const [recentProjects, setRecentProjects] = useState<RecentProjectHandle[]>([]);
   const [recentProjectError, setRecentProjectError] = useState<string | null>(null);
   const [layers, setLayers] = useState<LayerSummary[]>(initialLayers);
   const [uploadRequest, setUploadRequest] = useState<{ file: File; id: number } | null>(null);
+  const [imageDocumentRequest, setImageDocumentRequest] = useState<{
+    file: File;
+    id: number;
+    tabId: string;
+  } | null>(null);
   const [selectLayerRequest, setSelectLayerRequest] = useState<{
     id: number;
     layerId: string;
   } | null>(null);
   const [layerCommandRequest, setLayerCommandRequest] = useState<{
     command: LayerCommand;
+    id: number;
+  } | null>(null);
+  const [imageLayerCommandRequest, setImageLayerCommandRequest] = useState<{
+    command: ImageLayerCommand;
+    id: number;
+  } | null>(null);
+  const [documentCommandRequest, setDocumentCommandRequest] = useState<{
+    command: DocumentCommand;
     id: number;
   } | null>(null);
   const [projectFileRequest, setProjectFileRequest] = useState<{
@@ -211,6 +235,7 @@ export function EditorPage() {
     "--properties-panel-height": `${propertiesPanelHeight}px`
   };
   const selectedLayer = layers.find((layer) => layer.isSelected) ?? null;
+  const selectedImageLayer = isImageLayerSummary(selectedLayer) ? selectedLayer : null;
   const activeDocument = tabs.find((tab) => tab.isActive) ?? tabs[0] ?? null;
   const strokeLayers = layers.filter((layer) => layer.type === "stroke");
 
@@ -271,6 +296,7 @@ export function EditorPage() {
       ...currentTabs.map((currentTab) => ({ ...currentTab, isActive: false })),
       tab
     ]);
+    setImageDocumentRequest(null);
     setIsNewDocumentDialogOpen(false);
   }
 
@@ -354,6 +380,36 @@ export function EditorPage() {
       tabId: tab.id
     });
     setRecentProjectError(null);
+  }
+
+  async function openImageAsNewDocument(file: File) {
+    try {
+      const dimensions = await loadImageDimensions(file);
+
+      documentCounterRef.current += 1;
+
+      const title = file.name.replace(/\.[^.]+$/u, "") || `Image ${documentCounterRef.current}`;
+      const tab: EditorDocumentTab = {
+        height: dimensions.height,
+        id: `document-${documentCounterRef.current}`,
+        isActive: true,
+        title,
+        width: dimensions.width
+      };
+
+      setTabs((currentTabs) => [
+        ...currentTabs.map((currentTab) => ({ ...currentTab, isActive: false })),
+        tab
+      ]);
+      setImageDocumentRequest({
+        file,
+        id: Date.now(),
+        tabId: tab.id
+      });
+      setRecentProjectError(null);
+    } catch {
+      setRecentProjectError("Unable to open image.");
+    }
   }
 
   async function openProjectHandle(handle: WebsterFileHandle | null) {
@@ -516,15 +572,40 @@ export function EditorPage() {
     <main className="grid h-screen min-h-0 grid-rows-[64px_1fr] overflow-hidden bg-[#101113] text-[13px] text-[#e7e9ec] min-[1400px]:text-[14px] max-[760px]:h-[100svh] max-[760px]:grid-rows-[118px_1fr]">
       <Toolbar
         canEditDocument={Boolean(activeDocument)}
+        canvasSize={
+          activeDocument
+            ? {
+                height: activeDocument.height,
+                width: activeDocument.width
+              }
+            : null
+        }
         documentTitle={activeDocument?.title ?? "No document"}
         onNewDocument={() => setIsNewDocumentDialogOpen(true)}
+        onOpenCanvasResize={() => setIsResizeCanvasDialogOpen(true)}
         onOpenExportDialog={() => setIsExportImageDialogOpen(true)}
+        onOpenImageResize={() => setIsResizeImageDialogOpen(true)}
         onOpenProject={openProjectInNewTab}
+        onOpenImageDocument={(file) => void openImageAsNewDocument(file)}
+        onRestoreImageOriginal={() => {
+          if (!selectedImageLayer) {
+            return;
+          }
+
+          setImageLayerCommandRequest({
+            command: {
+              layerId: selectedImageLayer.id,
+              type: "restore-original"
+            },
+            id: Date.now()
+          });
+        }}
         onSaveAsProject={() => setProjectSaveRequest({ id: Date.now(), mode: "save-as" })}
         onSaveProject={() => setProjectSaveRequest({ id: Date.now(), mode: "save" })}
         onAddAdjustmentLayer={() => runLayerCommand({ type: "add-adjustment" })}
         onSelectionCommand={(command) => setSelectionCommandRequest({ command, id: Date.now() })}
         onSelectTool={setSelectedTool}
+        onShowCanvasBorderChange={setShowCanvasBorder}
         onUploadImage={(file) => setUploadRequest({ file, id: Date.now() })}
         maskBrushOptions={maskBrushOptions}
         onMaskBrushOptionsChange={(options) =>
@@ -546,6 +627,7 @@ export function EditorPage() {
         }}
         onStrokeWidthChange={(width) => setSelectedStrokeWidth(Math.max(1, width || 1))}
         saveStatus={saveStatus}
+        selectedLayer={selectedLayer}
         selectedStrokeColor={selectedStrokeColor}
         selectedStrokeMode={selectedStrokeMode}
         selectedStrokeStyle={selectedStrokeStyle}
@@ -553,6 +635,7 @@ export function EditorPage() {
         selectedStrokeTargetMode={selectedStrokeTargetMode}
         selectedStrokeWidth={selectedStrokeWidth}
         selectedTool={selectedTool}
+        showCanvasBorder={showCanvasBorder}
         strokeLayers={strokeLayers}
         zoomPercentage={zoomPercentage}
       />
@@ -596,6 +679,9 @@ export function EditorPage() {
             <CanvasView
               activeDocument={activeDocument}
               closedDocumentRequest={closedDocumentRequest}
+              documentCommandRequest={documentCommandRequest}
+              imageDocumentRequest={imageDocumentRequest}
+              imageLayerCommandRequest={imageLayerCommandRequest}
               layerCommandRequest={layerCommandRequest}
               maskBrushOptions={maskBrushOptions}
               imageExportRequest={imageExportRequest}
@@ -603,6 +689,20 @@ export function EditorPage() {
               onLayerCommandRequestHandled={(requestId) =>
                 setLayerCommandRequest((request) => (request?.id === requestId ? null : request))
               }
+              onDocumentCommandRequestHandled={(requestId) =>
+                setDocumentCommandRequest((request) =>
+                  request?.id === requestId ? null : request
+                )
+              }
+              onImageDocumentRequestHandled={(requestId) =>
+                setImageDocumentRequest((request) => (request?.id === requestId ? null : request))
+              }
+              onImageLayerCommandRequestHandled={(requestId) =>
+                setImageLayerCommandRequest((request) =>
+                  request?.id === requestId ? null : request
+                )
+              }
+              onImageLayerCommandPendingChange={setImageLayerCommandPendingState}
               onProjectFileRequestHandled={(requestId) =>
                 setProjectFileRequest((request) => (request?.id === requestId ? null : request))
               }
@@ -637,6 +737,7 @@ export function EditorPage() {
               selectedStrokeTargetMode={selectedStrokeTargetMode}
               selectedStrokeWidth={selectedStrokeWidth}
               selectedTool={selectedTool}
+              showCanvasBorder={showCanvasBorder}
               uploadRequest={uploadRequest}
             />
           ) : (
@@ -658,6 +759,13 @@ export function EditorPage() {
                     type="button"
                   >
                     Open...
+                  </button>
+                  <button
+                    className="min-w-40 rounded-lg border border-[#4aa391] bg-[#203731] px-[18px] py-3.5 font-extrabold text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]"
+                    onClick={() => emptyImageInputRef.current?.click()}
+                    type="button"
+                  >
+                    Open image...
                   </button>
                   <button
                     className="min-w-40 rounded-lg border border-[#333941] bg-[#202329] px-[18px] py-3.5 font-extrabold text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]"
@@ -710,6 +818,20 @@ export function EditorPage() {
                     <p className="m-0 text-[13px] text-[#8b929b]">No previous projects yet.</p>
                   )}
                 </div>
+                <input
+                  ref={emptyImageInputRef}
+                  accept="image/*"
+                  className="absolute h-px w-px overflow-hidden whitespace-nowrap [clip:rect(0_0_0_0)]"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+
+                    if (file) {
+                      void openImageAsNewDocument(file);
+                      event.target.value = "";
+                    }
+                  }}
+                  type="file"
+                />
                 <input
                   ref={emptyProjectInputRef}
                   accept=".webster,application/zip,application/vnd.webster.project"
@@ -809,6 +931,69 @@ export function EditorPage() {
           onCreate={createDocumentTab}
         />
       ) : null}
+      {isResizeCanvasDialogOpen && activeDocument ? (
+        <ResizeCanvasDialog
+          height={activeDocument.height}
+          onClose={() => setIsResizeCanvasDialogOpen(false)}
+          onResize={({ anchor, height, width }) => {
+            setTabs((currentTabs) =>
+              currentTabs.map((tab) =>
+                tab.id === activeDocument.id
+                  ? {
+                      ...tab,
+                      height,
+                      width
+                    }
+                  : tab
+              )
+            );
+            setDocumentCommandRequest({
+              command: {
+                anchor,
+                height,
+                type: "resize",
+                width
+              },
+              id: Date.now()
+            });
+            setIsResizeCanvasDialogOpen(false);
+          }}
+          width={activeDocument.width}
+        />
+      ) : null}
+      {isResizeImageDialogOpen && selectedImageLayer ? (
+        <ResizeImageDialog
+          canRestoreOriginalPixels={selectedImageLayer.canRestoreOriginalPixels}
+          height={selectedImageLayer.imagePixelHeight}
+          layerName={selectedImageLayer.name}
+          onClose={() => setIsResizeImageDialogOpen(false)}
+          onResize={({ height, width }) => {
+            setImageLayerCommandRequest({
+              command: {
+                height,
+                layerId: selectedImageLayer.id,
+                type: "resample",
+                width
+              },
+              id: Date.now()
+            });
+            setIsResizeImageDialogOpen(false);
+          }}
+          onRestoreOriginal={() => {
+            setImageLayerCommandRequest({
+              command: {
+                layerId: selectedImageLayer.id,
+                type: "restore-original"
+              },
+              id: Date.now()
+            });
+            setIsResizeImageDialogOpen(false);
+          }}
+          originalHeight={selectedImageLayer.originalImagePixelHeight}
+          originalWidth={selectedImageLayer.originalImagePixelWidth}
+          width={selectedImageLayer.imagePixelWidth}
+        />
+      ) : null}
       {isExportImageDialogOpen ? (
         <ExportImageDialog
           onClose={() => setIsExportImageDialogOpen(false)}
@@ -823,8 +1008,45 @@ export function EditorPage() {
           }}
         />
       ) : null}
+      {imageLayerCommandPendingState ? (
+        <ImageLayerCommandOverlay state={imageLayerCommandPendingState} />
+      ) : null}
     </main>
   );
+}
+
+function ImageLayerCommandOverlay({ state }: { state: ImageLayerCommandPendingState }) {
+  return (
+    <div
+      aria-live="polite"
+      aria-modal="true"
+      className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-6"
+      role="dialog"
+    >
+      <div className="grid w-[min(360px,100%)] justify-items-center gap-3 rounded-xl border border-[#3a414a] bg-[rgba(23,25,29,0.98)] px-5 py-5 text-center shadow-[0_24px_48px_rgba(0,0,0,0.48)]">
+        <span
+          className="h-9 w-9 animate-spin rounded-full border-2 border-[#4aa391] border-t-transparent"
+          aria-hidden="true"
+        />
+        <div>
+          <p className="m-0 text-[15px] font-extrabold text-[#f2f4f7]">{state.title}</p>
+          <p className="m-0 mt-1 text-xs font-bold text-[#8b929b]">{state.message}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function isImageLayerSummary(
+  layer: LayerSummary | null
+): layer is LayerSummary & {
+  canRestoreOriginalPixels: boolean;
+  imagePixelHeight: number;
+  imagePixelWidth: number;
+  originalImagePixelHeight: number;
+  originalImagePixelWidth: number;
+} {
+  return Boolean(layer && layer.type === "image" && "imagePixelWidth" in layer);
 }
 
 function formatRecentProjectDate(savedAt: string) {
@@ -837,6 +1059,35 @@ function formatRecentProjectDate(savedAt: string) {
   return date.toLocaleDateString(undefined, {
     day: "numeric",
     month: "short"
+  });
+}
+
+function loadImageDimensions(file: File) {
+  return new Promise<{ height: number; width: number }>((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+
+    function cleanup() {
+      URL.revokeObjectURL(objectUrl);
+    }
+
+    image.onload = () => {
+      const width = image.naturalWidth || image.width;
+      const height = image.naturalHeight || image.height;
+      cleanup();
+
+      if (width > 0 && height > 0) {
+        resolve({ height, width });
+        return;
+      }
+
+      reject(new Error("Image has no dimensions."));
+    };
+    image.onerror = () => {
+      cleanup();
+      reject(new Error("Unable to load image dimensions."));
+    };
+    image.src = objectUrl;
   });
 }
 

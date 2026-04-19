@@ -3,8 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import type {
+  DocumentCommand,
   ImageExportBackground,
   ImageExportFormat,
+  ImageLayerCommand,
   LayerCommand,
   LayerSummary,
   SelectionCommand
@@ -15,6 +17,7 @@ import { useCanvasWheelZoom } from "./canvas/useCanvasWheelZoom";
 import { useEditorDocumentTabs } from "./hooks/useEditorDocumentTabs";
 import { useEditorApp } from "./canvas/useEditorApp";
 import { useEditorSceneRequests } from "./hooks/useEditorSceneRequests";
+import type { ImageLayerCommandPendingState } from "./hooks/useEditorSceneRequests";
 import { useProjectFileActions } from "./hooks/useProjectFileActions";
 import type { SaveStatus } from "./hooks/useProjectFileActions";
 import type { WebsterFileHandle } from "../projects/projectFiles";
@@ -27,15 +30,26 @@ import { cn } from "./classNames";
 type CanvasViewProps = {
   activeDocument: EditorDocumentTab;
   closedDocumentRequest: { id: number; tabId: string } | null;
+  documentCommandRequest: { command: DocumentCommand; id: number } | null;
   imageExportRequest: {
     background: ImageExportBackground;
     format: ImageExportFormat;
     id: number;
     title: string;
   } | null;
+  imageDocumentRequest: {
+    file: File;
+    id: number;
+    tabId: string;
+  } | null;
+  imageLayerCommandRequest: { command: ImageLayerCommand; id: number } | null;
   layerCommandRequest: { command: LayerCommand; id: number } | null;
   maskBrushOptions: MaskBrushOptions;
   onLayersChange: (layers: LayerSummary[]) => void;
+  onDocumentCommandRequestHandled: (requestId: number) => void;
+  onImageDocumentRequestHandled: (requestId: number) => void;
+  onImageLayerCommandRequestHandled: (requestId: number) => void;
+  onImageLayerCommandPendingChange: (state: ImageLayerCommandPendingState | null) => void;
   onLayerCommandRequestHandled: (requestId: number) => void;
   onImageExportRequestHandled: (requestId: number) => void;
   onProjectFileRequestHandled: (requestId: number) => void;
@@ -63,15 +77,23 @@ type CanvasViewProps = {
   selectedStrokeTargetMode: "layer" | "new" | "selected";
   selectedStrokeWidth: number;
   uploadRequest: { file: File; id: number } | null;
+  showCanvasBorder: boolean;
 };
 
 export function CanvasView({
   activeDocument,
   closedDocumentRequest,
+  documentCommandRequest,
   imageExportRequest,
+  imageDocumentRequest,
+  imageLayerCommandRequest,
   layerCommandRequest,
   maskBrushOptions,
   onLayersChange,
+  onDocumentCommandRequestHandled,
+  onImageDocumentRequestHandled,
+  onImageLayerCommandRequestHandled,
+  onImageLayerCommandPendingChange,
   onLayerCommandRequestHandled,
   onImageExportRequestHandled,
   onProjectFileRequestHandled,
@@ -93,7 +115,8 @@ export function CanvasView({
   selectedStrokeTargetMode,
   selectedStrokeWidth,
   selectedTool,
-  uploadRequest
+  uploadRequest,
+  showCanvasBorder
 }: CanvasViewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [fps, setFps] = useState(0);
@@ -103,6 +126,7 @@ export function CanvasView({
     onLayersChange,
     onZoomChange,
     selectedShape,
+    showCanvasBorder,
     selectedStrokeColor,
     selectedStrokeMode,
     selectedStrokeStyle,
@@ -128,10 +152,17 @@ export function CanvasView({
 
   useCanvasWheelZoom({ canvasRef, editorAppRef });
   useEditorSceneRequests({
+    activeDocumentId: activeDocument.id,
     editorAppRef,
+    imageDocumentRequest,
+    imageLayerCommandRequest,
     layerCommandRequest,
     onLayersChange,
+    onImageDocumentRequestHandled,
+    onImageLayerCommandRequestHandled,
+    onImageLayerCommandPendingChange,
     onLayerCommandRequestHandled,
+    onSceneChange: rememberActiveScene,
     onSelectLayerRequestHandled,
     onUploadRequestHandled,
     selectLayerRequest,
@@ -153,6 +184,23 @@ export function CanvasView({
     selectedTool,
     setWebglError
   });
+
+  useEffect(() => {
+    if (!documentCommandRequest || !editorAppRef.current) {
+      return;
+    }
+
+    editorAppRef.current.applyDocumentCommand(documentCommandRequest.command);
+    onDocumentCommandRequestHandled(documentCommandRequest.id);
+    onLayersChange(editorAppRef.current.getLayerSummaries());
+    rememberActiveScene();
+  }, [
+    documentCommandRequest,
+    editorAppRef,
+    onDocumentCommandRequestHandled,
+    onLayersChange,
+    rememberActiveScene
+  ]);
 
   function handleTextToolPointerDown(event: ReactPointerEvent<HTMLCanvasElement>) {
     if (event.button !== 0 || !editorAppRef.current) {

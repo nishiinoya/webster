@@ -7,6 +7,7 @@ import { Layer } from "../../layers/Layer";
 import { TextLayer } from "../../layers/TextLayer";
 import { ensureLayerMaskResolution } from "../../masks/LayerMaskResolution";
 import type { LayerMask } from "../../masks/LayerMask";
+import type { MaskDirtyRect } from "../../masks/LayerMask";
 import { getTextMaskFrame } from "../../rendering/text/BitmapText";
 import { clamp, getBrushRadiiInMaskSpace, paintMaskEllipse } from "./MaskBrushRaster";
 import type { MaskBrushPixelPredicate } from "./MaskBrushRaster";
@@ -115,7 +116,7 @@ export class MaskBrushTool {
     }
 
     snapshot.mask.data.set(snapshot.data);
-    snapshot.mask.revision += 1;
+    snapshot.mask.markDirty();
     this.lastStrokeSnapshot = null;
 
     return true;
@@ -144,6 +145,7 @@ export class MaskBrushTool {
 
     const brushRadii = this.getBrushRadiiInMaskSpace(layer, layer.mask);
     const step = Math.max(0.5, Math.min(brushRadii.x, brushRadii.y) / 6);
+    let dirtyRect: MaskDirtyRect | null = null;
 
     if (this.lastPaintPoint) {
       const distance = Math.hypot(point.x - this.lastPaintPoint.x, point.y - this.lastPaintPoint.y);
@@ -152,17 +154,22 @@ export class MaskBrushTool {
       for (let index = 1; index <= steps; index += 1) {
         const amount = index / steps;
 
-        this.paintMaskCircle(layer, layer.mask, {
+        dirtyRect = unionDirtyRects(
+          dirtyRect,
+          this.paintMaskCircle(layer, layer.mask, {
           x: this.lastPaintPoint.x + (point.x - this.lastPaintPoint.x) * amount,
           y: this.lastPaintPoint.y + (point.y - this.lastPaintPoint.y) * amount
-        });
+          })
+        );
       }
     } else {
-      this.paintMaskCircle(layer, layer.mask, point);
+      dirtyRect = this.paintMaskCircle(layer, layer.mask, point);
     }
 
     this.lastPaintPoint = point;
-    layer.mask.revision += 1;
+    if (dirtyRect) {
+      layer.mask.markDirty(dirtyRect);
+    }
   }
 
   private clientToLayerMaskPoint(layer: Layer, clientX: number, clientY: number) {
@@ -270,7 +277,7 @@ export class MaskBrushTool {
     const radii = this.getBrushRadiiInMaskSpace(layer, mask);
     const selectionPredicate = this.createSelectionPixelPredicate(layer, mask);
 
-    paintMaskEllipse(mask, point, radii, this.brushOptions, selectionPredicate);
+    return paintMaskEllipse(mask, point, radii, this.brushOptions, selectionPredicate);
   }
 
   private createSelectionPixelPredicate(
@@ -426,4 +433,29 @@ function isInsideUnitRectWithMargin(point: Point, margin: Point) {
 
 function getCurrentTextMaskFrame(layer: TextLayer) {
   return layer.lastTextMaskFrame ?? getTextMaskFrame(layer);
+}
+
+function unionDirtyRects(
+  a: MaskDirtyRect | null,
+  b: MaskDirtyRect | null
+): MaskDirtyRect | null {
+  if (!a) {
+    return b;
+  }
+
+  if (!b) {
+    return a;
+  }
+
+  const left = Math.min(a.x, b.x);
+  const top = Math.min(a.y, b.y);
+  const right = Math.max(a.x + a.width, b.x + b.width);
+  const bottom = Math.max(a.y + a.height, b.y + b.height);
+
+  return {
+    height: bottom - top,
+    width: right - left,
+    x: left,
+    y: top
+  };
 }
