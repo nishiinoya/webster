@@ -7,6 +7,7 @@ import {
   rotateVector,
   TransformHandleId
 } from "../../geometry/TransformGeometry";
+import { AdjustmentLayer } from "../../layers/AdjustmentLayer";
 import { Layer } from "../../layers/Layer";
 import { TextLayer } from "../../layers/TextLayer";
 
@@ -99,6 +100,22 @@ export class MoveTool {
       }
 
       this.resizeState = this.createResizeState(selectedLayer, handleId);
+      return true;
+    }
+
+    if (
+      selectedLayer instanceof AdjustmentLayer &&
+      !selectedLayer.locked &&
+      isWorldPointInsideLayer(selectedLayer, worldPoint)
+    ) {
+      this.resizeState = null;
+      this.rotateState = null;
+      this.dragState = {
+        layer: selectedLayer,
+        offsetX: worldPoint.x - selectedLayer.x,
+        offsetY: worldPoint.y - selectedLayer.y
+      };
+
       return true;
     }
 
@@ -195,6 +212,15 @@ export class MoveTool {
     }
 
     const worldPoint = this.clientToWorld(clientX, clientY);
+
+    if (
+      selectedLayer instanceof AdjustmentLayer &&
+      !selectedLayer.locked &&
+      isWorldPointInsideLayer(selectedLayer, worldPoint)
+    ) {
+      return "move";
+    }
+
     const layer = this.scene.hitTestLayer(worldPoint.x, worldPoint.y);
 
     return layer ? "move" : "default";
@@ -391,6 +417,25 @@ function affectsBottom(handleId: TransformHandleId) {
 
 function affectsTop(handleId: TransformHandleId) {
   return handleId === "top-left" || handleId === "top" || handleId === "top-right";
+}
+
+function isWorldPointInsideLayer(layer: Layer, point: Point) {
+  const size = getLayerSize(layer);
+  const center = getLayerCenter(layer);
+  const localOffset = rotateVector(
+    {
+      x: point.x - center.x,
+      y: point.y - center.y
+    },
+    -layer.rotation
+  );
+
+  return (
+    localOffset.x >= -size.width / 2 &&
+    localOffset.x <= size.width / 2 &&
+    localOffset.y >= -size.height / 2 &&
+    localOffset.y <= size.height / 2
+  );
 }
 
 function normalizeRotation(rotation: number) {

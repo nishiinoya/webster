@@ -16,6 +16,8 @@ uniform int u_adjustmentCount;
 uniform vec4 u_adjustmentBounds[4];
 uniform vec4 u_adjustmentA[4];
 uniform vec4 u_adjustmentB[4];
+uniform mat3 u_adjustmentInverseMatrix[4];
+uniform vec2 u_adjustmentSize[4];
 
 varying vec2 v_texCoord;
 varying vec2 v_worldCoord;
@@ -85,11 +87,19 @@ vec3 applyFilters(vec3 color) {
     }
 
     vec4 bounds = u_adjustmentBounds[index];
-    bool inside =
+    bool broadInside =
       v_worldCoord.x >= bounds.x &&
       v_worldCoord.x <= bounds.x + bounds.z &&
       v_worldCoord.y >= bounds.y &&
       v_worldCoord.y <= bounds.y + bounds.w;
+    vec3 localPosition = u_adjustmentInverseMatrix[index] * vec3(v_worldCoord, 1.0);
+    vec2 size = u_adjustmentSize[index];
+    bool inside =
+      broadInside &&
+      localPosition.x >= 0.0 &&
+      localPosition.x <= size.x &&
+      localPosition.y >= 0.0 &&
+      localPosition.y <= size.y;
 
     if (inside) {
       color = applyFilterValues(color, u_adjustmentA[index], u_adjustmentB[index]);

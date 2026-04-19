@@ -24,6 +24,8 @@ export class TexturedShaderProgram extends ShaderProgram {
   private readonly adjustmentBHueInvertSepiaShadowUniformLocations: WebGLUniformLocation[];
   private readonly adjustmentBoundsUniformLocations: WebGLUniformLocation[];
   private readonly adjustmentCountUniformLocation: WebGLUniformLocation;
+  private readonly adjustmentInverseMatrixUniformLocations: WebGLUniformLocation[];
+  private readonly adjustmentSizeUniformLocations: WebGLUniformLocation[];
   private readonly maskEnabledUniformLocation: WebGLUniformLocation;
   private readonly maskUniformLocation: WebGLUniformLocation;
   private readonly opacityUniformLocation: WebGLUniformLocation;
@@ -56,6 +58,14 @@ export class TexturedShaderProgram extends ShaderProgram {
       this.getUniformArrayLocations("u_adjustmentA", maxAdjustmentFilters);
     this.adjustmentBHueInvertSepiaShadowUniformLocations = this.getUniformArrayLocations(
       "u_adjustmentB",
+      maxAdjustmentFilters
+    );
+    this.adjustmentInverseMatrixUniformLocations = this.getUniformArrayLocations(
+      "u_adjustmentInverseMatrix",
+      maxAdjustmentFilters
+    );
+    this.adjustmentSizeUniformLocations = this.getUniformArrayLocations(
+      "u_adjustmentSize",
       maxAdjustmentFilters
     );
     this.maskEnabledUniformLocation = this.getUniformLocation("u_maskEnabled");
@@ -112,6 +122,15 @@ export class TexturedShaderProgram extends ShaderProgram {
       this.gl.uniform4fv(
         this.adjustmentBoundsUniformLocations[index],
         adjustment?.bounds ?? [0, 0, 0, 0]
+      );
+      this.gl.uniformMatrix3fv(
+        this.adjustmentInverseMatrixUniformLocations[index],
+        false,
+        adjustment?.inverseMatrix ?? [1, 0, 0, 0, 1, 0, 0, 0, 1]
+      );
+      this.gl.uniform2fv(
+        this.adjustmentSizeUniformLocations[index],
+        adjustment?.size ?? [0, 0]
       );
       this.gl.uniform4f(
         this.adjustmentABrightnessContrastSaturationGrayscaleUniformLocations[index],

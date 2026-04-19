@@ -71,7 +71,7 @@ Legend:
 | Layer properties | Present | Transform, visibility, lock, opacity, text, shape, mask, and filter controls exist. |
 | Adjustment layers | Partial | Adjustment layers affect layers below and can be moved/scaled to limit the affected rectangular region. Rotated adjustment layers currently use their world bounding box. |
 | Per-layer filters | Present | Brightness, contrast, saturation, grayscale, hue, sepia, invert, shadow, blur, and drop shadow settings exist. |
-| Shader filter rendering | Partial | Basic filters are shader uniforms. Image blur is texture-sampled in shader. Vector/text/brush blur is edge softness; perfect outward blur needs a framebuffer pass. |
+| Shader filter rendering | Partial | Basic filters are shader uniforms. Adjustment-layer blur now uses an offscreen framebuffer/post-process pass over the composited scene. Per-layer vector/text/brush blur is still edge softness. |
 | Drop shadow | Partial | Drop shadow is rendered as GPU passes behind the layer. It is useful but not a full Photoshop-style shadow renderer yet. |
 | Add images | Present | Image import creates an image layer. |
 | Move elements by mouse | Present | Move tool can select, move, resize, and rotate layers. |
@@ -230,7 +230,7 @@ This is the practical remaining-work checklist.
 
 ### Filters And Effects
 
-- Offscreen framebuffer/post-process pipeline for true blur on all layer types.
+- Extend the offscreen framebuffer/post-process blur pipeline from adjustment-layer blur to exact per-layer blur workflows.
 - More accurate soft drop shadow with blur spread instead of multi-pass approximation.
 - Clip adjustment layer to one layer or group.
 - Adjustment layer masks.

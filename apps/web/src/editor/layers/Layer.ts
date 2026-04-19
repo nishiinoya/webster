@@ -24,6 +24,8 @@ export type LayerFilterSettings = {
 export type LayerFilterAdjustment = {
   bounds: [number, number, number, number];
   filters: LayerFilterSettings;
+  inverseMatrix: [number, number, number, number, number, number, number, number, number];
+  size: [number, number];
 };
 
 export const defaultLayerFilters: LayerFilterSettings = {

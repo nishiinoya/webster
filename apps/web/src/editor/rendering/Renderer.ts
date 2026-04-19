@@ -19,6 +19,8 @@ import { TextLayer } from "../layers/TextLayer";
 import { CheckerboardShaderProgram } from "./shaders/CheckerboardShaderProgram";
 import { BrushShaderProgram } from "./shaders/BrushShaderProgram";
 import { loadShaderSource } from "./shaders/loadShaderSource";
+import { PostProcessShaderProgram } from "./shaders/PostProcessShaderProgram";
+import type { BlurRegion } from "./shaders/PostProcessShaderProgram";
 import { Quad } from "./geometry/Quad";
 import { EllipseMesh } from "./geometry/EllipseMesh";
 import { SolidColorShaderProgram } from "./shaders/SolidColorShaderProgram";
@@ -39,6 +41,8 @@ export type RendererShaderSources = {
   checkerboardVertex: string;
   solidFragment: string;
   solidVertex: string;
+  postProcessFragment: string;
+  postProcessVertex: string;
   texturedFragment: string;
   texturedVertex: string;
 };
@@ -81,6 +85,13 @@ type EffectiveLayerFilters = {
   filters: LayerFilterSettings;
 };
 
+type RenderTarget = {
+  framebuffer: WebGLFramebuffer;
+  height: number;
+  texture: WebGLTexture;
+  width: number;
+};
+
 export const editorRenderOptions: RenderOptions = {
   documentBackground: "checkerboard",
   showSelectionOverlay: true,
@@ -100,6 +111,7 @@ export class Renderer {
   private readonly solidColorShaderProgram: SolidColorShaderProgram;
   private readonly brushShaderProgram: BrushShaderProgram;
   private readonly checkerboardShaderProgram: CheckerboardShaderProgram;
+  private readonly postProcessShaderProgram: PostProcessShaderProgram;
   private readonly texturedShaderProgram: TexturedShaderProgram;
   private readonly textureManager: TextureManager;
   private readonly fontLoader: FontLoader;
@@ -113,6 +125,8 @@ export class Renderer {
   private readonly textGeometryTexCoordBuffer: WebGLBuffer;
   private readonly supportsUint32Indices: boolean;
   private readonly strokeGeometryCache = new WeakMap<StrokeLayer, StrokeGeometryCacheEntry>();
+  private postProcessRenderTarget: RenderTarget | null = null;
+  private sceneRenderTarget: RenderTarget | null = null;
   private layerRenderOffset = { x: 0, y: 0 };
   private renderColorOverride: [number, number, number, number] | null = null;
   private width = 0;
@@ -131,6 +145,8 @@ export class Renderer {
       brushVertex,
       solidFragment,
       solidVertex,
+      postProcessFragment,
+      postProcessVertex,
       texturedFragment,
       texturedVertex,
       fontLoader
@@ -141,6 +157,8 @@ export class Renderer {
       loadShaderSource("/glsl/brush.vert.glsl"),
       loadShaderSource("/glsl/solid.frag.glsl"),
       loadShaderSource("/glsl/solid.vert.glsl"),
+      loadShaderSource("/glsl/postprocess.frag.glsl"),
+      loadShaderSource("/glsl/postprocess.vert.glsl"),
       loadShaderSource("/glsl/textured.frag.glsl"),
       loadShaderSource("/glsl/textured.vert.glsl"),
       FontLoader.create()
@@ -155,6 +173,8 @@ export class Renderer {
         checkerboardVertex,
         solidFragment,
         solidVertex,
+        postProcessFragment,
+        postProcessVertex,
         texturedFragment,
         texturedVertex
       },
@@ -197,6 +217,11 @@ export class Renderer {
       gl,
       shaderSources.checkerboardVertex,
       shaderSources.checkerboardFragment
+    );
+    this.postProcessShaderProgram = new PostProcessShaderProgram(
+      gl,
+      shaderSources.postProcessVertex,
+      shaderSources.postProcessFragment
     );
     this.texturedShaderProgram = new TexturedShaderProgram(
       gl,
@@ -281,10 +306,20 @@ export class Renderer {
   }
 
   private renderScene(scene: Scene, camera: Camera2D, options: RenderOptions) {
+    if (hasAdjustmentBlur(scene.layers)) {
+      this.renderArtworkWithStackPostProcess(scene, camera, options);
+      this.drawEditorOverlays(scene, camera, options);
+      return;
+    }
+
     this.clear(options);
 
-    this.drawDocumentBackground(scene, camera, options);
+    this.drawArtwork(scene, camera, options);
+    this.drawEditorOverlays(scene, camera, options);
+  }
 
+  private drawArtwork(scene: Scene, camera: Camera2D, options: RenderOptions) {
+    this.drawDocumentBackground(scene, camera, options);
     this.solidColorShaderProgram.use();
     this.solidColorShaderProgram.setProjection(camera.projectionMatrix);
     this.solidColorShaderProgram.setFilters(defaultLayerFilters);
@@ -306,7 +341,9 @@ export class Renderer {
       this.drawLayerDropShadow(layer, camera, effectiveFilters[layerIndex].filters);
       this.drawLayerContent(layer, camera, options.textEdit, effectiveFilters[layerIndex]);
     }
+  }
 
+  private drawEditorOverlays(scene: Scene, camera: Camera2D, options: RenderOptions) {
     const selectedLayer = scene.selectedLayerId ? scene.getLayer(scene.selectedLayerId) : null;
 
     if (options.showSelectionOutline && selectedLayer?.visible && selectedLayer.opacity > 0) {
@@ -320,10 +357,85 @@ export class Renderer {
     }
   }
 
+  private renderArtworkWithPostProcess(
+    scene: Scene,
+    camera: Camera2D,
+    options: RenderOptions,
+    blurRegions: BlurRegion[]
+  ) {
+    const renderTarget = this.ensureSceneRenderTarget();
+
+    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, renderTarget.framebuffer);
+    this.gl.viewport(0, 0, renderTarget.width, renderTarget.height);
+    this.clear(options);
+    this.drawArtwork(scene, camera, options);
+
+    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+    this.gl.viewport(0, 0, this.width, this.height);
+    this.drawPostProcessedTexture(renderTarget.texture, blurRegions, camera);
+  }
+
+  private renderArtworkWithStackPostProcess(scene: Scene, camera: Camera2D, options: RenderOptions) {
+    let currentTarget = this.ensureSceneRenderTarget();
+    let nextTarget = this.ensurePostProcessRenderTarget();
+    const effectiveFilters = getEffectiveLayerFilters(scene.layers);
+
+    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, currentTarget.framebuffer);
+    this.gl.viewport(0, 0, currentTarget.width, currentTarget.height);
+    this.clearTransparent();
+    if (options.documentBackground === "white") {
+      this.drawDocumentBackground(scene, camera, options);
+    }
+    this.solidColorShaderProgram.use();
+    this.solidColorShaderProgram.setProjection(camera.projectionMatrix);
+    this.solidColorShaderProgram.setFilters(defaultLayerFilters);
+    this.solidColorShaderProgram.setAdjustmentFilters([]);
+
+    for (let layerIndex = 0; layerIndex < scene.layers.length; layerIndex += 1) {
+      const layer = scene.layers[layerIndex];
+
+      if (!layer.visible || layer.opacity <= 0) {
+        continue;
+      }
+
+      if (layer instanceof AdjustmentLayer) {
+        const blurRegion = getAdjustmentLayerBlurRegion(
+          layer,
+          camera,
+          this.cssWidth,
+          this.cssHeight,
+          this.width
+        );
+
+        if (!blurRegion) {
+          continue;
+        }
+
+        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, nextTarget.framebuffer);
+        this.gl.viewport(0, 0, nextTarget.width, nextTarget.height);
+        this.drawPostProcessedTexture(currentTarget.texture, [blurRegion], camera);
+        [currentTarget, nextTarget] = [nextTarget, currentTarget];
+        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, currentTarget.framebuffer);
+        this.gl.viewport(0, 0, currentTarget.width, currentTarget.height);
+        continue;
+      }
+
+      this.drawLayerDropShadow(layer, camera, effectiveFilters[layerIndex].filters);
+      this.drawLayerContent(layer, camera, options.textEdit, effectiveFilters[layerIndex]);
+    }
+
+    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+    this.gl.viewport(0, 0, this.width, this.height);
+    this.clear(options);
+    this.drawDocumentBackground(scene, camera, options);
+    this.drawPostProcessedTexture(currentTarget.texture, [], camera, { blend: true });
+  }
+
   dispose() {
     this.quad.dispose();
     this.textureManager.dispose();
     this.texturedShaderProgram.dispose();
+    this.postProcessShaderProgram.dispose();
     this.checkerboardShaderProgram.dispose();
     this.brushShaderProgram.dispose();
     this.solidColorShaderProgram.dispose();
@@ -333,6 +445,120 @@ export class Renderer {
     this.gl.deleteBuffer(this.textGeometryPositionBuffer);
     this.gl.deleteBuffer(this.textGeometryTexCoordBuffer);
     this.gl.deleteBuffer(this.textGeometryIndexBuffer);
+    this.disposeRenderTarget(this.postProcessRenderTarget);
+    this.disposeRenderTarget(this.sceneRenderTarget);
+  }
+
+  private drawPostProcessedTexture(
+    texture: WebGLTexture,
+    blurRegions: BlurRegion[],
+    camera: Camera2D,
+    options: { blend?: boolean } = {}
+  ) {
+    if (options.blend) {
+      this.gl.enable(this.gl.BLEND);
+    } else {
+      this.gl.disable(this.gl.BLEND);
+    }
+    this.postProcessShaderProgram.use();
+    this.postProcessShaderProgram.setTextureUnit(0);
+    this.postProcessShaderProgram.setTextureSize(this.width, this.height);
+    this.postProcessShaderProgram.setViewport(
+      camera.x,
+      camera.y,
+      camera.zoom,
+      this.cssWidth,
+      this.cssHeight
+    );
+    this.postProcessShaderProgram.setBlurRegions(blurRegions);
+    this.gl.activeTexture(this.gl.TEXTURE0);
+    this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+    this.quad.drawTextured(this.postProcessShaderProgram);
+    this.gl.enable(this.gl.BLEND);
+  }
+
+  private ensureSceneRenderTarget() {
+    if (
+      this.sceneRenderTarget &&
+      this.sceneRenderTarget.width === this.width &&
+      this.sceneRenderTarget.height === this.height
+    ) {
+      return this.sceneRenderTarget;
+    }
+
+    this.disposeRenderTarget(this.sceneRenderTarget);
+    this.sceneRenderTarget = this.createRenderTarget(this.width, this.height);
+
+    return this.sceneRenderTarget;
+  }
+
+  private ensurePostProcessRenderTarget() {
+    if (
+      this.postProcessRenderTarget &&
+      this.postProcessRenderTarget.width === this.width &&
+      this.postProcessRenderTarget.height === this.height
+    ) {
+      return this.postProcessRenderTarget;
+    }
+
+    this.disposeRenderTarget(this.postProcessRenderTarget);
+    this.postProcessRenderTarget = this.createRenderTarget(this.width, this.height);
+
+    return this.postProcessRenderTarget;
+  }
+
+  private createRenderTarget(width: number, height: number): RenderTarget {
+    const framebuffer = this.gl.createFramebuffer();
+    const texture = this.gl.createTexture();
+
+    if (!framebuffer || !texture) {
+      throw new Error("Unable to create WebGL post-process render target.");
+    }
+
+    this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+    this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR);
+    this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.LINEAR);
+    this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
+    this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
+    this.gl.texImage2D(
+      this.gl.TEXTURE_2D,
+      0,
+      this.gl.RGBA,
+      width,
+      height,
+      0,
+      this.gl.RGBA,
+      this.gl.UNSIGNED_BYTE,
+      null
+    );
+
+    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, framebuffer);
+    this.gl.framebufferTexture2D(
+      this.gl.FRAMEBUFFER,
+      this.gl.COLOR_ATTACHMENT0,
+      this.gl.TEXTURE_2D,
+      texture,
+      0
+    );
+
+    if (this.gl.checkFramebufferStatus(this.gl.FRAMEBUFFER) !== this.gl.FRAMEBUFFER_COMPLETE) {
+      this.gl.deleteFramebuffer(framebuffer);
+      this.gl.deleteTexture(texture);
+      throw new Error("WebGL post-process framebuffer is incomplete.");
+    }
+
+    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+
+    return { framebuffer, height, texture, width };
+  }
+
+  private disposeRenderTarget(renderTarget: RenderTarget | null) {
+    if (!renderTarget) {
+      return;
+    }
+
+    this.gl.deleteFramebuffer(renderTarget.framebuffer);
+    this.gl.deleteTexture(renderTarget.texture);
   }
 
   private clear(options: RenderOptions) {
@@ -342,6 +568,11 @@ export class Renderer {
       this.gl.clearColor(0.07, 0.08, 0.09, 1);
     }
 
+    this.gl.clear(this.gl.COLOR_BUFFER_BIT);
+  }
+
+  private clearTransparent() {
+    this.gl.clearColor(0, 0, 0, 0);
     this.gl.clear(this.gl.COLOR_BUFFER_BIT);
   }
 
@@ -1274,7 +1505,9 @@ function getEffectiveLayerFilters(layers: Layer[]) {
         adjustmentFiltersAbove = [
           {
             bounds: getLayerWorldBounds(layer),
-            filters: scaleLayerFilters(layer.filters, layer.opacity)
+            filters: scaleLayerFilters(layer.filters, layer.opacity),
+            inverseMatrix: getLayerInverseMatrix(layer),
+            size: [1, 1]
           },
           ...adjustmentFiltersAbove
         ];
@@ -1358,6 +1591,100 @@ function clampFilter(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
+function hasAdjustmentBlur(layers: Layer[]) {
+  return layers.some(
+    (layer) =>
+      layer instanceof AdjustmentLayer &&
+      layer.visible &&
+      layer.opacity > 0 &&
+      layer.filters.blur * layer.opacity > 0.5
+  );
+}
+
+function getAdjustmentLayerBlurRegion(
+  layer: AdjustmentLayer,
+  camera: Camera2D,
+  cssWidth: number,
+  cssHeight: number,
+  textureWidth: number
+): BlurRegion | null {
+  const pixelScale = textureWidth / Math.max(1, cssWidth);
+  const radius = layer.filters.blur * layer.opacity * pixelScale;
+
+  if (radius <= 0.5) {
+    return null;
+  }
+
+  return {
+    bounds: worldBoundsToTextureBounds(getLayerWorldBounds(layer), camera, cssWidth, cssHeight),
+    inverseMatrix: getLayerInverseMatrix(layer),
+    radius: Math.min(radius, textureWidth * 0.12),
+    size: [1, 1]
+  };
+}
+
+function getAdjustmentBlurRegions(
+  layers: Layer[],
+  camera: Camera2D,
+  cssWidth: number,
+  cssHeight: number,
+  textureWidth: number,
+  textureHeight: number
+): BlurRegion[] {
+  const pixelScale = textureWidth / Math.max(1, cssWidth);
+  const regions: BlurRegion[] = [];
+
+  for (const layer of layers) {
+    if (!(layer instanceof AdjustmentLayer) || !layer.visible || layer.opacity <= 0) {
+      continue;
+    }
+
+    const radius = layer.filters.blur * layer.opacity * pixelScale;
+
+    if (radius <= 0.5) {
+      continue;
+    }
+
+    regions.push({
+      bounds: worldBoundsToTextureBounds(getLayerWorldBounds(layer), camera, cssWidth, cssHeight),
+      inverseMatrix: getLayerInverseMatrix(layer),
+      radius: Math.min(radius, Math.max(textureWidth, textureHeight) * 0.08),
+      size: [1, 1]
+    });
+
+    if (regions.length >= 4) {
+      break;
+    }
+  }
+
+  return regions;
+}
+
+function worldBoundsToTextureBounds(
+  bounds: [number, number, number, number],
+  camera: Camera2D,
+  cssWidth: number,
+  cssHeight: number
+): [number, number, number, number] {
+  const [x, y, width, height] = bounds;
+  const screenCorners = [
+    camera.worldToScreen(x, y),
+    camera.worldToScreen(x + width, y),
+    camera.worldToScreen(x + width, y + height),
+    camera.worldToScreen(x, y + height)
+  ];
+  const minScreenX = Math.min(...screenCorners.map((corner) => corner.x));
+  const maxScreenX = Math.max(...screenCorners.map((corner) => corner.x));
+  const minScreenY = Math.min(...screenCorners.map((corner) => corner.y));
+  const maxScreenY = Math.max(...screenCorners.map((corner) => corner.y));
+  const left = clampFilter(minScreenX / Math.max(1, cssWidth), 0, 1);
+  const right = clampFilter(maxScreenX / Math.max(1, cssWidth), 0, 1);
+  const bottom = clampFilter(1 - maxScreenY / Math.max(1, cssHeight), 0, 1);
+  const top = clampFilter(1 - minScreenY / Math.max(1, cssHeight), 0, 1);
+
+  return [left, bottom, Math.max(0, right - left), Math.max(0, top - bottom)];
+}
+
 function getLayerWorldBounds(layer: Layer): [number, number, number, number] {
   const corners = getLayerCorners(layer);
   const xs = [
@@ -1378,6 +1705,25 @@ function getLayerWorldBounds(layer: Layer): [number, number, number, number] {
   const maxY = Math.max(...ys);
 
   return [minX, minY, maxX - minX, maxY - minY];
+}
+
+function getLayerInverseMatrix(
+  layer: Layer
+): [number, number, number, number, number, number, number, number, number] {
+  const inverseMatrix = invert3x3(getModelMatrix(layer));
+  const matrix = inverseMatrix ?? new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]);
+
+  return [
+    matrix[0],
+    matrix[1],
+    matrix[2],
+    matrix[3],
+    matrix[4],
+    matrix[5],
+    matrix[6],
+    matrix[7],
+    matrix[8]
+  ];
 }
 
 function getDropShadowPasses(filters: LayerFilterSettings) {
