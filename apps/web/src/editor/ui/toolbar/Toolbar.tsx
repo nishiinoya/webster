@@ -1,3 +1,4 @@
+import type { MouseEvent as ReactMouseEvent } from "react";
 import { useRef } from "react";
 import {
   canPickProjectFileHandle,
@@ -19,7 +20,9 @@ type ToolbarProps = {
   onOpenProject: (file: File, handle?: WebsterFileHandle | null) => void;
   onSaveAsProject: () => void;
   onSaveProject: () => void;
+  onAddAdjustmentLayer: () => void;
   onSelectionCommand: (command: SelectionCommand) => void;
+  onSelectTool: (tool: string) => void;
   onUploadImage: (file: File) => void;
   maskBrushOptions: MaskBrushOptions;
   onMaskBrushOptionsChange: (options: Partial<MaskBrushOptions>) => void;
@@ -45,8 +48,6 @@ export type StrokeTargetSelection = {
   mode: "layer" | "new" | "selected";
 };
 
-const toolbarActions = ["Edit", "View", "Filter"];
-
 export function Toolbar({
   canEditDocument,
   documentTitle,
@@ -55,7 +56,9 @@ export function Toolbar({
   onOpenProject,
   onSaveAsProject,
   onSaveProject,
+  onAddAdjustmentLayer,
   onSelectionCommand,
+  onSelectTool,
   onUploadImage,
   maskBrushOptions,
   onMaskBrushOptionsChange,
@@ -106,6 +109,10 @@ export function Toolbar({
     }
 
     projectInputRef.current?.click();
+  }
+
+  function closeMenu(event: ReactMouseEvent<HTMLElement>) {
+    event.currentTarget.closest("details")?.removeAttribute("open");
   }
 
   return (
@@ -192,11 +199,132 @@ export function Toolbar({
             </button>
           </div>
         </details>
-        {toolbarActions.map((action) => (
-          <button className={toolbarButtonClass} key={action} type="button">
-            {action}
-          </button>
-        ))}
+        <details className="toolbar-menu relative">
+          <summary className={toolbarButtonClass}>Edit</summary>
+          <div className={toolbarMenuClass} role="menu">
+            <button className={toolbarMenuItemClass} disabled type="button">
+              Undo <span className={toolbarMenuHintClass}>TODO</span>
+            </button>
+            <button className={toolbarMenuItemClass} disabled type="button">
+              Redo <span className={toolbarMenuHintClass}>TODO</span>
+            </button>
+            <MenuSeparator />
+            <button className={toolbarMenuItemClass} disabled type="button">
+              Cut <span className={toolbarMenuHintClass}>TODO</span>
+            </button>
+            <button className={toolbarMenuItemClass} disabled type="button">
+              Copy <span className={toolbarMenuHintClass}>TODO</span>
+            </button>
+            <button className={toolbarMenuItemClass} disabled type="button">
+              Paste <span className={toolbarMenuHintClass}>TODO</span>
+            </button>
+            <MenuSeparator />
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!canEditDocument}
+              onClick={(event) => {
+                closeMenu(event);
+                onSelectTool("Move");
+              }}
+              type="button"
+            >
+              Move / transform tool
+            </button>
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!canEditDocument}
+              onClick={(event) => {
+                closeMenu(event);
+                onSelectTool("Draw");
+              }}
+              type="button"
+            >
+              Draw tool
+            </button>
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!canEditDocument}
+              onClick={(event) => {
+                closeMenu(event);
+                onSelectTool("Text");
+              }}
+              type="button"
+            >
+              Text tool
+            </button>
+          </div>
+        </details>
+        <details className="toolbar-menu relative">
+          <summary className={toolbarButtonClass}>View</summary>
+          <div className={toolbarMenuClass} role="menu">
+            <button className={toolbarMenuItemClass} disabled type="button">
+              Zoom: {zoomPercentage}%
+            </button>
+            <button className={toolbarMenuItemClass} disabled type="button">
+              Zoom in <span className={toolbarMenuHintClass}>TODO</span>
+            </button>
+            <button className={toolbarMenuItemClass} disabled type="button">
+              Zoom out <span className={toolbarMenuHintClass}>TODO</span>
+            </button>
+            <button className={toolbarMenuItemClass} disabled type="button">
+              Fit canvas <span className={toolbarMenuHintClass}>TODO</span>
+            </button>
+            <MenuSeparator />
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!canEditDocument}
+              onClick={(event) => {
+                closeMenu(event);
+                onSelectTool("Pan");
+              }}
+              type="button"
+            >
+              Pan workspace
+            </button>
+            <button className={toolbarMenuItemClass} disabled type="button">
+              Toggle checkerboard <span className={toolbarMenuHintClass}>TODO</span>
+            </button>
+            <button className={toolbarMenuItemClass} disabled type="button">
+              Rulers and guides <span className={toolbarMenuHintClass}>TODO</span>
+            </button>
+          </div>
+        </details>
+        <details className="toolbar-menu relative">
+          <summary className={toolbarButtonClass}>Filter</summary>
+          <div className={toolbarMenuClass} role="menu">
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!canEditDocument}
+              onClick={(event) => {
+                closeMenu(event);
+                onAddAdjustmentLayer();
+              }}
+              type="button"
+            >
+              Add adjustment layer
+            </button>
+            <button className={toolbarMenuItemClass} disabled type="button">
+              Layer filters live in Properties
+            </button>
+            <MenuSeparator />
+            <button className={toolbarMenuItemClass} disabled type="button">
+              Brightness / Contrast <span className={toolbarMenuHintClass}>Implemented</span>
+            </button>
+            <button className={toolbarMenuItemClass} disabled type="button">
+              Hue / Saturation <span className={toolbarMenuHintClass}>Implemented</span>
+            </button>
+            <button className={toolbarMenuItemClass} disabled type="button">
+              Blur / Drop shadow <span className={toolbarMenuHintClass}>Implemented</span>
+            </button>
+            <MenuSeparator />
+            <button className={toolbarMenuItemClass} disabled type="button">
+              Filter gallery <span className={toolbarMenuHintClass}>TODO</span>
+            </button>
+            <button className={toolbarMenuItemClass} disabled type="button">
+              Clip adjustment to layer <span className={toolbarMenuHintClass}>TODO</span>
+            </button>
+          </div>
+        </details>
         <details className="toolbar-menu relative">
           <summary className={toolbarButtonClass}>Select</summary>
           <div className={toolbarMenuClass} role="menu">
@@ -433,14 +561,20 @@ function hexToColor(hex: string, alpha = 1): [number, number, number, number] {
   ];
 }
 
+function MenuSeparator() {
+  return <div className="my-1 h-px bg-[#2b3037]" role="separator" />;
+}
+
 const toolbarButtonClass =
   "block cursor-default list-none rounded-lg border border-transparent bg-transparent px-2.5 py-2 text-[13px] text-[#d9dde3] hover:border-[#4c535c] hover:bg-[#252930] focus-visible:border-[#4c535c] focus-visible:bg-[#252930] [&::-webkit-details-marker]:hidden [.toolbar-menu[open]_&]:border-[#4c535c] [.toolbar-menu[open]_&]:bg-[#252930]";
 
 const toolbarMenuClass =
-  "absolute left-0 top-[calc(100%+6px)] z-10 grid w-[220px] rounded-lg border border-[#33373d] bg-[#17191d] p-1.5 shadow-[0_18px_34px_rgba(0,0,0,0.35)]";
+  "absolute left-0 top-[calc(100%+6px)] z-10 grid w-[250px] rounded-lg border border-[#33373d] bg-[#17191d] p-1.5 shadow-[0_18px_34px_rgba(0,0,0,0.35)]";
 
 const toolbarMenuItemClass =
-  "w-full rounded-lg border border-transparent bg-transparent px-2.5 py-2 text-left text-[13px] text-[#eef1f4] hover:border-[#4c535c] hover:bg-[#252930] focus-visible:border-[#4c535c] focus-visible:bg-[#252930] disabled:cursor-not-allowed disabled:text-[#6f7680] disabled:hover:border-transparent disabled:hover:bg-transparent";
+  "flex w-full items-center justify-between gap-3 rounded-lg border border-transparent bg-transparent px-2.5 py-2 text-left text-[13px] text-[#eef1f4] hover:border-[#4c535c] hover:bg-[#252930] focus-visible:border-[#4c535c] focus-visible:bg-[#252930] disabled:cursor-not-allowed disabled:text-[#6f7680] disabled:hover:border-transparent disabled:hover:bg-transparent";
+
+const toolbarMenuHintClass = "ml-auto text-[10px] uppercase tracking-normal text-[#7f8791]";
 
 const maskBrushInputClass =
   "w-[74px] rounded-md border border-[#33373d] bg-[#101113] px-[7px] py-1.5 text-[#eef1f4] font-[inherit]";

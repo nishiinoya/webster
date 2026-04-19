@@ -1,6 +1,8 @@
+import { AdjustmentLayer } from "../layers/AdjustmentLayer";
 import { ImageLayer } from "../layers/ImageLayer";
 import { Layer } from "../layers/Layer";
-import type { SerializedLayer } from "../layers/Layer";
+import { normalizeLayerFilters } from "../layers/Layer";
+import type { LayerFilterSettings, SerializedLayer } from "../layers/Layer";
 import { ShapeLayer } from "../layers/ShapeLayer";
 import { StrokeLayer } from "../layers/StrokeLayer";
 import { TextLayer } from "../layers/TextLayer"
@@ -106,6 +108,19 @@ export class Scene {
     return layer;
   }
 
+  addAdjustmentLayer() {
+    return this.addLayer(
+      new AdjustmentLayer({
+        id: crypto.randomUUID(),
+        name: "Adjustment",
+        x: this.document.x,
+        y: this.document.y,
+        width: this.document.width,
+        height: this.document.height
+      })
+    );
+  }
+
   removeLayer(layerId: string) {
     const layerIndex = this.layers.findIndex((layer) => layer.id === layerId);
 
@@ -153,6 +168,10 @@ export class Scene {
         continue;
       }
 
+      if (layer instanceof AdjustmentLayer) {
+        continue;
+      }
+
       if (isPointInsideLayer(layer, x, y)) {
         return layer;
       }
@@ -181,6 +200,7 @@ export class Scene {
       bold: boolean;
       color: [number, number, number, number];
       fillColor: [number, number, number, number];
+      filters: Partial<LayerFilterSettings>;
       fontFamily: string;
       fontSize: number;
       height: number;
@@ -219,6 +239,13 @@ export class Scene {
 
     if (updates.opacity !== undefined) {
       layer.opacity = clamp(updates.opacity, 0, 1);
+    }
+
+    if (updates.filters !== undefined) {
+      layer.filters = normalizeLayerFilters({
+        ...layer.filters,
+        ...updates.filters
+      });
     }
 
     if (!layer.locked) {
@@ -423,6 +450,7 @@ function cloneLayer(layer: Layer) {
     mask: layer.mask?.clone() ?? null,
     name: `${layer.name} copy`,
     opacity: layer.opacity,
+    filters: layer.filters,
     rotation: layer.rotation,
     scaleX: layer.scaleX,
     scaleY: layer.scaleY,
@@ -461,6 +489,10 @@ function cloneLayer(layer: Layer) {
       italic: layer.italic,
       text: layer.text
     });
+  }
+
+  if (layer instanceof AdjustmentLayer) {
+    return new AdjustmentLayer(options);
   }
 
   if (layer instanceof StrokeLayer) {
@@ -575,6 +607,7 @@ function getLayerSummary(layer: Layer, selectedLayerId: string | null) {
     maskEnabled: layer.mask?.enabled ?? false,
     name: layer.name,
     opacity: layer.opacity,
+    filters: layer.filters,
     rotation: layer.rotation,
     type: layer.type,
     x: layer.x,

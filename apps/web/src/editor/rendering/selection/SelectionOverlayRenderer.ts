@@ -1,5 +1,6 @@
 import { Camera2D } from "../../geometry/Camera2D";
 import { distance, getModelMatrix, midpoint } from "../../geometry/TransformGeometry";
+import { defaultLayerFilters } from "../../layers/Layer";
 import type { SelectionSnapshot } from "../../selection/SelectionManager";
 import { Quad } from "../geometry/Quad";
 import { SolidColorShaderProgram } from "../shaders/SolidColorShaderProgram";
@@ -38,6 +39,8 @@ export class SelectionOverlayRenderer {
 
     this.solidColorShaderProgram.use();
     this.solidColorShaderProgram.setProjection(camera.projectionMatrix);
+    this.solidColorShaderProgram.setFilters(defaultLayerFilters);
+    this.solidColorShaderProgram.setAdjustmentFilters([]);
     this.drawDim(selection, documentBounds, camera);
     this.solidColorShaderProgram.setColor([0.02, 0.025, 0.03, 0.95]);
 

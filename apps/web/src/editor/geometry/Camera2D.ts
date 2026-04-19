@@ -30,7 +30,7 @@ export class Camera2D {
   }
 
   setZoom(zoom: number) {
-    this.zoom = Math.min(Math.max(zoom, 0.1), 8);
+    this.zoom = Math.min(Math.max(zoom, 0.05), 100);
     this.clampToBounds();
     this.updateProjectionMatrix();
   }

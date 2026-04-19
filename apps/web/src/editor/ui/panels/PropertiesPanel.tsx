@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { LayerCommand, LayerSummary } from "../../app/EditorApp";
+import type { LayerFilterSettings } from "../../layers/Layer";
+import { defaultLayerFilters } from "../../layers/Layer";
 import type { CompiledFontManifest } from "../../rendering/text/CompiledFont";
 import { cn } from "../classNames";
 
@@ -12,6 +14,7 @@ type PropertiesPanelProps = {
 };
 
 type NumericField = "height" | "opacity" | "rotation" | "width" | "x" | "y";
+type FilterField = keyof LayerFilterSettings;
 
 type TextLayerSummary = LayerSummary & {
   align: "left" | "center" | "right";
@@ -81,6 +84,20 @@ export function PropertiesPanel({
 
     updateSelectedLayer({
       [field]: field === "opacity" ? numberValue / 100 : numberValue
+    });
+  }
+
+  function updateFilter(field: FilterField, value: string, scale = 1) {
+    const numberValue = Number(value);
+
+    if (!Number.isFinite(numberValue)) {
+      return;
+    }
+
+    updateSelectedLayer({
+      filters: {
+        [field]: numberValue / scale
+      }
     });
   }
 
@@ -353,6 +370,131 @@ export function PropertiesPanel({
             </label>
           </div>
         ) : null}
+        {selectedLayer ? (
+          <div className={propertySectionClass}>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className={propertySectionTitleClass}>Filters</h3>
+              <button
+                className={propertyToggleClass}
+                disabled={selectedLayer.locked}
+                onClick={() => updateSelectedLayer({ filters: defaultLayerFilters })}
+                type="button"
+              >
+                Reset
+              </button>
+            </div>
+            <FilterSlider
+              disabled={selectedLayer.locked}
+              label="Brightness"
+              max={100}
+              min={-100}
+              onChange={(value) => updateFilter("brightness", value, 100)}
+              value={Math.round((selectedLayer.filters?.brightness ?? 0) * 100)}
+            />
+            <FilterSlider
+              disabled={selectedLayer.locked}
+              label="Blur"
+              max={64}
+              min={0}
+              onChange={(value) => updateFilter("blur", value)}
+              value={Math.round(selectedLayer.filters?.blur ?? 0)}
+            />
+            <FilterSlider
+              disabled={selectedLayer.locked}
+              label="Contrast"
+              max={100}
+              min={-100}
+              onChange={(value) => updateFilter("contrast", value, 100)}
+              value={Math.round((selectedLayer.filters?.contrast ?? 0) * 100)}
+            />
+            <FilterSlider
+              disabled={selectedLayer.locked}
+              label="Saturation"
+              max={100}
+              min={-100}
+              onChange={(value) => updateFilter("saturation", value, 100)}
+              value={Math.round((selectedLayer.filters?.saturation ?? 0) * 100)}
+            />
+            <FilterSlider
+              disabled={selectedLayer.locked}
+              label="Grayscale"
+              max={100}
+              min={0}
+              onChange={(value) => updateFilter("grayscale", value, 100)}
+              value={Math.round((selectedLayer.filters?.grayscale ?? 0) * 100)}
+            />
+            <FilterSlider
+              disabled={selectedLayer.locked}
+              label="Shadow"
+              max={100}
+              min={-100}
+              onChange={(value) => updateFilter("shadow", value, 100)}
+              value={Math.round((selectedLayer.filters?.shadow ?? 0) * 100)}
+            />
+            <FilterSlider
+              disabled={selectedLayer.locked}
+              label="Drop shadow"
+              max={100}
+              min={0}
+              onChange={(value) => updateFilter("dropShadowOpacity", value, 100)}
+              value={Math.round((selectedLayer.filters?.dropShadowOpacity ?? 0) * 100)}
+            />
+            <FilterSlider
+              disabled={selectedLayer.locked}
+              label="Shadow blur"
+              max={80}
+              min={0}
+              onChange={(value) => updateFilter("dropShadowBlur", value)}
+              value={Math.round(selectedLayer.filters?.dropShadowBlur ?? 0)}
+            />
+            <FilterSlider
+              disabled={selectedLayer.locked}
+              label="Shadow X"
+              max={240}
+              min={-240}
+              onChange={(value) => updateFilter("dropShadowOffsetX", value)}
+              value={Math.round(
+                selectedLayer.filters?.dropShadowOffsetX ??
+                  defaultLayerFilters.dropShadowOffsetX
+              )}
+            />
+            <FilterSlider
+              disabled={selectedLayer.locked}
+              label="Shadow Y"
+              max={240}
+              min={-240}
+              onChange={(value) => updateFilter("dropShadowOffsetY", value)}
+              value={Math.round(
+                selectedLayer.filters?.dropShadowOffsetY ??
+                  defaultLayerFilters.dropShadowOffsetY
+              )}
+            />
+            <FilterSlider
+              disabled={selectedLayer.locked}
+              label="Hue"
+              max={180}
+              min={-180}
+              onChange={(value) => updateFilter("hue", value)}
+              value={Math.round(selectedLayer.filters?.hue ?? 0)}
+            />
+            <FilterSlider
+              disabled={selectedLayer.locked}
+              label="Sepia"
+              max={100}
+              min={0}
+              onChange={(value) => updateFilter("sepia", value, 100)}
+              value={Math.round((selectedLayer.filters?.sepia ?? 0) * 100)}
+            />
+            <FilterSlider
+              disabled={selectedLayer.locked}
+              label="Invert"
+              max={100}
+              min={0}
+              onChange={(value) => updateFilter("invert", value, 100)}
+              value={Math.round((selectedLayer.filters?.invert ?? 0) * 100)}
+            />
+          </div>
+        ) : null}
         <div className={propertySectionClass}>
           <h3 className={propertySectionTitleClass}>Mask</h3>
           <div className={propertyRowClass}>
@@ -378,6 +520,48 @@ function isTextLayerSummary(layer: LayerSummary | null): layer is TextLayerSumma
 
 function isShapeLayerSummary(layer: LayerSummary | null): layer is ShapeLayerSummary {
   return Boolean(layer && layer.type === "shape" && "shape" in layer);
+}
+
+function FilterSlider({
+  disabled,
+  label,
+  max,
+  min,
+  onChange,
+  value
+}: {
+  disabled: boolean;
+  label: string;
+  max: number;
+  min: number;
+  onChange: (value: string) => void;
+  value: number;
+}) {
+  return (
+    <label className="grid min-h-[34px] grid-cols-[minmax(88px,0.75fr)_minmax(120px,1.25fr)] items-center gap-2.5">
+      <span className={propertyLabelClass}>{label}</span>
+      <span className="grid grid-cols-[minmax(0,1fr)_56px] items-center gap-2">
+        <input
+          className="min-w-0 accent-[#4aa391]"
+          disabled={disabled}
+          max={max}
+          min={min}
+          onChange={(event) => onChange(event.target.value)}
+          type="range"
+          value={value}
+        />
+        <input
+          className={propertyInputClass}
+          disabled={disabled}
+          max={max}
+          min={min}
+          onChange={(event) => onChange(event.target.value)}
+          type="number"
+          value={value}
+        />
+      </span>
+    </label>
+  );
 }
 
 function PanelToggleButton({

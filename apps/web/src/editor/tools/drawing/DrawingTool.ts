@@ -1,6 +1,6 @@
 import { Camera2D } from "../../geometry/Camera2D";
 import { StrokeLayer } from "../../layers/StrokeLayer";
-import type { StrokePoint, StrokeStyle } from "../../layers/StrokeLayer";
+import type { StrokePoint, StrokeSelectionClip, StrokeStyle } from "../../layers/StrokeLayer";
 import { Scene } from "../../scene/Scene";
 import type { ToolPointerEvent } from "../move/MoveTool";
 
@@ -17,6 +17,7 @@ export class DrawingTool {
   private activeLayer: StrokeLayer | null = null;
   private activePathIndex = -1;
   private isErasing = false;
+  private isDrawing = false;
   private points: StrokePoint[] = [];
   private options: DrawingToolOptions = {
     color: [0.07, 0.08, 0.09, 0.82],
@@ -60,6 +61,19 @@ export class DrawingTool {
     }
 
     const point = this.clientToWorld(event.clientX, event.clientY);
+    this.isDrawing = true;
+
+    if (!this.scene.selection.containsWorldPoint(point.x, point.y)) {
+      this.points = [];
+      this.activeLayer = null;
+      this.activePathIndex = -1;
+      return true;
+    }
+
+    return this.startStrokeAt(point);
+  }
+
+  private startStrokeAt(point: StrokePoint) {
     const preset = getStrokePreset(this.options.style);
     const targetLayer = this.getDrawTargetLayer();
     const layer =
@@ -81,6 +95,7 @@ export class DrawingTool {
     this.activePathIndex = layer.paths.length;
     layer.appendWorldPath(this.points, {
       color: this.options.color,
+      selectionClip: cloneSelectionClip(this.scene.selection.current),
       strokeStyle: this.options.style,
       strokeWidth: this.options.strokeWidth
     });
@@ -99,11 +114,24 @@ export class DrawingTool {
       return this.eraseAtEvent(event);
     }
 
-    if (!this.activeLayer) {
+    if (!this.isDrawing) {
       return false;
     }
 
     const point = this.clientToWorld(event.clientX, event.clientY);
+    const isInsideSelection = this.scene.selection.containsWorldPoint(point.x, point.y);
+
+    if (!isInsideSelection) {
+      this.activeLayer = null;
+      this.activePathIndex = -1;
+      this.points = [];
+      return true;
+    }
+
+    if (!this.activeLayer) {
+      return this.startStrokeAt(point);
+    }
+
     const lastPoint = this.points.at(-1);
 
     if (!lastPoint) {
@@ -141,14 +169,15 @@ export class DrawingTool {
     if (this.isErasing) {
       this.isErasing = false;
       this.activeLayer = null;
+      this.isDrawing = false;
       return true;
     }
 
-    if (!this.activeLayer) {
+    if (!this.isDrawing) {
       return false;
     }
 
-    if (this.points.length === 1) {
+    if (this.activeLayer && this.points.length === 1) {
       const point = this.points[0];
 
       this.points.push({
@@ -160,6 +189,7 @@ export class DrawingTool {
 
     this.activeLayer = null;
     this.activePathIndex = -1;
+    this.isDrawing = false;
     this.points = [];
 
     return true;
@@ -169,6 +199,7 @@ export class DrawingTool {
     this.activeLayer = null;
     this.activePathIndex = -1;
     this.isErasing = false;
+    this.isDrawing = false;
     this.points = [];
   }
 
@@ -210,6 +241,7 @@ export class DrawingTool {
 
     this.activeLayer = selectedLayer;
     this.isErasing = true;
+    this.isDrawing = true;
 
     return this.eraseAtEvent(event);
   }
@@ -222,6 +254,11 @@ export class DrawingTool {
     }
 
     const point = this.clientToWorld(event.clientX, event.clientY);
+
+    if (!this.scene.selection.containsWorldPoint(point.x, point.y)) {
+      return true;
+    }
+
     const radius = Math.max(1, this.options.strokeWidth / 2);
     const hasRemainingStrokes = layer.eraseWorldCircle(point, radius);
 
@@ -233,6 +270,21 @@ export class DrawingTool {
 
     return true;
   }
+}
+
+function cloneSelectionClip(selection: StrokeSelectionClip | null): StrokeSelectionClip | null {
+  return selection
+    ? {
+        bounds: {
+          height: selection.bounds.height,
+          width: selection.bounds.width,
+          x: selection.bounds.x,
+          y: selection.bounds.y
+        },
+        inverted: selection.inverted,
+        shape: selection.shape
+      }
+    : null;
 }
 
 function getStrokePreset(style: StrokeStyle) {

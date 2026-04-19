@@ -522,7 +522,9 @@ export function EditorPage() {
         onOpenProject={openProjectInNewTab}
         onSaveAsProject={() => setProjectSaveRequest({ id: Date.now(), mode: "save-as" })}
         onSaveProject={() => setProjectSaveRequest({ id: Date.now(), mode: "save" })}
+        onAddAdjustmentLayer={() => runLayerCommand({ type: "add-adjustment" })}
         onSelectionCommand={(command) => setSelectionCommandRequest({ command, id: Date.now() })}
+        onSelectTool={setSelectedTool}
         onUploadImage={(file) => setUploadRequest({ file, id: Date.now() })}
         maskBrushOptions={maskBrushOptions}
         onMaskBrushOptionsChange={(options) =>

@@ -3,7 +3,44 @@ import type { SerializedLayerMask } from "../masks/LayerMask";
 
 import type { StrokePath, StrokePoint, StrokeStyle } from "./StrokeLayer";
 
-export type LayerType = "shape" | "image" | "text" | "stroke";
+export type LayerType = "adjustment" | "shape" | "image" | "text" | "stroke";
+
+export type LayerFilterSettings = {
+  brightness: number;
+  blur: number;
+  contrast: number;
+  dropShadowBlur: number;
+  dropShadowOffsetX: number;
+  dropShadowOffsetY: number;
+  dropShadowOpacity: number;
+  grayscale: number;
+  hue: number;
+  invert: number;
+  saturation: number;
+  sepia: number;
+  shadow: number;
+};
+
+export type LayerFilterAdjustment = {
+  bounds: [number, number, number, number];
+  filters: LayerFilterSettings;
+};
+
+export const defaultLayerFilters: LayerFilterSettings = {
+  brightness: 0,
+  blur: 0,
+  contrast: 0,
+  dropShadowBlur: 0,
+  dropShadowOffsetX: 12,
+  dropShadowOffsetY: 12,
+  dropShadowOpacity: 0,
+  grayscale: 0,
+  hue: 0,
+  invert: 0,
+  saturation: 0,
+  sepia: 0,
+  shadow: 0
+};
 
 export type SerializedLayerBase = {
   height: number;
@@ -20,6 +57,7 @@ export type SerializedLayerBase = {
   x: number;
   y: number;
   mask?: SerializedLayerMask | null;
+  filters?: Partial<LayerFilterSettings>;
 };
 
 export type SerializedShapeLayer = SerializedLayerBase & {
@@ -28,6 +66,10 @@ export type SerializedShapeLayer = SerializedLayerBase & {
   strokeColor:[number, number, number, number];
   strokeWidth: number;
   type: "shape";
+};
+
+export type SerializedAdjustmentLayer = SerializedLayerBase & {
+  type: "adjustment";
 };
 
 export type SerializedImageLayer = SerializedLayerBase & {
@@ -58,6 +100,7 @@ export type SerializedStrokeLayer = SerializedLayerBase & {
 };
 
 export type SerializedLayer =
+  | SerializedAdjustmentLayer
   | SerializedShapeLayer
   | SerializedImageLayer
   | SerializedTextLayer
@@ -78,6 +121,7 @@ export type LayerOptions = {
   scaleX?: number;
   scaleY?: number;
   mask?: LayerMask | null;
+  filters?: Partial<LayerFilterSettings>;
 };
 
 export abstract class Layer {
@@ -95,6 +139,7 @@ export abstract class Layer {
   scaleX: number;
   scaleY: number;
   mask: LayerMask | null;
+  filters: LayerFilterSettings;
 
   protected constructor(options: LayerOptions) {
     this.id = options.id;
@@ -111,9 +156,16 @@ export abstract class Layer {
     this.scaleX = options.scaleX ?? 1;
     this.scaleY = options.scaleY ?? 1;
     this.mask = options.mask ?? null;
+    this.filters = normalizeLayerFilters(options.filters);
   }
 
   static async fromJSON(data: SerializedLayer, assets = new Map<string, Blob>()) {
+    if (data.type === "adjustment") {
+      const { AdjustmentLayer } = await import("./AdjustmentLayer");
+
+      return new AdjustmentLayer(getLayerOptions(data));
+    }
+
     if (data.type === "shape") {
       const { ShapeLayer } = await import("./ShapeLayer");
       const legacyShapeData = data as SerializedShapeLayer & {
@@ -197,9 +249,50 @@ export abstract class Layer {
       width: this.width,
       x: this.x,
       y: this.y,
+      filters: this.filters,
       mask: this.mask?.toJSON() ?? null
     };
   }
+}
+
+export function normalizeLayerFilters(
+  filters?: Partial<LayerFilterSettings> | null
+): LayerFilterSettings {
+  return {
+    brightness: clampFilter(filters?.brightness ?? defaultLayerFilters.brightness, -1, 1),
+    blur: clampFilter(filters?.blur ?? defaultLayerFilters.blur, 0, 64),
+    contrast: clampFilter(filters?.contrast ?? defaultLayerFilters.contrast, -1, 1),
+    dropShadowBlur: clampFilter(
+      filters?.dropShadowBlur ?? defaultLayerFilters.dropShadowBlur,
+      0,
+      80
+    ),
+    dropShadowOffsetX: clampFilter(
+      filters?.dropShadowOffsetX ?? defaultLayerFilters.dropShadowOffsetX,
+      -240,
+      240
+    ),
+    dropShadowOffsetY: clampFilter(
+      filters?.dropShadowOffsetY ?? defaultLayerFilters.dropShadowOffsetY,
+      -240,
+      240
+    ),
+    dropShadowOpacity: clampFilter(
+      filters?.dropShadowOpacity ?? defaultLayerFilters.dropShadowOpacity,
+      0,
+      1
+    ),
+    grayscale: clampFilter(filters?.grayscale ?? defaultLayerFilters.grayscale, 0, 1),
+    hue: clampFilter(filters?.hue ?? defaultLayerFilters.hue, -180, 180),
+    invert: clampFilter(filters?.invert ?? defaultLayerFilters.invert, 0, 1),
+    saturation: clampFilter(filters?.saturation ?? defaultLayerFilters.saturation, -1, 1),
+    sepia: clampFilter(filters?.sepia ?? defaultLayerFilters.sepia, 0, 1),
+    shadow: clampFilter(filters?.shadow ?? defaultLayerFilters.shadow, -1, 1)
+  };
+}
+
+function clampFilter(value: number, min: number, max: number) {
+  return Math.min(Math.max(Number.isFinite(value) ? value : 0, min), max);
 }
 
 function getLayerOptions(data: SerializedLayer): LayerOptions {
@@ -217,6 +310,7 @@ function getLayerOptions(data: SerializedLayer): LayerOptions {
     width: data.width,
     x: data.x,
     y: data.y,
+    filters: data.filters,
     mask: data.mask ? LayerMask.fromJSON(data.mask) : null
   };
 }

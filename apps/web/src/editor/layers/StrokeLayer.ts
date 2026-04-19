@@ -2,6 +2,7 @@ import { transformPoint3x3 } from "../geometry/Matrix3";
 import { getModelMatrix } from "../geometry/TransformGeometry";
 import { Layer } from "./Layer";
 import type { LayerOptions, SerializedStrokeLayer } from "./Layer";
+import type { Selection } from "../selection/SelectionManager";
 
 export type StrokePoint = {
   x: number;
@@ -10,9 +11,14 @@ export type StrokePoint = {
 
 export type StrokeStyle = "pencil" | "pen" | "brush" | "marker" | "highlighter";
 
+export type StrokeSelectionClip = Selection & {
+  coordinateSpace?: "layer" | "world";
+};
+
 export type StrokePath = {
   color: [number, number, number, number];
   points: StrokePoint[];
+  selectionClip?: StrokeSelectionClip | null;
   strokeStyle: StrokeStyle;
   strokeWidth: number;
 };
@@ -52,6 +58,7 @@ export class StrokeLayer extends Layer {
     worldPoints: StrokePoint[],
     style: {
       color?: [number, number, number, number];
+      selectionClip?: StrokeSelectionClip | null;
       strokeStyle?: StrokeStyle;
       strokeWidth?: number;
     } = {}
@@ -67,6 +74,7 @@ export class StrokeLayer extends Layer {
       {
         color: nextStyle.color,
         points: worldPoints,
+        selectionClip: style.selectionClip === undefined ? null : cloneSelectionClip(style.selectionClip),
         strokeStyle: nextStyle.strokeStyle,
         strokeWidth: nextStyle.strokeWidth
       }
@@ -110,6 +118,7 @@ export class StrokeLayer extends Layer {
 
     return this.paths.map((path) => ({
       ...path,
+      selectionClip: layerSelectionClipToWorld(path.selectionClip ?? null, modelMatrix),
       points: path.points.map((point) =>
         transformPoint3x3(
           modelMatrix,
@@ -150,6 +159,13 @@ export class StrokeLayer extends Layer {
     this.scaleY = 1;
     this.paths = worldPaths.map((path) => ({
       ...path,
+      selectionClip: worldSelectionClipToLayer(
+        path.selectionClip ?? null,
+        minX,
+        minY,
+        this.width,
+        this.height
+      ),
       points: path.points.map((point) => ({
         x: point.x - minX,
         y: point.y - minY
@@ -260,7 +276,89 @@ function normalizeStrokePaths(
       color: path.color ?? fallback.color,
       points: path.points ?? [],
       strokeStyle: path.strokeStyle ?? fallback.strokeStyle,
-      strokeWidth: Math.max(1, path.strokeWidth ?? fallback.strokeWidth)
+      strokeWidth: Math.max(1, path.strokeWidth ?? fallback.strokeWidth),
+      selectionClip: cloneSelectionClip(path.selectionClip ?? null)
     };
   });
+}
+
+function cloneSelectionClip(selection: StrokeSelectionClip | null) {
+  return selection
+    ? {
+        bounds: {
+          height: selection.bounds.height,
+          width: selection.bounds.width,
+          x: selection.bounds.x,
+          y: selection.bounds.y
+        },
+        coordinateSpace: selection.coordinateSpace,
+        inverted: selection.inverted,
+        shape: selection.shape
+      }
+    : null;
+}
+
+function worldSelectionClipToLayer(
+  selection: StrokeSelectionClip | null,
+  minX: number,
+  minY: number,
+  width: number,
+  height: number
+): StrokeSelectionClip | null {
+  if (!selection) {
+    return null;
+  }
+
+  if (selection.coordinateSpace === "layer") {
+    return cloneSelectionClip(selection);
+  }
+
+  return {
+    bounds: {
+      height: selection.bounds.height / Math.max(1e-6, height),
+      width: selection.bounds.width / Math.max(1e-6, width),
+      x: (selection.bounds.x - minX) / Math.max(1e-6, width),
+      y: (selection.bounds.y - minY) / Math.max(1e-6, height)
+    },
+    coordinateSpace: "layer",
+    inverted: selection.inverted,
+    shape: selection.shape
+  };
+}
+
+function layerSelectionClipToWorld(
+  selection: StrokeSelectionClip | null,
+  modelMatrix: Float32Array
+): StrokeSelectionClip | null {
+  if (!selection) {
+    return null;
+  }
+
+  if (selection.coordinateSpace !== "layer") {
+    return cloneSelectionClip(selection);
+  }
+
+  const bounds = selection.bounds;
+  const corners = [
+    transformPoint3x3(modelMatrix, bounds.x, bounds.y),
+    transformPoint3x3(modelMatrix, bounds.x + bounds.width, bounds.y),
+    transformPoint3x3(modelMatrix, bounds.x + bounds.width, bounds.y + bounds.height),
+    transformPoint3x3(modelMatrix, bounds.x, bounds.y + bounds.height)
+  ];
+  const minX = Math.min(...corners.map((corner) => corner.x));
+  const minY = Math.min(...corners.map((corner) => corner.y));
+  const maxX = Math.max(...corners.map((corner) => corner.x));
+  const maxY = Math.max(...corners.map((corner) => corner.y));
+
+  return {
+    bounds: {
+      height: maxY - minY,
+      width: maxX - minX,
+      x: minX,
+      y: minY
+    },
+    coordinateSpace: "world",
+    inverted: selection.inverted,
+    shape: selection.shape
+  };
 }

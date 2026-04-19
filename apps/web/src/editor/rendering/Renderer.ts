@@ -1,4 +1,5 @@
 import { Camera2D } from "../geometry/Camera2D";
+import { invert3x3, transformPoint3x3 } from "../geometry/Matrix3";
 import { Scene } from "../scene/Scene";
 import {
   distance,
@@ -8,10 +9,12 @@ import {
   midpoint
 } from "../geometry/TransformGeometry";
 import { ImageLayer } from "../layers/ImageLayer";
-import { Layer } from "../layers/Layer";
+import { AdjustmentLayer } from "../layers/AdjustmentLayer";
+import { defaultLayerFilters, Layer } from "../layers/Layer";
+import type { LayerFilterAdjustment, LayerFilterSettings } from "../layers/Layer";
 import { ShapeLayer } from "../layers/ShapeLayer";
 import { StrokeLayer } from "../layers/StrokeLayer";
-import type { StrokePath, StrokeStyle } from "../layers/StrokeLayer";
+import type { StrokePath, StrokeSelectionClip, StrokeStyle } from "../layers/StrokeLayer";
 import { TextLayer } from "../layers/TextLayer";
 import { CheckerboardShaderProgram } from "./shaders/CheckerboardShaderProgram";
 import { BrushShaderProgram } from "./shaders/BrushShaderProgram";
@@ -63,6 +66,7 @@ type CachedStrokePathGeometry = {
   brushSize: number;
   brushStyle: number;
   color: [number, number, number, number];
+  selectionClip: StrokeSelectionClip | null;
   texCoords: Float32Array;
   vertices: Float32Array;
 };
@@ -70,6 +74,11 @@ type CachedStrokePathGeometry = {
 type StrokeGeometryCacheEntry = {
   paths: CachedStrokePathGeometry[];
   revision: number;
+};
+
+type EffectiveLayerFilters = {
+  adjustments: LayerFilterAdjustment[];
+  filters: LayerFilterSettings;
 };
 
 export const editorRenderOptions: RenderOptions = {
@@ -104,6 +113,8 @@ export class Renderer {
   private readonly textGeometryTexCoordBuffer: WebGLBuffer;
   private readonly supportsUint32Indices: boolean;
   private readonly strokeGeometryCache = new WeakMap<StrokeLayer, StrokeGeometryCacheEntry>();
+  private layerRenderOffset = { x: 0, y: 0 };
+  private renderColorOverride: [number, number, number, number] | null = null;
   private width = 0;
   private height = 0;
   private cssWidth = 1;
@@ -276,38 +287,24 @@ export class Renderer {
 
     this.solidColorShaderProgram.use();
     this.solidColorShaderProgram.setProjection(camera.projectionMatrix);
+    this.solidColorShaderProgram.setFilters(defaultLayerFilters);
+    this.solidColorShaderProgram.setAdjustmentFilters([]);
 
-    for (const layer of scene.layers) {
+    const effectiveFilters = getEffectiveLayerFilters(scene.layers);
+
+    for (let layerIndex = 0; layerIndex < scene.layers.length; layerIndex += 1) {
+      const layer = scene.layers[layerIndex];
+
       if (!layer.visible || layer.opacity <= 0) {
         continue;
       }
 
-      if (layer instanceof ShapeLayer) {
-        this.drawShapeLayer(layer, camera);
+      if (layer instanceof AdjustmentLayer) {
+        continue;
       }
 
-      if (layer instanceof StrokeLayer) {
-        this.drawStrokeLayer(layer, camera);
-      }
-
-      if (layer instanceof ImageLayer) {
-        this.texturedShaderProgram.use();
-        this.texturedShaderProgram.setProjection(camera.projectionMatrix);
-        this.texturedShaderProgram.setModel(getModelMatrix(layer));
-        this.texturedShaderProgram.setTextureUnit(0);
-        this.texturedShaderProgram.setMaskTextureUnit(1);
-        this.texturedShaderProgram.setOpacity(layer.opacity);
-        this.gl.activeTexture(this.gl.TEXTURE0);
-        this.gl.bindTexture(this.gl.TEXTURE_2D, this.textureManager.getTexture(layer));
-        this.bindMask(layer, this.texturedShaderProgram);
-        this.quad.drawTextured(this.texturedShaderProgram);
-        this.solidColorShaderProgram.use();
-        this.solidColorShaderProgram.setProjection(camera.projectionMatrix);
-      }
-
-      if (layer instanceof TextLayer) {
-        this.drawTextLayer(layer, camera, options.textEdit);
-      }
+      this.drawLayerDropShadow(layer, camera, effectiveFilters[layerIndex].filters);
+      this.drawLayerContent(layer, camera, options.textEdit, effectiveFilters[layerIndex]);
     }
 
     const selectedLayer = scene.selectedLayerId ? scene.getLayer(scene.selectedLayerId) : null;
@@ -356,6 +353,8 @@ export class Renderer {
     if (options.documentBackground === "white") {
       this.solidColorShaderProgram.use();
       this.solidColorShaderProgram.setProjection(camera.projectionMatrix);
+      this.solidColorShaderProgram.setFilters(defaultLayerFilters);
+      this.solidColorShaderProgram.setAdjustmentFilters([]);
       this.solidColorShaderProgram.setColor([1, 1, 1, 1]);
       this.drawRectangle(scene.document);
       return;
@@ -396,6 +395,8 @@ export class Renderer {
 
     this.solidColorShaderProgram.use();
     this.solidColorShaderProgram.setProjection(camera.projectionMatrix);
+    this.solidColorShaderProgram.setFilters(defaultLayerFilters);
+    this.solidColorShaderProgram.setAdjustmentFilters([]);
     this.solidColorShaderProgram.setColor([0.39, 0.86, 0.75, 1]);
 
     this.drawLine(corners.bottomLeft, corners.bottomRight, outlineWidth);
@@ -492,9 +493,131 @@ export class Renderer {
     });
   }
 
-  private drawShapeLayer(layer: ShapeLayer, camera: Camera2D) {
+  private drawLayerContent(
+    layer: Layer,
+    camera: Camera2D,
+    textEdit: RenderOptions["textEdit"],
+    filters: EffectiveLayerFilters
+  ) {
+    if (layer instanceof ShapeLayer) {
+      this.drawShapeLayer(layer, camera, filters);
+    }
+
+    if (layer instanceof StrokeLayer) {
+      this.drawStrokeLayer(layer, camera, filters);
+    }
+
+    if (layer instanceof ImageLayer) {
+      this.drawImageLayer(layer, camera, filters);
+    }
+
+    if (layer instanceof TextLayer) {
+      this.drawTextLayer(layer, camera, textEdit, filters);
+    }
+  }
+
+  private drawLayerDropShadow(layer: Layer, camera: Camera2D, filters: LayerFilterSettings) {
+    if (filters.dropShadowOpacity <= 0) {
+      return;
+    }
+
+    const shadowFilters = {
+      ...defaultLayerFilters,
+      blur: Math.max(filters.blur, filters.dropShadowBlur)
+    };
+    const passes = getDropShadowPasses(filters);
+    const previousOverride = this.renderColorOverride;
+
+    try {
+      for (const pass of passes) {
+        this.renderColorOverride = [0, 0, 0, filters.dropShadowOpacity * pass.opacity];
+        this.withLayerRenderOffset(
+          {
+            x: filters.dropShadowOffsetX + pass.x,
+            y: filters.dropShadowOffsetY + pass.y
+          },
+          () => this.drawLayerContent(layer, camera, null, {
+            adjustments: [],
+            filters: shadowFilters
+          })
+        );
+      }
+    } finally {
+      this.renderColorOverride = previousOverride;
+    }
+  }
+
+  private getRenderColor(
+    color: [number, number, number, number],
+    opacity: number
+  ): [number, number, number, number] {
+    if (!this.renderColorOverride) {
+      return [color[0], color[1], color[2], color[3] * opacity];
+    }
+
+    return [
+      this.renderColorOverride[0],
+      this.renderColorOverride[1],
+      this.renderColorOverride[2],
+      color[3] * opacity * this.renderColorOverride[3]
+    ];
+  }
+
+  private getLayerModelMatrix(layer: Layer) {
+    if (this.layerRenderOffset.x === 0 && this.layerRenderOffset.y === 0) {
+      return getModelMatrix(layer);
+    }
+
+    return getModelMatrix({
+      ...layer,
+      x: layer.x + this.layerRenderOffset.x,
+      y: layer.y + this.layerRenderOffset.y
+    });
+  }
+
+  private withLayerRenderOffset(offset: { x: number; y: number }, draw: () => void) {
+    const previousOffset = this.layerRenderOffset;
+
+    this.layerRenderOffset = {
+      x: previousOffset.x + offset.x,
+      y: previousOffset.y + offset.y
+    };
+
+    try {
+      draw();
+    } finally {
+      this.layerRenderOffset = previousOffset;
+    }
+  }
+
+  private drawImageLayer(layer: ImageLayer, camera: Camera2D, filters: EffectiveLayerFilters) {
+    this.texturedShaderProgram.use();
+    this.texturedShaderProgram.setProjection(camera.projectionMatrix);
+    this.texturedShaderProgram.setModel(this.getLayerModelMatrix(layer));
+    this.texturedShaderProgram.setTextureUnit(0);
+    this.texturedShaderProgram.setMaskTextureUnit(1);
+    this.texturedShaderProgram.setOpacity(layer.opacity);
+    this.texturedShaderProgram.setFilters(filters.filters);
+    this.texturedShaderProgram.setAdjustmentFilters(filters.adjustments);
+    this.texturedShaderProgram.setTextureSize(layer.image.naturalWidth, layer.image.naturalHeight);
+    this.texturedShaderProgram.setTintColor(this.renderColorOverride ?? [1, 1, 1, 1]);
+    this.texturedShaderProgram.setTintEnabled(Boolean(this.renderColorOverride));
+    this.gl.activeTexture(this.gl.TEXTURE0);
+    this.gl.bindTexture(this.gl.TEXTURE_2D, this.textureManager.getTexture(layer));
+    this.bindMask(layer, this.texturedShaderProgram);
+    this.quad.drawTextured(this.texturedShaderProgram);
+    this.texturedShaderProgram.setTintEnabled(false);
     this.solidColorShaderProgram.use();
     this.solidColorShaderProgram.setProjection(camera.projectionMatrix);
+    this.solidColorShaderProgram.setFilters(defaultLayerFilters);
+    this.solidColorShaderProgram.setAdjustmentFilters([]);
+  }
+
+  private drawShapeLayer(layer: ShapeLayer, camera: Camera2D, filters: EffectiveLayerFilters) {
+    this.solidColorShaderProgram.use();
+    this.solidColorShaderProgram.setProjection(camera.projectionMatrix);
+    this.solidColorShaderProgram.setFilters(filters.filters);
+    this.solidColorShaderProgram.setAdjustmentFilters(filters.adjustments);
 
     if (layer.shape === "rectangle") {
       this.drawRectangleShape(layer);
@@ -514,7 +637,7 @@ export class Renderer {
     this.drawPolygonShape(layer);
   }
 
-  private drawStrokeLayer(layer: StrokeLayer, camera: Camera2D) {
+  private drawStrokeLayer(layer: StrokeLayer, camera: Camera2D, filters: EffectiveLayerFilters) {
     if (layer.paths.length === 0) {
       return;
     }
@@ -523,17 +646,15 @@ export class Renderer {
 
     this.brushShaderProgram.use();
     this.brushShaderProgram.setProjection(camera.projectionMatrix);
+    this.brushShaderProgram.setFilters(filters.filters);
+    this.brushShaderProgram.setAdjustmentFilters(filters.adjustments);
     this.bindMask(layer, this.brushShaderProgram);
 
     for (const path of cachedGeometry.paths) {
-      this.brushShaderProgram.setColor([
-        path.color[0],
-        path.color[1],
-        path.color[2],
-        path.color[3] * layer.opacity
-      ]);
+      this.brushShaderProgram.setColor(this.getRenderColor(path.color, layer.opacity));
       this.brushShaderProgram.setBrushStyle(path.brushStyle);
       this.brushShaderProgram.setBrushSize(path.brushSize);
+      this.brushShaderProgram.setSelectionClip(getLayerSelectionClip(layer, path.selectionClip));
       this.drawBrushLayerLocalVertexData(layer, path.vertices, path.texCoords);
     }
   }
@@ -563,12 +684,7 @@ export class Renderer {
     }
 
     if (layer.fillColor[3] > 0) {
-      this.solidColorShaderProgram.setColor([
-        layer.fillColor[0],
-        layer.fillColor[1],
-        layer.fillColor[2],
-        layer.fillColor[3] * layer.opacity
-      ]);
+      this.solidColorShaderProgram.setColor(this.getRenderColor(layer.fillColor, layer.opacity));
       this.bindMask(layer, this.solidColorShaderProgram);
       this.drawLayerLocalPolygon(layer, points);
     }
@@ -577,12 +693,7 @@ export class Renderer {
       return;
     }
 
-    this.solidColorShaderProgram.setColor([
-      layer.strokeColor[0],
-      layer.strokeColor[1],
-      layer.strokeColor[2],
-      layer.strokeColor[3] * layer.opacity
-    ]);
+    this.solidColorShaderProgram.setColor(this.getRenderColor(layer.strokeColor, layer.opacity));
     this.bindMask(layer, this.solidColorShaderProgram);
 
     const strokeWidth =
@@ -598,13 +709,8 @@ export class Renderer {
 
   private drawRectangleShape(layer: ShapeLayer) {
     if (layer.fillColor[3] > 0) {
-      this.solidColorShaderProgram.setColor([
-        layer.fillColor[0],
-        layer.fillColor[1],
-        layer.fillColor[2],
-        layer.fillColor[3] * layer.opacity
-      ]);
-      this.solidColorShaderProgram.setModel(getModelMatrix(layer));
+      this.solidColorShaderProgram.setColor(this.getRenderColor(layer.fillColor, layer.opacity));
+      this.solidColorShaderProgram.setModel(this.getLayerModelMatrix(layer));
       this.bindMask(layer, this.solidColorShaderProgram);
       this.quad.drawTextured(this.solidColorShaderProgram);
     }
@@ -613,12 +719,7 @@ export class Renderer {
         return;
       }
 
-      this.solidColorShaderProgram.setColor([
-        layer.strokeColor[0],
-        layer.strokeColor[1],
-        layer.strokeColor[2],
-        layer.strokeColor[3] * layer.opacity
-      ]);
+      this.solidColorShaderProgram.setColor(this.getRenderColor(layer.strokeColor, layer.opacity));
       this.bindMask(layer, this.solidColorShaderProgram);
 
       const strokeWidthX = Math.min(
@@ -669,12 +770,7 @@ export class Renderer {
       layer.height
     );
 
-    this.solidColorShaderProgram.setColor([
-      layer.strokeColor[0],
-      layer.strokeColor[1],
-      layer.strokeColor[2],
-      layer.strokeColor[3] * layer.opacity
-    ]);
+    this.solidColorShaderProgram.setColor(this.getRenderColor(layer.strokeColor, layer.opacity));
     this.bindMask(layer, this.solidColorShaderProgram);
 
     this.drawLayerLocalRectangle(layer, {
@@ -687,13 +783,8 @@ export class Renderer {
 
   private drawEllipseShape(layer: ShapeLayer) {
     if (layer.fillColor[3] > 0) {
-      this.solidColorShaderProgram.setColor([
-        layer.fillColor[0],
-        layer.fillColor[1],
-        layer.fillColor[2],
-        layer.fillColor[3] * layer.opacity
-      ]);
-      this.solidColorShaderProgram.setModel(getModelMatrix(layer));
+      this.solidColorShaderProgram.setColor(this.getRenderColor(layer.fillColor, layer.opacity));
+      this.solidColorShaderProgram.setModel(this.getLayerModelMatrix(layer));
       this.bindMask(layer, this.solidColorShaderProgram);
       this.ellipseMesh.drawFill(this.solidColorShaderProgram);
     }
@@ -702,13 +793,8 @@ export class Renderer {
       return;
     }
 
-    this.solidColorShaderProgram.setColor([
-      layer.strokeColor[0],
-      layer.strokeColor[1],
-      layer.strokeColor[2],
-      layer.strokeColor[3] * layer.opacity
-    ]);
-    this.solidColorShaderProgram.setModel(getModelMatrix(layer));
+    this.solidColorShaderProgram.setColor(this.getRenderColor(layer.strokeColor, layer.opacity));
+    this.solidColorShaderProgram.setModel(this.getLayerModelMatrix(layer));
     this.bindMask(layer, this.solidColorShaderProgram);
     this.ellipseMesh.drawStroke(
       this.solidColorShaderProgram,
@@ -721,7 +807,8 @@ export class Renderer {
   private drawTextLayer(
     layer: TextLayer,
     camera: Camera2D,
-    textEdit: RenderOptions["textEdit"]
+    textEdit: RenderOptions["textEdit"],
+    filters: EffectiveLayerFilters
   ) {
     const requestedCompiledFont = this.fontLoader.requestFont(
       layer.fontFamily,
@@ -752,10 +839,12 @@ export class Renderer {
         this.drawTextSelection(layer, geometry.characterBoxes, textEdit);
       }
 
-      const didDrawCompiledText = this.drawCompiledTextGeometry(layer, camera, geometry);
+      const didDrawCompiledText = this.drawCompiledTextGeometry(layer, camera, geometry, filters);
 
       if (didDrawCompiledText && textEdit?.layerId === layer.id) {
         this.solidColorShaderProgram.setMaskEnabled(false);
+        this.solidColorShaderProgram.setFilters(defaultLayerFilters);
+        this.solidColorShaderProgram.setAdjustmentFilters([]);
         this.solidColorShaderProgram.setColor([0.39, 0.86, 0.75, 1]);
         this.drawLayerLocalRectangle(layer, geometry.caret);
       }
@@ -775,18 +864,17 @@ export class Renderer {
     if (textEdit?.layerId === layer.id) {
       this.solidColorShaderProgram.use();
       this.solidColorShaderProgram.setProjection(camera.projectionMatrix);
+      this.solidColorShaderProgram.setFilters(defaultLayerFilters);
+      this.solidColorShaderProgram.setAdjustmentFilters([]);
       this.drawTextSelection(layer, layout.characterBoxes, textEdit);
     }
 
     this.solidColorShaderProgram.use();
     this.solidColorShaderProgram.setProjection(camera.projectionMatrix);
+    this.solidColorShaderProgram.setFilters(filters.filters);
+    this.solidColorShaderProgram.setAdjustmentFilters(filters.adjustments);
     this.bindMask(layer, this.solidColorShaderProgram);
-    this.solidColorShaderProgram.setColor([
-      layer.color[0],
-      layer.color[1],
-      layer.color[2],
-      layer.color[3] * layer.opacity
-    ]);
+    this.solidColorShaderProgram.setColor(this.getRenderColor(layer.color, layer.opacity));
 
     for (const glyph of layout.glyphs) {
       this.drawLayerLocalRectangle(layer, glyph, layout.maskFrame);
@@ -798,6 +886,8 @@ export class Renderer {
     }
 
     this.solidColorShaderProgram.setMaskEnabled(false);
+    this.solidColorShaderProgram.setFilters(defaultLayerFilters);
+    this.solidColorShaderProgram.setAdjustmentFilters([]);
     this.solidColorShaderProgram.setColor([0.39, 0.86, 0.75, 1]);
     this.drawLayerLocalRectangle(layer, layout.caret);
   }
@@ -805,7 +895,8 @@ export class Renderer {
   private drawCompiledTextGeometry(
     layer: TextLayer,
     camera: Camera2D,
-    geometry: CompiledTextGeometry
+    geometry: CompiledTextGeometry,
+    filters: EffectiveLayerFilters
   ) {
     if (geometry.indices.length === 0) {
       return true;
@@ -828,14 +919,11 @@ export class Renderer {
 
     this.solidColorShaderProgram.use();
     this.solidColorShaderProgram.setProjection(camera.projectionMatrix);
-    this.solidColorShaderProgram.setModel(getModelMatrix(layer));
+    this.solidColorShaderProgram.setFilters(filters.filters);
+    this.solidColorShaderProgram.setAdjustmentFilters(filters.adjustments);
+    this.solidColorShaderProgram.setModel(this.getLayerModelMatrix(layer));
     this.bindMask(layer, this.solidColorShaderProgram);
-    this.solidColorShaderProgram.setColor([
-      layer.color[0],
-      layer.color[1],
-      layer.color[2],
-      layer.color[3] * layer.opacity
-    ]);
+    this.solidColorShaderProgram.setColor(this.getRenderColor(layer.color, layer.opacity));
 
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.textGeometryPositionBuffer);
     this.gl.bufferData(this.gl.ARRAY_BUFFER, normalizedVertices, this.gl.DYNAMIC_DRAW);
@@ -894,6 +982,8 @@ export class Renderer {
     }
 
     this.solidColorShaderProgram.setMaskEnabled(false);
+    this.solidColorShaderProgram.setFilters(defaultLayerFilters);
+    this.solidColorShaderProgram.setAdjustmentFilters([]);
     this.solidColorShaderProgram.setColor([0.25, 0.56, 1, 0.35]);
 
     for (const box of characterBoxes) {
@@ -939,7 +1029,7 @@ export class Renderer {
     const v1 = (clippedTop - texCoordFrame.y) / texCoordFrame.height;
     const texCoords = new Float32Array([u0, v0, u1, v0, u0, v1, u0, v1, u1, v0, u1, v1]);
 
-    this.solidColorShaderProgram.setModel(getModelMatrix(layer));
+    this.solidColorShaderProgram.setModel(this.getLayerModelMatrix(layer));
 
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.localRectanglePositionBuffer);
     this.gl.bufferData(this.gl.ARRAY_BUFFER, vertices, this.gl.DYNAMIC_DRAW);
@@ -1037,7 +1127,7 @@ export class Renderer {
       texCoords[vertexIndex + 1] = point.y / layer.height;
     }
 
-    this.solidColorShaderProgram.setModel(getModelMatrix(layer));
+    this.solidColorShaderProgram.setModel(this.getLayerModelMatrix(layer));
 
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.localRectanglePositionBuffer);
     this.gl.bufferData(this.gl.ARRAY_BUFFER, vertices, this.gl.DYNAMIC_DRAW);
@@ -1075,7 +1165,7 @@ export class Renderer {
       return;
     }
 
-    this.solidColorShaderProgram.setModel(getModelMatrix(layer));
+    this.solidColorShaderProgram.setModel(this.getLayerModelMatrix(layer));
 
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.localRectanglePositionBuffer);
     this.gl.bufferData(this.gl.ARRAY_BUFFER, vertices, this.gl.DYNAMIC_DRAW);
@@ -1113,7 +1203,7 @@ export class Renderer {
       return;
     }
 
-    this.brushShaderProgram.setModel(getModelMatrix(layer));
+    this.brushShaderProgram.setModel(this.getLayerModelMatrix(layer));
 
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.localRectanglePositionBuffer);
     this.gl.bufferData(this.gl.ARRAY_BUFFER, vertices, this.gl.DYNAMIC_DRAW);
@@ -1172,6 +1262,147 @@ function isFiniteFloatArray(values: Float32Array) {
   return true;
 }
 
+function getEffectiveLayerFilters(layers: Layer[]) {
+  const effectiveFilters = new Map<Layer, EffectiveLayerFilters>();
+  let adjustmentFiltersAbove: LayerFilterAdjustment[] = [];
+
+  for (let index = layers.length - 1; index >= 0; index -= 1) {
+    const layer = layers[index];
+
+    if (layer instanceof AdjustmentLayer) {
+      if (layer.visible && layer.opacity > 0) {
+        adjustmentFiltersAbove = [
+          {
+            bounds: getLayerWorldBounds(layer),
+            filters: scaleLayerFilters(layer.filters, layer.opacity)
+          },
+          ...adjustmentFiltersAbove
+        ];
+      }
+
+      effectiveFilters.set(layer, {
+        adjustments: [],
+        filters: defaultLayerFilters
+      });
+      continue;
+    }
+
+    effectiveFilters.set(layer, {
+      adjustments: adjustmentFiltersAbove,
+      filters: layer.filters
+    });
+  }
+
+  return layers.map(
+    (layer): EffectiveLayerFilters =>
+      effectiveFilters.get(layer) ?? {
+        adjustments: [],
+        filters: layer.filters
+      }
+  );
+}
+
+function combineLayerFilters(base: LayerFilterSettings, overlay: LayerFilterSettings) {
+  return {
+    brightness: clampFilter(base.brightness + overlay.brightness, -1, 1),
+    blur: clampFilter(base.blur + overlay.blur, 0, 64),
+    contrast: clampFilter(base.contrast + overlay.contrast, -1, 1),
+    dropShadowBlur: clampFilter(base.dropShadowBlur + overlay.dropShadowBlur, 0, 80),
+    dropShadowOffsetX: clampFilter(
+      base.dropShadowOffsetX + overlay.dropShadowOffsetX - defaultLayerFilters.dropShadowOffsetX,
+      -240,
+      240
+    ),
+    dropShadowOffsetY: clampFilter(
+      base.dropShadowOffsetY + overlay.dropShadowOffsetY - defaultLayerFilters.dropShadowOffsetY,
+      -240,
+      240
+    ),
+    dropShadowOpacity: combineAmountFilter(base.dropShadowOpacity, overlay.dropShadowOpacity),
+    grayscale: combineAmountFilter(base.grayscale, overlay.grayscale),
+    hue: clampFilter(base.hue + overlay.hue, -180, 180),
+    invert: combineAmountFilter(base.invert, overlay.invert),
+    saturation: clampFilter(base.saturation + overlay.saturation, -1, 1),
+    sepia: combineAmountFilter(base.sepia, overlay.sepia),
+    shadow: clampFilter(base.shadow + overlay.shadow, -1, 1)
+  };
+}
+
+function scaleLayerFilters(filters: LayerFilterSettings, amount: number) {
+  return {
+    brightness: filters.brightness * amount,
+    blur: filters.blur * amount,
+    contrast: filters.contrast * amount,
+    dropShadowBlur: filters.dropShadowBlur * amount,
+    dropShadowOffsetX:
+      defaultLayerFilters.dropShadowOffsetX +
+      (filters.dropShadowOffsetX - defaultLayerFilters.dropShadowOffsetX) * amount,
+    dropShadowOffsetY:
+      defaultLayerFilters.dropShadowOffsetY +
+      (filters.dropShadowOffsetY - defaultLayerFilters.dropShadowOffsetY) * amount,
+    dropShadowOpacity: filters.dropShadowOpacity * amount,
+    grayscale: filters.grayscale * amount,
+    hue: filters.hue * amount,
+    invert: filters.invert * amount,
+    saturation: filters.saturation * amount,
+    sepia: filters.sepia * amount,
+    shadow: filters.shadow * amount
+  };
+}
+
+function combineAmountFilter(base: number, overlay: number) {
+  return clampFilter(1 - (1 - base) * (1 - overlay), 0, 1);
+}
+
+function clampFilter(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function getLayerWorldBounds(layer: Layer): [number, number, number, number] {
+  const corners = getLayerCorners(layer);
+  const xs = [
+    corners.topLeft.x,
+    corners.topRight.x,
+    corners.bottomRight.x,
+    corners.bottomLeft.x
+  ];
+  const ys = [
+    corners.topLeft.y,
+    corners.topRight.y,
+    corners.bottomRight.y,
+    corners.bottomLeft.y
+  ];
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const maxX = Math.max(...xs);
+  const maxY = Math.max(...ys);
+
+  return [minX, minY, maxX - minX, maxY - minY];
+}
+
+function getDropShadowPasses(filters: LayerFilterSettings) {
+  const blur = filters.dropShadowBlur;
+
+  if (blur <= 0.5) {
+    return [{ opacity: 1, x: 0, y: 0 }];
+  }
+
+  const spread = blur * 0.35;
+  const diagonalSpread = spread * 0.7071;
+
+  return [
+    { opacity: 0.2, x: 0, y: 0 },
+    { opacity: 0.1, x: spread, y: 0 },
+    { opacity: 0.1, x: -spread, y: 0 },
+    { opacity: 0.1, x: 0, y: spread },
+    { opacity: 0.1, x: 0, y: -spread },
+    { opacity: 0.1, x: diagonalSpread, y: diagonalSpread },
+    { opacity: 0.1, x: -diagonalSpread, y: diagonalSpread },
+    { opacity: 0.1, x: diagonalSpread, y: -diagonalSpread },
+    { opacity: 0.1, x: -diagonalSpread, y: -diagonalSpread }
+  ];
+}
+
 function getPolygonShapePoints(layer: ShapeLayer) {
   const width = layer.width;
   const height = layer.height;
@@ -1208,6 +1439,45 @@ function getPolygonShapePoints(layer: ShapeLayer) {
   return [];
 }
 
+function getLayerSelectionClip(layer: StrokeLayer, clip: StrokeSelectionClip | null) {
+  if (!clip) {
+    return null;
+  }
+
+  if (clip.coordinateSpace === "layer") {
+    return clip;
+  }
+
+  const inverseModel = invert3x3(getModelMatrix(layer));
+
+  if (!inverseModel) {
+    return null;
+  }
+
+  const bounds = clip.bounds;
+  const corners = [
+    transformPoint3x3(inverseModel, bounds.x, bounds.y),
+    transformPoint3x3(inverseModel, bounds.x + bounds.width, bounds.y),
+    transformPoint3x3(inverseModel, bounds.x + bounds.width, bounds.y + bounds.height),
+    transformPoint3x3(inverseModel, bounds.x, bounds.y + bounds.height)
+  ];
+  const minX = Math.min(...corners.map((corner) => corner.x));
+  const minY = Math.min(...corners.map((corner) => corner.y));
+  const maxX = Math.max(...corners.map((corner) => corner.x));
+  const maxY = Math.max(...corners.map((corner) => corner.y));
+
+  return {
+    bounds: {
+      height: maxY - minY,
+      width: maxX - minX,
+      x: minX,
+      y: minY
+    },
+    inverted: clip.inverted,
+    shape: clip.shape
+  };
+}
+
 function buildStrokePathGeometry(layer: StrokeLayer, path: StrokePath): CachedStrokePathGeometry {
   const width = getRenderedStrokeWidth(path.strokeStyle, path.strokeWidth);
   const points = simplifyStrokePoints(path.points, Math.max(0.75, width * 0.08));
@@ -1238,6 +1508,7 @@ function buildStrokePathGeometry(layer: StrokeLayer, path: StrokePath): CachedSt
     brushSize: path.strokeWidth,
     brushStyle: getBrushStyleUniform(path.strokeStyle),
     color: getRenderedStrokeColor(path.strokeStyle, path.color),
+    selectionClip: path.selectionClip ?? null,
     texCoords,
     vertices
   };

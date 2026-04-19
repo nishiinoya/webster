@@ -56,42 +56,50 @@ npm run typecheck
 
 Legend:
 
-- Present: implemented in the app
-- Partial: implemented, but not complete enough for a full product/demo requirement
-- Planned: not implemented yet
+- Present: implemented in the app.
+- Partial: implemented, but still has known limitations.
+- Planned: not implemented yet.
 
 | Area | Status | Notes |
 | --- | --- | --- |
-| Editor workspace | Present | Toolbar, tool rail, tabs, WebGL canvas, layers, properties, and history panels exist. |
+| Editor workspace | Present | Top menus, tool rail, tabs, WebGL canvas, layers, properties, and history panels exist. |
+| Top menus | Partial | File and Select have real actions. Edit/View/Filter now contain useful entries plus disabled TODO items. |
 | Project templates/presets | Partial | New document presets exist: 1200x800, 1920x1080, 1080x1080. User-created templates are planned. |
 | New project creation | Present | New document dialog creates a blank document from preset/custom size. |
 | WebGL rendering | Present | Scene rendering is outside React and handled by `Renderer`. |
-| Layers | Present | Shape and image layers are supported. |
+| Layers | Present | Image, text, shape, stroke, and adjustment layers are supported. |
+| Layer properties | Present | Transform, visibility, lock, opacity, text, shape, mask, and filter controls exist. |
+| Adjustment layers | Partial | Adjustment layers affect layers below and can be moved/scaled to limit the affected rectangular region. Rotated adjustment layers currently use their world bounding box. |
+| Per-layer filters | Present | Brightness, contrast, saturation, grayscale, hue, sepia, invert, shadow, blur, and drop shadow settings exist. |
+| Shader filter rendering | Partial | Basic filters are shader uniforms. Image blur is texture-sampled in shader. Vector/text/brush blur is edge softness; perfect outward blur needs a framebuffer pass. |
+| Drop shadow | Partial | Drop shadow is rendered as GPU passes behind the layer. It is useful but not a full Photoshop-style shadow renderer yet. |
 | Add images | Present | Image import creates an image layer. |
 | Move elements by mouse | Present | Move tool can select, move, resize, and rotate layers. |
 | Move elements by keyboard | Planned | Arrow-key nudging is not implemented yet. |
-| Delete elements | Present | Layer menu supports deleting layers. |
+| Delete elements | Present | Layer menu supports deleting layers. Keyboard delete is planned. |
 | Canvas pan | Present | Pan tool and middle mouse panning are supported. |
 | Canvas zoom | Present | Mouse wheel zoom is supported. Dedicated Zoom tool was removed because wheel zoom already covers it. |
 | Canvas resize | Partial | New documents can be created at chosen sizes. Resizing an existing canvas is planned. |
 | Selection tools | Present | Rectangle Select and Ellipse Select are implemented. |
-| Selection placeholders | Planned | Lasso Select and Magic Select are visible as disabled "Later" tools. |
+| Selection placeholders | Planned | Lasso Select and Magic Select are visible as disabled future tools. |
 | Selection overlay | Present | Active selections dim the outside area and show a moving dashed outline. |
 | Clear selection | Present | Select menu supports clearing the current selection. |
 | Invert selection | Present | Select menu supports inverted selections. |
 | Selection to mask | Present | Selection can be rasterized into the selected layer mask. |
-| Brush inside selection | Present | Mask Brush respects the active selection. |
-| Mask brush | Present | Paints reveal/hide values into layer masks with size, opacity, and mode controls. |
-| Free drawing / pencil | Present | General paint/pencil drawing |
-| Text tool | Present | Text creation, text color, size, and font/style controls. |
-| Shape elements | Present | Shape layer exists. |
+| Draw inside selection | Present | Draw strokes respect rectangle/ellipse selections. Selection clips are stored on stroke paths so changing selection later does not reveal hidden parts. |
+| Mask brush | Present | Paints reveal/hide values into layer masks with size, opacity, and mode controls. Mask brush resolution is increased for better quality. |
+| Free drawing | Present | Draw tool supports pencil, pen, brush, marker, highlighter, color, size, eraser mode, and target stroke layer selection. |
+| Stroke layers | Present | Multiple paths with different style/color/size can live on one stroke layer. Drawing can continue into an existing stroke layer. |
+| Text tool | Present | Text creation, editing, selection, color, size, font, alignment, bold, and italic controls exist. |
+| Shape elements | Present | Rectangle, circle, line, triangle, diamond, and arrow shapes exist with fill/stroke controls. |
 | History panel | Partial | Panel exists, but full undo/redo history is not implemented. Mask brush stroke undo exists. |
 | Save `.webster` | Present | Saves a portable project package with `manifest.json` and image assets. |
 | Open `.webster` | Present | Opens saved Webster project packages. |
 | Recent project handle | Present | Uses browser File System Access API/IndexedDB when available. |
-| Export PNG | Present | `File -> Export as... -> PNG`; transparent background, no editor UI/tools in output. |
+| Export PNG | Present | `File -> Export as... -> PNG`; transparent background option, no editor UI/tools in output. |
 | Export JPEG/JPG | Present | `File -> Export as... -> JPEG`; white or checkerboard background, no editor UI/tools in output. |
 | Export PDF | Present | `File -> Export as... -> PDF`; single-page PDF with white or checkerboard background, no editor UI/tools in output. |
+| Export color consistency | Partial | Export path uses WebGL offscreen rendering; color issues have been worked on, but more browser/device validation is still useful. |
 | Extra export format | Present | `.webster` project package is the extra native project format. |
 | Social sharing | Planned | Sharing to social networks is not implemented yet. |
 | Authentication | Planned | Registration, login, email confirmation, and profile editing are not implemented. |
@@ -102,24 +110,34 @@ Legend:
 
 ## Tools
 
-The tool rail intentionally shows only tools that are useful right now, plus disabled placeholders for future selection tools.
+The tool rail shows active editor tools plus disabled placeholders for future selection tools.
 
 | Tool | Status | Description |
 | --- | --- | --- |
 | Move | Present | Select, move, resize, and rotate layers. |
 | Pan | Present | Drag the workspace without editing artwork. |
 | Mask Brush | Present | Paint the selected layer mask. |
-| Rectangle Select | Present | Drag a rectangular selection. Previously called Marquee. |
+| Text | Present | Place and edit live text layers. |
+| Draw | Present | Draw freehand strokes with pencil, pen, brush, marker, and highlighter. |
+| Shape | Present | Draw rectangles, circles, lines, triangles, diamonds, and arrows. |
+| Rectangle Select | Present | Drag a rectangular selection. |
 | Ellipse Select | Present | Drag an oval selection. |
 | Lasso Select | Planned | Disabled placeholder for freehand selection. |
 | Magic Select | Planned | Disabled placeholder for color/similarity-based selection. |
 
 Removed from the active tool list:
 
-- Brush: planned as a future free drawing tool.
-- Eraser: planned after general pixel/paint layers exist.
-- Text: planned after text layer support exists.
 - Zoom: removed because wheel zoom is already implemented.
+
+## Top Menus
+
+| Menu | Status | Notes |
+| --- | --- | --- |
+| File | Present | New, open `.webster`, import image, save, save as, and export. |
+| Edit | Partial | Tool shortcuts exist. Undo/redo/cut/copy/paste are visible TODO items. |
+| View | Partial | Current zoom display and Pan workspace action exist. Fit canvas, keyboard zoom, checkerboard toggle, rulers, and guides are TODO. |
+| Filter | Partial | Can add an adjustment layer. Implemented filter families are listed. Filter gallery and clipping adjustment to one layer/group are TODO. |
+| Select | Present | Clear selection, invert selection, and convert selection to mask. |
 
 ## Keyboard And Mouse Controls
 
@@ -132,6 +150,7 @@ Removed from the active tool list:
 | Pan tool + drag | Present | Pan canvas. |
 | Move tool + drag layer | Present | Move selected layer with mouse. |
 | Transform handles | Present | Resize and rotate selected layer with mouse. |
+| Text keyboard input | Present | Typing, caret movement, selection, copy/paste text input, delete/backspace, and multiline text editing exist while editing text. |
 | Ctrl+C / Cmd+C | Planned | Copy selected layer or selected area. Selection-area copy is not implemented yet. |
 | Ctrl+V / Cmd+V | Planned | Paste copied layer/area. |
 | Delete / Backspace | Planned | Delete selected layer from keyboard. Layer menu delete exists. |
@@ -154,7 +173,7 @@ Export output excludes:
 
 Formats:
 
-- PNG: transparent background.
+- PNG: transparent, white, or checkerboard background depending on export option.
 - JPEG/JPG: white or checkerboard background.
 - PDF: single-page PDF, white or checkerboard background.
 - `.webster`: native editable project package.
@@ -171,11 +190,129 @@ Current project data includes:
 - document bounds and background metadata
 - layer order
 - selected layer id
-- shape layers
 - image layers
+- text layers
+- shape layers
+- stroke layers and per-path brush settings
+- adjustment layers
 - layer masks
+- selection clips stored on stroke paths
 - transforms: x, y, width, height, scale, rotation
 - visibility, opacity, lock state
+- per-layer filter settings
+
+## What Is Left To Implement
+
+This is the practical remaining-work checklist.
+
+### Core Editing
+
+- Full command-based undo/redo for layer creation, deletion, transforms, filters, masks, text edits, and strokes.
+- Keyboard delete for selected layer.
+- Arrow-key nudging for selected layer/selection.
+- Copy, cut, and paste for layers.
+- Copy, cut, and paste for selected pixel/selection area.
+- Duplicate layer command.
+- Layer grouping.
+- Better layer ordering shortcuts from menus/keyboard.
+- Canvas resize for an existing project.
+- Crop document to selection.
+
+### Selection
+
+- Lasso Select implementation.
+- Magic Select/color similarity selection.
+- Add/subtract/intersect selection modes.
+- Feather selection.
+- Grow/shrink selection.
+- Save/load selection.
+- More exact rotated adjustment/selection region handling where needed.
+
+### Filters And Effects
+
+- Offscreen framebuffer/post-process pipeline for true blur on all layer types.
+- More accurate soft drop shadow with blur spread instead of multi-pass approximation.
+- Clip adjustment layer to one layer or group.
+- Adjustment layer masks.
+- Filter gallery/presets.
+- Complex blur/sharpen after framebuffer support exists.
+- Curves/levels/color balance/vibrance.
+- Noise, posterize, threshold, and gradient map.
+
+### Drawing And Brushes
+
+- More natural brush engine with pressure/velocity if pointer hardware supports it.
+- Brush presets saved in project/user settings.
+- Stabilizer/smoothing control.
+- Smudge/blend tool.
+- Better eraser controls and keyboard shortcut.
+- Optional raster paint layer mode if needed for very large drawings.
+
+### Text
+
+- Better font picker and font previews.
+- Text box resizing behavior improvements.
+- Text transform/warp effects.
+- More text decorations: underline, stroke, shadow presets.
+- Text layer export validation across browsers.
+
+### Shapes
+
+- More shape types: star, polygon, rounded rectangle, speech bubble.
+- Editable shape points/handles.
+- Shape presets.
+- Gradient fill/stroke.
+
+### View And UX
+
+- Fit canvas command.
+- Zoom in/out menu and keyboard shortcuts.
+- Toggle checkerboard/document background preview.
+- Rulers and guides.
+- Snap to guides, canvas, and layers.
+- Better status/error messages for failed saves/exports/imports.
+- Improve mobile layout and touch interactions.
+
+### Project, Save, And Export
+
+- Incremental `.webster` saving so unchanged assets are not repackaged every time.
+- Web Worker packaging for large project saves.
+- Save progress for large files.
+- More export color validation across browsers/GPUs.
+- Export selected layer/selection only.
+- Export scale/resolution controls.
+- Multi-page or print-ready PDF options if needed.
+
+### Backend, Accounts, And Sharing
+
+- Backend API in `apps/api`.
+- PostgreSQL schema.
+- User registration.
+- Login/logout.
+- Email confirmation.
+- User profile editing.
+- Cloud project storage.
+- Project ownership/permissions.
+- User-created templates.
+- Project sharing links.
+- Social sharing/export integration.
+
+### Deployment
+
+- Dockerfile.
+- docker-compose.yml.
+- Production hosting configuration.
+- Environment variable documentation.
+- Build/deploy logs for demo requirements.
+- Public domain deployment.
+
+### Nice-To-Have / Larger Ideas
+
+- 3D object layer.
+- Basic 3D primitives: cube, sphere, cylinder.
+- 3D materials, color, and texture support.
+- Plugin/filter architecture.
+- Collaboration/realtime cursors later.
 
 ## Database
 
@@ -273,7 +410,7 @@ This section maps the expected demo requirements to current project status.
 | Requirement | Status | Notes |
 | --- | --- | --- |
 | Show Dockerfile/docker-compose deployment config | Planned | Docker config is not present yet. |
-| Show project build logs | Partial | Local `npm run build:web` works. Docker build logs are not available until Docker config is added. |
+| Show project build logs | Partial | Local `npm run build:web` compiles, but this Windows/OneDrive workspace currently hits `spawn EPERM` during Next's later build phase. Docker build logs are not available until Docker config is added. |
 | App works on hosting by domain name | Planned | No hosted domain is configured. |
 | Explain database choice | Partial | No DB currently; PostgreSQL is the planned production choice. |
 | Go to app homepage | Present | Local homepage runs at `http://localhost:3000`. |
@@ -284,8 +421,8 @@ This section maps the expected demo requirements to current project status.
 | Project templates | Partial | Built-in document presets exist. User templates are planned. |
 | Create new project | Present | New document dialog exists. |
 | Add/work with text | Present | Text tool/layers are implemented. |
-| Free drawing/pencil | Present | General drawing tool is implemented. |
-| Shape elements | Present | Basic shape layer exists; |
+| Free drawing/pencil | Present | Draw tool is implemented. |
+| Shape elements | Present | Rectangle, circle, line, triangle, diamond, and arrow are implemented. |
 | Add pictures as elements | Present | Import image as layer works. |
 | Move elements with mouse | Present | Move tool works. |
 | Move elements with keyboard | Planned | Arrow-key movement is not implemented. |
@@ -294,55 +431,8 @@ This section maps the expected demo requirements to current project status.
 | Resize canvas | Partial | New document size exists; resizing an existing document is planned. |
 | Zoom canvas | Present | Mouse wheel zoom works. |
 | Save project as JPG | Present | Export as JPEG. |
-| Save project as PNG | Present | Export as transparent PNG. |
+| Save project as PNG | Present | Export as transparent/white/checkerboard PNG. |
 | Save project as PDF | Present | Export as single-page PDF. |
 | Save project in additional format | Present | `.webster` native project format. |
 | Share in social networks | Planned | Not implemented. |
 | User-created templates | Planned | Not implemented. |
-
-## Planned Improvements
-
-### Save Performance
-
-Saving is correct but heavy. Each save rebuilds the full `.webster` package, including image assets, even when only metadata changed.
-
-Planned:
-
-- cache exported image asset blobs by `assetId`
-- rebuild only changed entries when possible
-- avoid re-reading unchanged image data on every save
-- show progress for large project saves
-
-### Background Saving
-
-Packaging should move into a Web Worker so the UI stays responsive during large saves.
-
-Planned:
-
-- move `.webster` package creation off the main thread
-- report save progress back to the toolbar
-- keep `Saving...`, `Saved`, and `Save failed` labels connected to worker state
-
-### Full History
-
-Current undo only covers the last Mask Brush stroke.
-
-Planned:
-
-- command-based undo/redo
-- layer create/delete history
-- transform history
-- mask edit history
-- project revision restore
-
-### Auth, Cloud Save, And Templates
-
-Planned:
-
-- backend API
-- PostgreSQL database
-- registration/login/email confirmation
-- user profile editing
-- cloud project ownership
-- project sharing
-- user-created templates

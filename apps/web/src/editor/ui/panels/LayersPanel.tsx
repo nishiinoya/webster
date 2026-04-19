@@ -94,7 +94,16 @@ export function LayersPanel({
             Layers
           </h2>
         </div>
-        <span className="text-xs text-[#9aa1ab] min-[1400px]:text-[13px]">{layers.length}</span>
+        <div className="flex items-center gap-2">
+          <button
+            className="rounded-md border border-[#333941] bg-[#202329] px-2 py-1 text-[11px] font-bold text-[#dce1e6] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]"
+            onClick={() => onLayerCommand({ type: "add-adjustment" })}
+            type="button"
+          >
+            + Adjust
+          </button>
+          <span className="text-xs text-[#9aa1ab] min-[1400px]:text-[13px]">{layers.length}</span>
+        </div>
       </div>
       <div className={cn("min-h-0 overflow-auto px-3 pb-3", isCollapsed && "hidden")}>
       <div className="grid gap-2">
@@ -141,6 +150,8 @@ export function LayersPanel({
                 "h-[38px] w-[38px] rounded-md border border-[#3a3f47] bg-[linear-gradient(45deg,#2c3036_25%,#41464f_25%,#41464f_50%,#2c3036_50%,#2c3036_75%,#41464f_75%)] bg-[length:10px_10px] min-[1400px]:h-[42px] min-[1400px]:w-[42px]",
                 layer.type === "image" &&
                   "bg-[#252930] bg-[linear-gradient(135deg,rgba(74,163,145,0.65),rgba(118,137,255,0.55))]",
+                layer.type === "adjustment" &&
+                  "bg-[#252930] bg-[radial-gradient(circle_at_35%_35%,rgba(255,255,255,0.8),rgba(74,163,145,0.45)_42%,rgba(32,35,41,0.95)_70%)]",
                 layer.type === "shape" && "bg-[#2f7d6f]"
               )}
               aria-hidden="true"

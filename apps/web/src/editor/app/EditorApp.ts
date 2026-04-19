@@ -23,6 +23,7 @@ export type LayerSummary = ReturnType<Scene["getLayerSummaries"]>[number];
 export type LayerUpdate = Parameters<Scene["updateLayer"]>[1];
 
 export type LayerCommand =
+  | { type: "add-adjustment" }
   | { type: "delete"; layerId: string }
   | { type: "duplicate"; layerId: string }
   | { type: "mask"; action: LayerMaskAction; layerId: string }
@@ -303,6 +304,8 @@ export class EditorApp {
 
   applyLayerCommand(command: LayerCommand) {
     switch (command.type) {
+      case "add-adjustment":
+        return this.scene.addAdjustmentLayer();
       case "delete":
         return this.scene.removeLayer(command.layerId);
       case "duplicate":
