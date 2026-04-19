@@ -62,6 +62,24 @@ const editorTools: ToolDefinition[] = [
     value: "Text"
   },
   {
+    description: "Draw filled or stroked rectangles.",
+    icon: "R",
+    label: "Rectangle",
+    value: "Rectangle"
+  },
+  {
+    description: "Draw proportional circles.",
+    icon: "C",
+    label: "Circle",
+    value: "Circle"
+  },
+  {
+    description: "Draw straight stroked lines.",
+    icon: "/",
+    label: "Line",
+    value: "Line"
+  },
+  {
     description: "Drag a box selection.",
     icon: "R",
     label: "Rectangle Select",

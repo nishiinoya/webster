@@ -1,11 +1,10 @@
 import { ImageLayer } from "../layers/ImageLayer";
 import { Layer } from "../layers/Layer";
 import type { SerializedLayer } from "../layers/Layer";
-import { LayerMask } from "../masks/LayerMask";
 import { ShapeLayer } from "../layers/ShapeLayer";
 import { TextLayer } from "../layers/TextLayer"
 import { SelectionManager } from "../selection/SelectionManager";
-import { getTextMaskFrame } from "../rendering/text/BitmapText";
+import { ensureLayerMaskResolution } from "../masks/LayerMaskResolution";
 
 export type DocumentBounds = {
   x: number;
@@ -189,7 +188,7 @@ export class Scene {
       name: string;
       opacity: number;
       rotation: number;
-      shape: "rectangle" | "ellipse" | "line";
+      shape: "rectangle" | "circle" | "line";
       strokeColor: [number, number, number, number];
       strokeWidth: number;
       text: string;
@@ -474,12 +473,7 @@ function applyLayerMaskAction(layer: Layer, action: LayerMaskAction) {
   }
 
   if (action === "add" && !layer.mask) {
-    const textMaskFrame = layer instanceof TextLayer ? layer.lastTextMaskFrame ?? getTextMaskFrame(layer) : null;
-
-    layer.mask = new LayerMask({
-      height: textMaskFrame?.height ?? layer.height,
-      width: textMaskFrame?.width ?? layer.width
-    });
+    ensureLayerMaskResolution(layer);
     return layer;
   }
 

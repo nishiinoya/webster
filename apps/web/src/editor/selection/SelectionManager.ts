@@ -1,5 +1,5 @@
 import type { Layer } from "../layers/Layer";
-import { LayerMask } from "../masks/LayerMask";
+import { ensureLayerMaskResolution } from "../masks/LayerMaskResolution";
 import { getModelMatrix } from "../geometry/TransformGeometry";
 import { transformPoint3x3 } from "../geometry/Matrix3";
 
@@ -142,12 +142,7 @@ export class SelectionManager {
       return false;
     }
 
-    const mask =
-      layer.mask ??
-      new LayerMask({
-        height: layer.height,
-        width: layer.width
-      });
+    const mask = ensureLayerMaskResolution(layer);
     const modelMatrix = getModelMatrix(layer);
 
     for (let y = 0; y < mask.height; y += 1) {
@@ -163,7 +158,6 @@ export class SelectionManager {
       }
     }
 
-    layer.mask = mask;
     mask.enabled = true;
     mask.revision += 1;
 

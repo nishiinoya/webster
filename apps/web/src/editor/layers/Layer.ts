@@ -22,7 +22,7 @@ export type SerializedLayerBase = {
 
 export type SerializedShapeLayer = SerializedLayerBase & {
   fillColor: [number, number, number, number];
-  shape: "rectangle" | "ellipse" | "line";
+  shape: "rectangle" | "circle" | "ellipse" | "line";
   strokeColor:[number, number, number, number];
   strokeWidth: number;
   type: "shape";
@@ -108,7 +108,7 @@ export abstract class Layer {
       return new ShapeLayer({
         ...getLayerOptions(data),
         fillColor: data.fillColor ?? legacyShapeData.color,
-        shape: data.shape ?? "rectangle",
+        shape: data.shape === "ellipse" ? "circle" : data.shape ?? "rectangle",
         strokeColor: data.strokeColor ?? [0.07, 0.08, 0.09, 1],
         strokeWidth: data.strokeWidth ?? 0
       });

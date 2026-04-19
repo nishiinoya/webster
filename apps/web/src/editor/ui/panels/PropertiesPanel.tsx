@@ -23,6 +23,13 @@ type TextLayerSummary = LayerSummary & {
   text: string;
 };
 
+type ShapeLayerSummary = LayerSummary & {
+  fillColor: [number, number, number, number];
+  shape: "rectangle" | "circle" | "line";
+  strokeColor: [number, number, number, number];
+  strokeWidth: number;
+};
+
 export function PropertiesPanel({
   isCollapsed,
   onLayerCommand,
@@ -300,6 +307,74 @@ export function PropertiesPanel({
             </div>
           </div>
         ) : null}
+        {isShapeLayerSummary(selectedLayer) ? (
+          <div className={propertySectionClass}>
+            <h3 className={propertySectionTitleClass}>Shape</h3>
+            <label className={propertyRowClass}>
+              <span className={propertyLabelClass}>Kind</span>
+              <select
+                className={propertyInputClass}
+                disabled={selectedLayer.locked}
+                onChange={(event) =>
+                  updateSelectedLayer({
+                    shape:
+                      event.target.value === "circle"
+                        ? "circle"
+                        : event.target.value === "line"
+                          ? "line"
+                          : "rectangle"
+                  })
+                }
+                value={selectedLayer.shape}
+              >
+                <option value="rectangle">Rectangle</option>
+                <option value="circle">Circle</option>
+                <option value="line">Line</option>
+              </select>
+            </label>
+            <label className={propertyRowClass}>
+              <span className={propertyLabelClass}>Fill color</span>
+              <input
+                className={propertyInputClass}
+                disabled={selectedLayer.locked}
+                onChange={(event) =>
+                  updateSelectedLayer({
+                    fillColor: hexToColor(event.target.value, selectedLayer.fillColor[3])
+                  })
+                }
+                type="color"
+                value={colorToHex(selectedLayer.fillColor)}
+              />
+            </label>
+            <label className={propertyRowClass}>
+              <span className={propertyLabelClass}>Stroke color</span>
+              <input
+                className={propertyInputClass}
+                disabled={selectedLayer.locked}
+                onChange={(event) =>
+                  updateSelectedLayer({
+                    strokeColor: hexToColor(event.target.value, selectedLayer.strokeColor[3])
+                  })
+                }
+                type="color"
+                value={colorToHex(selectedLayer.strokeColor)}
+              />
+            </label>
+            <label className={propertyRowClass}>
+              <span className={propertyLabelClass}>Stroke width</span>
+              <input
+                className={propertyInputClass}
+                disabled={selectedLayer.locked}
+                min="0"
+                onChange={(event) =>
+                  updateSelectedLayer({ strokeWidth: Number(event.target.value) || 0 })
+                }
+                type="number"
+                value={Math.round(selectedLayer.strokeWidth)}
+              />
+            </label>
+          </div>
+        ) : null}
         <div className={propertySectionClass}>
           <h3 className={propertySectionTitleClass}>Mask</h3>
           <div className={propertyRowClass}>
@@ -321,6 +396,10 @@ export function PropertiesPanel({
 
 function isTextLayerSummary(layer: LayerSummary | null): layer is TextLayerSummary {
   return Boolean(layer && layer.type === "text" && "text" in layer);
+}
+
+function isShapeLayerSummary(layer: LayerSummary | null): layer is ShapeLayerSummary {
+  return Boolean(layer && layer.type === "shape" && "shape" in layer);
 }
 
 function PanelToggleButton({
@@ -391,7 +470,7 @@ function colorToHex(color: [number, number, number, number]) {
     .join("")}`;
 }
 
-function hexToColor(hex: string): [number, number, number, number] {
+function hexToColor(hex: string, alpha = 1): [number, number, number, number] {
   const value = hex.replace("#", "");
   const red = Number.parseInt(value.slice(0, 2), 16);
   const green = Number.parseInt(value.slice(2, 4), 16);
@@ -401,7 +480,7 @@ function hexToColor(hex: string): [number, number, number, number] {
     Number.isFinite(red) ? red / 255 : 0,
     Number.isFinite(green) ? green / 255 : 0,
     Number.isFinite(blue) ? blue / 255 : 0,
-    1
+    alpha
   ];
 }
 

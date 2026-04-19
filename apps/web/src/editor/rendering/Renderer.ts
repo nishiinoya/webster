@@ -456,7 +456,7 @@ export class Renderer {
       return;
     }
 
-    if (layer.shape === "ellipse") {
+    if (layer.shape === "circle") {
       this.drawEllipseShape(layer);
       return;
     }
@@ -476,7 +476,7 @@ export class Renderer {
       ]);
       this.solidColorShaderProgram.setModel(getModelMatrix(layer));
       this.bindMask(layer, this.solidColorShaderProgram);
-      this.quad.draw(this.solidColorShaderProgram);
+      this.quad.drawTextured(this.solidColorShaderProgram);
     }
 
       if (layer.strokeWidth <= 0 || layer.strokeColor[3] <= 0) {
@@ -491,40 +491,41 @@ export class Renderer {
       ]);
       this.bindMask(layer, this.solidColorShaderProgram);
 
-      const width = layer.width * layer.scaleX;
-      const height = layer.height * layer.scaleY;
-      const strokeWidth = Math.min(layer.strokeWidth, width / 2, height / 2);
+      const strokeWidthX = Math.min(
+        layer.strokeWidth / Math.max(layer.scaleX, 1e-6),
+        layer.width / 2
+      );
+      const strokeWidthY = Math.min(
+        layer.strokeWidth / Math.max(layer.scaleY, 1e-6),
+        layer.height / 2
+      );
 
-      this.drawRectangle({
-        x: layer.x,
-        y: layer.y,
-        width,
-        height: strokeWidth,
-        rotation: layer.rotation
+      this.drawLayerLocalRectangle(layer, {
+        x: 0,
+        y: 0,
+        width: layer.width,
+        height: strokeWidthY
       });
 
-      this.drawRectangle({
-        x: layer.x,
-        y: layer.y + height - strokeWidth,
-        width,
-        height: strokeWidth,
-        rotation: layer.rotation
+      this.drawLayerLocalRectangle(layer, {
+        x: 0,
+        y: layer.height - strokeWidthY,
+        width: layer.width,
+        height: strokeWidthY
       });
 
-      this.drawRectangle({
-        x: layer.x,
-        y: layer.y,
-        width: strokeWidth,
-        height,
-        rotation: layer.rotation
+      this.drawLayerLocalRectangle(layer, {
+        x: 0,
+        y: 0,
+        width: strokeWidthX,
+        height: layer.height
       });
 
-      this.drawRectangle({
-        x: layer.x + width - strokeWidth,
-        y: layer.y,
-        width: strokeWidth,
-        height,
-        rotation: layer.rotation
+      this.drawLayerLocalRectangle(layer, {
+        x: layer.width - strokeWidthX,
+        y: 0,
+        width: strokeWidthX,
+        height: layer.height
       });
   }
 
@@ -533,10 +534,10 @@ export class Renderer {
       return;
     }
 
-    const width = layer.width * layer.scaleX;
-    const height = layer.height * layer.scaleY;
-    const y = layer.y + height / 2;
-    const strokeWidth = Math.max(1, layer.strokeWidth);
+    const strokeWidth = Math.min(
+      Math.max(1, layer.strokeWidth) / Math.max(layer.scaleY, 1e-6),
+      layer.height
+    );
 
     this.solidColorShaderProgram.setColor([
       layer.strokeColor[0],
@@ -546,12 +547,11 @@ export class Renderer {
     ]);
     this.bindMask(layer, this.solidColorShaderProgram);
 
-    this.drawRectangle({
-      x: layer.x,
-      y: y - strokeWidth / 2,
-      width,
-      height: strokeWidth,
-      rotation: layer.rotation
+    this.drawLayerLocalRectangle(layer, {
+      x: 0,
+      y: (layer.height - strokeWidth) / 2,
+      width: layer.width,
+      height: strokeWidth
     });
   }
 
@@ -580,7 +580,12 @@ export class Renderer {
     ]);
     this.solidColorShaderProgram.setModel(getModelMatrix(layer));
     this.bindMask(layer, this.solidColorShaderProgram);
-    this.ellipseMesh.drawStroke(this.solidColorShaderProgram);
+    this.ellipseMesh.drawStroke(
+      this.solidColorShaderProgram,
+      Math.max(1, layer.strokeWidth),
+      layer.width * layer.scaleX,
+      layer.height * layer.scaleY
+    );
   }
 
   private drawTextLayer(

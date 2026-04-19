@@ -157,6 +157,9 @@ function isCanvasInputTool(tool: string) {
   return (
     tool === "Move" ||
     tool === "Mask Brush" ||
+    tool === "Rectangle" ||
+    tool === "Circle" ||
+    tool === "Line" ||
     tool === "Marquee" ||
     tool === "Rectangle Select" ||
     tool === "Ellipse Select"

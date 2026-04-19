@@ -5,7 +5,8 @@ import { getModelMatrix } from "../../geometry/TransformGeometry";
 import type { Point } from "../../geometry/TransformGeometry";
 import { Layer } from "../../layers/Layer";
 import { TextLayer } from "../../layers/TextLayer";
-import { LayerMask } from "../../masks/LayerMask";
+import { ensureLayerMaskResolution } from "../../masks/LayerMaskResolution";
+import type { LayerMask } from "../../masks/LayerMask";
 import { getTextMaskFrame } from "../../rendering/text/BitmapText";
 import { clamp, getBrushRadiiInMaskSpace, paintMaskEllipse } from "./MaskBrushRaster";
 import type { MaskBrushPixelPredicate } from "./MaskBrushRaster";
@@ -59,23 +60,7 @@ export class MaskBrushTool {
     if (!layer || layer.locked) {
       return false;
     }
-const TEXT_MASK_SCALE = 4;
-    if (!layer.mask) {
-  const textMaskFrame = layer instanceof TextLayer ? getCurrentTextMaskFrame(layer) : null;
-
-  layer.mask = new LayerMask({
-    height: Math.max(
-      1,
-      Math.ceil((textMaskFrame?.height ?? layer.height) * (layer instanceof TextLayer ? TEXT_MASK_SCALE : 1))
-    ),
-    width: Math.max(
-      1,
-      Math.ceil((textMaskFrame?.width ?? layer.width) * (layer instanceof TextLayer ? TEXT_MASK_SCALE : 1))
-    )
-  });
-}
-
-    const mask = layer.mask;
+    const mask = ensureLayerMaskResolution(layer);
 
     this.isPainting = true;
     this.lastPaintPoint = null;
