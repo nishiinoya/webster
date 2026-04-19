@@ -16,6 +16,11 @@ export class PostProcessShaderProgram extends ShaderProgram {
   private readonly blurRegionInverseMatrixUniformLocations: WebGLUniformLocation[];
   private readonly blurRegionRadiusUniformLocations: WebGLUniformLocation[];
   private readonly blurRegionSizeUniformLocations: WebGLUniformLocation[];
+  private readonly backgroundModeUniformLocation: WebGLUniformLocation;
+  private readonly checkerColorAUniformLocation: WebGLUniformLocation;
+  private readonly checkerColorBUniformLocation: WebGLUniformLocation;
+  private readonly checkerSizeUniformLocation: WebGLUniformLocation;
+  private readonly clipToBlurRegionsUniformLocation: WebGLUniformLocation;
   private readonly textureTexelSizeUniformLocation: WebGLUniformLocation;
   private readonly textureUniformLocation: WebGLUniformLocation;
   private readonly viewportUniformLocation: WebGLUniformLocation;
@@ -29,6 +34,11 @@ export class PostProcessShaderProgram extends ShaderProgram {
     this.textureTexelSizeUniformLocation = this.getUniformLocation("u_textureTexelSize");
     this.viewportUniformLocation = this.getUniformLocation("u_viewport");
     this.zoomUniformLocation = this.getUniformLocation("u_zoom");
+    this.backgroundModeUniformLocation = this.getUniformLocation("u_backgroundMode");
+    this.checkerColorAUniformLocation = this.getUniformLocation("u_checkerColorA");
+    this.checkerColorBUniformLocation = this.getUniformLocation("u_checkerColorB");
+    this.checkerSizeUniformLocation = this.getUniformLocation("u_checkerSize");
+    this.clipToBlurRegionsUniformLocation = this.getUniformLocation("u_clipToBlurRegions");
     this.blurRegionCountUniformLocation = this.getUniformLocation("u_blurRegionCount");
     this.blurRegionBoundsUniformLocations = this.getUniformArrayLocations(
       "u_blurRegionBounds",
@@ -89,6 +99,25 @@ export class PostProcessShaderProgram extends ShaderProgram {
 
   setTextureUnit(textureUnit: number) {
     this.gl.uniform1i(this.textureUniformLocation, textureUnit);
+  }
+
+  setClipToBlurRegions(enabled: boolean) {
+    this.gl.uniform1i(this.clipToBlurRegionsUniformLocation, enabled ? 1 : 0);
+  }
+
+  setReplacementBackground(
+    mode: "checkerboard" | "transparent" | "white",
+    checkerColorA: [number, number, number, number],
+    checkerColorB: [number, number, number, number],
+    checkerSize: number
+  ) {
+    this.gl.uniform1i(
+      this.backgroundModeUniformLocation,
+      mode === "white" ? 1 : mode === "checkerboard" ? 2 : 0
+    );
+    this.gl.uniform4fv(this.checkerColorAUniformLocation, checkerColorA);
+    this.gl.uniform4fv(this.checkerColorBUniformLocation, checkerColorB);
+    this.gl.uniform1f(this.checkerSizeUniformLocation, checkerSize);
   }
 
   private getUniformArrayLocations(name: string, count: number) {

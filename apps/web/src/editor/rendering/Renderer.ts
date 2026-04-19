@@ -424,6 +424,8 @@ export class Renderer {
     let currentTarget = this.ensureSceneRenderTarget();
     let nextTarget = this.ensurePostProcessRenderTarget();
     const effectiveFilters = getEffectiveLayerFilters(scene.layers);
+    const topmostBlurAdjustmentIndex = getTopmostAdjustmentBlurIndex(scene.layers)
+    const appliedBlurRegions: BlurRegion[] = [];
 
     this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, currentTarget.framebuffer);
     this.gl.viewport(0, 0, currentTarget.width, currentTarget.height);
@@ -436,7 +438,7 @@ export class Renderer {
     this.solidColorShaderProgram.setFilters(defaultLayerFilters);
     this.solidColorShaderProgram.setAdjustmentFilters([]);
 
-    for (let layerIndex = 0; layerIndex < scene.layers.length; layerIndex += 1) {
+    for (let layerIndex = 0; layerIndex <= topmostBlurAdjustmentIndex; layerIndex += 1) {
       const layer = scene.layers[layerIndex];
 
       if (!layer.visible || layer.opacity <= 0) {
@@ -456,8 +458,10 @@ export class Renderer {
           continue;
         }
 
+        appliedBlurRegions.push(blurRegion);
         this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, nextTarget.framebuffer);
         this.gl.viewport(0, 0, nextTarget.width, nextTarget.height);
+        this.clearTransparent();
         this.drawPostProcessedTexture(currentTarget.texture, [blurRegion], camera);
         [currentTarget, nextTarget] = [nextTarget, currentTarget];
         this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, currentTarget.framebuffer);
@@ -473,7 +477,38 @@ export class Renderer {
     this.gl.viewport(0, 0, this.width, this.height);
     this.clear(options);
     this.drawDocumentBackground(scene, camera, options);
-    this.drawPostProcessedTexture(currentTarget.texture, [], camera, { blend: true });
+        for (let layerIndex = 0; layerIndex <= topmostBlurAdjustmentIndex; layerIndex += 1) {
+      const layer = scene.layers[layerIndex];
+
+      if (!layer.visible || layer.opacity <= 0 || layer instanceof AdjustmentLayer) {
+        continue;
+      }
+
+      this.drawLayerDropShadow(layer, camera, effectiveFilters[layerIndex].filters);
+      this.drawLayerContent(layer, camera, options.textEdit, effectiveFilters[layerIndex]);
+    }
+    this.drawPostProcessedTexture(currentTarget.texture, toClipOnlyBlurRegions(appliedBlurRegions), camera, {
+      blend: true,
+      clipToBlurRegions: true,
+      filter: "nearest",
+      premultipliedBlend: true
+    });
+
+    
+    for (
+      let layerIndex = topmostBlurAdjustmentIndex + 1;
+      layerIndex < scene.layers.length;
+      layerIndex += 1
+    ) {
+      const layer = scene.layers[layerIndex];
+
+      if (!layer.visible || layer.opacity <= 0 || layer instanceof AdjustmentLayer) {
+        continue;
+      }
+
+      this.drawLayerDropShadow(layer, camera, effectiveFilters[layerIndex].filters);
+      this.drawLayerContent(layer, camera, options.textEdit, effectiveFilters[layerIndex]);
+    }
   }
 
   dispose() {
@@ -498,10 +533,18 @@ export class Renderer {
     texture: WebGLTexture,
     blurRegions: BlurRegion[],
     camera: Camera2D,
-    options: { blend?: boolean } = {}
+    options: {
+      blend?: boolean;
+      clipToBlurRegions?: boolean;
+      filter?: "linear" | "nearest";
+      premultipliedBlend?: boolean;
+    } = {}
   ) {
     if (options.blend) {
       this.gl.enable(this.gl.BLEND);
+      if (options.premultipliedBlend) {
+        this.gl.blendFunc(this.gl.ONE, this.gl.ONE_MINUS_SRC_ALPHA);
+      }
     } else {
       this.gl.disable(this.gl.BLEND);
     }
@@ -516,10 +559,20 @@ export class Renderer {
       this.cssHeight
     );
     this.postProcessShaderProgram.setBlurRegions(blurRegions);
+    this.postProcessShaderProgram.setClipToBlurRegions(Boolean(options.clipToBlurRegions));
     this.gl.activeTexture(this.gl.TEXTURE0);
     this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+        if (options.filter === "nearest") {
+      this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.NEAREST);
+      this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.NEAREST);
+    }
     this.quad.drawTextured(this.postProcessShaderProgram);
+    if (options.filter === "nearest") {
+      this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR);
+      this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.LINEAR);
+    }
     this.gl.enable(this.gl.BLEND);
+    this.gl.blendFunc(this.gl.SRC_ALPHA, this.gl.ONE_MINUS_SRC_ALPHA);
   }
 
   private ensureSceneRenderTarget() {
@@ -1646,6 +1699,23 @@ function hasAdjustmentBlur(layers: Layer[]) {
   );
 }
 
+function getTopmostAdjustmentBlurIndex(layers: Layer[]) {
+  for (let index = layers.length - 1; index >= 0; index -= 1) {
+    const layer = layers[index];
+
+    if (
+      layer instanceof AdjustmentLayer &&
+      layer.visible &&
+      layer.opacity > 0 &&
+      layer.filters.blur * layer.opacity > 0.5
+    ) {
+      return index;
+    }
+  }
+
+  return layers.length - 1;
+}
+
 function getAdjustmentLayerBlurRegion(
   layer: AdjustmentLayer,
   camera: Camera2D,
@@ -1666,6 +1736,13 @@ function getAdjustmentLayerBlurRegion(
     radius: Math.min(radius, textureWidth * 0.12),
     size: [1, 1]
   };
+}
+
+function toClipOnlyBlurRegions(regions: BlurRegion[]): BlurRegion[] {
+  return regions.map((region) => ({
+    ...region,
+    radius: 0
+  }));
 }
 
 function getAdjustmentBlurRegions(

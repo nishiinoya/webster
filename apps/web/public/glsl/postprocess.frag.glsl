@@ -9,27 +9,30 @@ uniform float u_blurRegionRadius[4];
 uniform vec2 u_blurRegionSize[4];
 uniform vec4 u_viewport;
 uniform float u_zoom;
+uniform bool u_clipToBlurRegions;
+uniform int u_backgroundMode;
+uniform vec4 u_checkerColorA;
+uniform vec4 u_checkerColorB;
+uniform float u_checkerSize;
 
 varying vec2 v_texCoord;
 
 vec4 sampleBlurred(float radius) {
-  vec2 stepSize = u_textureTexelSize * radius;
-  vec4 color = texture2D(u_texture, v_texCoord) * 0.16;
+  float clampedRadius = min(radius, 64.0);
 
-  color += texture2D(u_texture, v_texCoord + vec2(stepSize.x * 0.25, 0.0)) * 0.105;
-  color += texture2D(u_texture, v_texCoord - vec2(stepSize.x * 0.25, 0.0)) * 0.105;
-  color += texture2D(u_texture, v_texCoord + vec2(0.0, stepSize.y * 0.25)) * 0.105;
-  color += texture2D(u_texture, v_texCoord - vec2(0.0, stepSize.y * 0.25)) * 0.105;
+  if (clampedRadius <= 0.001) {
+    return texture2D(u_texture, v_texCoord);
+  }
 
-  color += texture2D(u_texture, v_texCoord + vec2(stepSize.x * 0.55, 0.0)) * 0.065;
-  color += texture2D(u_texture, v_texCoord - vec2(stepSize.x * 0.55, 0.0)) * 0.065;
-  color += texture2D(u_texture, v_texCoord + vec2(0.0, stepSize.y * 0.55)) * 0.065;
-  color += texture2D(u_texture, v_texCoord - vec2(0.0, stepSize.y * 0.55)) * 0.065;
+  vec2 stepSize = u_textureTexelSize * clampedRadius * 0.45;
+  vec4 color = texture2D(u_texture, v_texCoord) * 0.227027;
 
-  color += texture2D(u_texture, v_texCoord + stepSize * vec2(0.4, 0.4)) * 0.04;
-  color += texture2D(u_texture, v_texCoord + stepSize * vec2(-0.4, 0.4)) * 0.04;
-  color += texture2D(u_texture, v_texCoord + stepSize * vec2(0.4, -0.4)) * 0.04;
-  color += texture2D(u_texture, v_texCoord + stepSize * vec2(-0.4, -0.4)) * 0.04;
+  color += texture2D(u_texture, v_texCoord + vec2(stepSize.x, 0.0)) * 0.1945946;
+  color += texture2D(u_texture, v_texCoord - vec2(stepSize.x, 0.0)) * 0.1945946;
+  color += texture2D(u_texture, v_texCoord + vec2(0.0, stepSize.y)) * 0.1216216;
+  color += texture2D(u_texture, v_texCoord - vec2(0.0, stepSize.y)) * 0.1216216;
+  color += texture2D(u_texture, v_texCoord + stepSize) * 0.0702703;
+  color += texture2D(u_texture, v_texCoord - stepSize) * 0.0702703;
 
   return color;
 }
@@ -48,8 +51,25 @@ vec2 texCoordToWorld(vec2 texCoord) {
   );
 }
 
+vec4 getBackgroundColor(vec2 worldPosition) {
+  if (u_backgroundMode == 1) {
+    return vec4(1.0);
+  }
+
+  if (u_backgroundMode == 2) {
+    vec2 checker = floor(worldPosition / u_checkerSize);
+    float checkerIndex = mod(checker.x + checker.y, 2.0);
+
+    return mix(u_checkerColorA, u_checkerColorB, checkerIndex);
+  }
+
+  return vec4(0.0);
+}
+
 void main() {
   vec4 color = texture2D(u_texture, v_texCoord);
+  bool matchedRegion = false;
+  vec2 worldPosition = texCoordToWorld(v_texCoord);
 
   for (int index = 0; index < 4; index += 1) {
     if (index >= u_blurRegionCount) {
@@ -63,7 +83,7 @@ void main() {
       v_texCoord.y >= bounds.y &&
       v_texCoord.y <= bounds.y + bounds.w;
     vec3 localPosition =
-      u_blurRegionInverseMatrix[index] * vec3(texCoordToWorld(v_texCoord), 1.0);
+      u_blurRegionInverseMatrix[index] * vec3(worldPosition, 1.0);
     vec2 size = u_blurRegionSize[index];
     bool inside =
       broadInside &&
@@ -73,8 +93,19 @@ void main() {
       localPosition.y <= size.y;
 
     if (inside) {
+      matchedRegion = true;
       color = sampleBlurred(u_blurRegionRadius[index]);
     }
+  }
+
+  if (u_clipToBlurRegions && !matchedRegion) {
+    discard;
+  }
+
+  if (u_clipToBlurRegions) {
+    vec4 background = getBackgroundColor(worldPosition);
+
+    color = vec4(color.rgb + background.rgb * (1.0 - color.a), max(color.a, background.a));
   }
 
   gl_FragColor = color;
