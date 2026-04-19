@@ -2,6 +2,7 @@ import { ImageLayer } from "../layers/ImageLayer";
 import { Layer } from "../layers/Layer";
 import type { SerializedLayer } from "../layers/Layer";
 import { ShapeLayer } from "../layers/ShapeLayer";
+import { StrokeLayer } from "../layers/StrokeLayer";
 import { TextLayer } from "../layers/TextLayer"
 import { SelectionManager } from "../selection/SelectionManager";
 import { ensureLayerMaskResolution } from "../masks/LayerMaskResolution";
@@ -188,7 +189,7 @@ export class Scene {
       name: string;
       opacity: number;
       rotation: number;
-      shape: "rectangle" | "circle" | "line";
+      shape: "rectangle" | "circle" | "line" | "triangle" | "diamond" | "arrow";
       strokeColor: [number, number, number, number];
       strokeWidth: number;
       text: string;
@@ -257,6 +258,16 @@ export class Scene {
 
       if (updates.strokeWidth !== undefined) {
         layer.strokeWidth = Math.max(0, updates.strokeWidth);
+      }
+    }
+
+    if (layer instanceof StrokeLayer && !layer.locked) {
+      if (updates.color !== undefined) {
+        layer.color = updates.color;
+      }
+
+      if (updates.strokeWidth !== undefined) {
+        layer.strokeWidth = Math.max(1, updates.strokeWidth);
       }
     }
 
@@ -452,6 +463,19 @@ function cloneLayer(layer: Layer) {
     });
   }
 
+  if (layer instanceof StrokeLayer) {
+    return new StrokeLayer({
+      ...options,
+      color: [...layer.color],
+      paths: layer.paths.map((path) => ({
+        ...path,
+        color: [...path.color],
+        points: path.points.map((point) => ({ ...point }))
+      })),
+      strokeStyle: layer.strokeStyle,
+      strokeWidth: layer.strokeWidth
+    });
+  }
 
   throw new Error(`Unsupported layer type: ${layer.type}`);
 }
@@ -579,6 +603,15 @@ function getLayerSummary(layer: Layer, selectedLayerId: string | null) {
       fontSize: layer.fontSize,
       italic: layer.italic,
       text: layer.text
+    };
+  }
+
+  if (layer instanceof StrokeLayer) {
+    return {
+      ...baseSummary,
+      color: layer.color,
+      strokeStyle: layer.strokeStyle,
+      strokeWidth: layer.strokeWidth
     };
   }
 

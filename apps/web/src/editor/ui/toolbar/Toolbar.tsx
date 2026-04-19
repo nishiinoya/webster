@@ -6,6 +6,8 @@ import {
 import type { WebsterFileHandle } from "../../projects/projectFiles";
 import type { SaveStatus } from "../hooks/useProjectFileActions";
 import type { MaskBrushOptions } from "../../tools/mask-brush/MaskBrushTypes";
+import type { LayerSummary } from "../../app/EditorApp";
+import type { StrokeStyle } from "../../layers/StrokeLayer";
 import type { SelectionCommand } from "../../app/EditorApp";
 import { cn } from "../classNames";
 
@@ -21,9 +23,26 @@ type ToolbarProps = {
   onUploadImage: (file: File) => void;
   maskBrushOptions: MaskBrushOptions;
   onMaskBrushOptionsChange: (options: Partial<MaskBrushOptions>) => void;
+  onStrokeColorChange: (color: [number, number, number, number]) => void;
+  onStrokeModeChange: (mode: "draw" | "erase") => void;
+  onStrokeStyleChange: (style: StrokeStyle) => void;
+  onStrokeTargetChange: (target: StrokeTargetSelection) => void;
+  onStrokeWidthChange: (width: number) => void;
   saveStatus: SaveStatus;
+  selectedStrokeColor: [number, number, number, number];
+  selectedStrokeMode: "draw" | "erase";
+  selectedStrokeStyle: StrokeStyle;
+  selectedStrokeTargetLayerId: string | null;
+  selectedStrokeTargetMode: "layer" | "new" | "selected";
+  selectedStrokeWidth: number;
   selectedTool: string;
+  strokeLayers: LayerSummary[];
   zoomPercentage: number;
+};
+
+export type StrokeTargetSelection = {
+  layerId: string | null;
+  mode: "layer" | "new" | "selected";
 };
 
 const toolbarActions = ["Edit", "View", "Filter"];
@@ -40,8 +59,20 @@ export function Toolbar({
   onUploadImage,
   maskBrushOptions,
   onMaskBrushOptionsChange,
+  onStrokeColorChange,
+  onStrokeModeChange,
+  onStrokeStyleChange,
+  onStrokeTargetChange,
+  onStrokeWidthChange,
   saveStatus,
+  selectedStrokeColor,
+  selectedStrokeMode,
+  selectedStrokeStyle,
+  selectedStrokeTargetLayerId,
+  selectedStrokeTargetMode,
+  selectedStrokeWidth,
   selectedTool,
+  strokeLayers,
   zoomPercentage
 }: ToolbarProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -240,6 +271,70 @@ export function Toolbar({
             </label>
           </div>
         ) : null}
+        {selectedTool === "Draw" ? (
+          <div className="flex items-center gap-2 pl-1.5" aria-label="Draw options">
+            <label className="flex items-center gap-[5px] text-xs font-bold text-[#c9cdd2]">
+              Target
+              <select
+                className={cn(maskBrushInputClass, "w-[156px]")}
+                onChange={(event) => onStrokeTargetChange(parseStrokeTarget(event.target.value))}
+                value={formatStrokeTargetValue(selectedStrokeTargetMode, selectedStrokeTargetLayerId)}
+              >
+                <option value="new">New layer</option>
+                <option value="selected">Selected stroke layer</option>
+                {strokeLayers.map((layer) => (
+                  <option key={layer.id} value={`layer:${layer.id}`}>
+                    {layer.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-[5px] text-xs font-bold text-[#c9cdd2]">
+              Type
+              <select
+                className={cn(maskBrushInputClass, "w-[118px]")}
+                onChange={(event) => onStrokeStyleChange(toStrokeStyle(event.target.value))}
+                value={selectedStrokeStyle}
+              >
+                <option value="pencil">Pencil</option>
+                <option value="pen">Pen</option>
+                <option value="brush">Brush</option>
+                <option value="marker">Marker</option>
+                <option value="highlighter">Highlighter</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-[5px] text-xs font-bold text-[#c9cdd2]">
+              Color
+              <input
+                aria-label="Draw color"
+                className="h-[34px] w-[48px] rounded-md border border-[#33373d] bg-[#101113] p-1"
+                onChange={(event) =>
+                  onStrokeColorChange(hexToColor(event.target.value, selectedStrokeColor[3]))
+                }
+                type="color"
+                value={colorToHex(selectedStrokeColor)}
+              />
+            </label>
+            <label className="flex items-center gap-[5px] text-xs font-bold text-[#c9cdd2]">
+              Size
+              <input
+                className={maskBrushInputClass}
+                min="1"
+                max="256"
+                onChange={(event) => onStrokeWidthChange(Number(event.target.value))}
+                type="number"
+                value={selectedStrokeWidth}
+              />
+            </label>
+            <button
+              className={cn(toolbarButtonClass, selectedStrokeMode === "erase" && "border-[#4aa391] bg-[#203731]")}
+              onClick={() => onStrokeModeChange(selectedStrokeMode === "erase" ? "draw" : "erase")}
+              type="button"
+            >
+              {selectedStrokeMode === "erase" ? "Draw" : "Eraser"}
+            </button>
+          </div>
+        ) : null}
         <input
           ref={fileInputRef}
           accept="image/*"
@@ -279,6 +374,63 @@ export function Toolbar({
       </div>
     </header>
   );
+}
+
+function formatStrokeTargetValue(
+  mode: "layer" | "new" | "selected",
+  layerId: string | null
+) {
+  if (mode === "layer" && layerId) {
+    return `layer:${layerId}`;
+  }
+
+  return mode;
+}
+
+function parseStrokeTarget(value: string): StrokeTargetSelection {
+  if (value === "selected") {
+    return { layerId: null, mode: "selected" };
+  }
+
+  if (value.startsWith("layer:")) {
+    return { layerId: value.slice("layer:".length), mode: "layer" };
+  }
+
+  return { layerId: null, mode: "new" };
+}
+
+function toStrokeStyle(value: string): StrokeStyle {
+  if (
+    value === "pen" ||
+    value === "brush" ||
+    value === "marker" ||
+    value === "highlighter"
+  ) {
+    return value;
+  }
+
+  return "pencil";
+}
+
+function colorToHex(color: [number, number, number, number]) {
+  return `#${color
+    .slice(0, 3)
+    .map((channel) => Math.round(channel * 255).toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
+function hexToColor(hex: string, alpha = 1): [number, number, number, number] {
+  const value = hex.replace("#", "");
+  const red = Number.parseInt(value.slice(0, 2), 16);
+  const green = Number.parseInt(value.slice(2, 4), 16);
+  const blue = Number.parseInt(value.slice(4, 6), 16);
+
+  return [
+    Number.isFinite(red) ? red / 255 : 0,
+    Number.isFinite(green) ? green / 255 : 0,
+    Number.isFinite(blue) ? blue / 255 : 0,
+    alpha
+  ];
 }
 
 const toolbarButtonClass =

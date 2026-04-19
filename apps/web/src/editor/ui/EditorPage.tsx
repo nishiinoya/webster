@@ -10,6 +10,8 @@ import type {
   SelectionCommand
 } from "@/editor/app/EditorApp";
 import type { MaskBrushOptions } from "../tools/mask-brush/MaskBrushTypes";
+import type { ShapeKind } from "../layers/ShapeLayer";
+import type { StrokeStyle } from "../layers/StrokeLayer";
 import {
   canPickProjectFileHandle,
   pickProjectFileWithHandle
@@ -62,22 +64,16 @@ const editorTools: ToolDefinition[] = [
     value: "Text"
   },
   {
-    description: "Draw filled or stroked rectangles.",
-    icon: "R",
-    label: "Rectangle",
-    value: "Rectangle"
+    description: "Sketch freehand strokes with pencils and brushes.",
+    icon: "D",
+    label: "Draw",
+    value: "Draw"
   },
   {
-    description: "Draw proportional circles.",
-    icon: "C",
-    label: "Circle",
-    value: "Circle"
-  },
-  {
-    description: "Draw straight stroked lines.",
-    icon: "/",
-    label: "Line",
-    value: "Line"
+    description: "Draw rectangles, circles, arrows, and polygons.",
+    icon: "S",
+    label: "Shape",
+    value: "Shape"
   },
   {
     description: "Drag a box selection.",
@@ -139,6 +135,19 @@ export function EditorPage() {
   const sidePanelsRef = useRef<HTMLElement | null>(null);
   const documentCounterRef = useRef(1);
   const [selectedTool, setSelectedTool] = useState("Move");
+  const [selectedShape, setSelectedShape] = useState<ShapeKind>("rectangle");
+  const [selectedStrokeStyle, setSelectedStrokeStyle] = useState<StrokeStyle>("pencil");
+  const [selectedStrokeColor, setSelectedStrokeColor] = useState<[number, number, number, number]>(
+    [0.07, 0.08, 0.09, 0.82]
+  );
+  const [selectedStrokeMode, setSelectedStrokeMode] = useState<"draw" | "erase">("draw");
+  const [selectedStrokeTargetLayerId, setSelectedStrokeTargetLayerId] = useState<string | null>(
+    null
+  );
+  const [selectedStrokeTargetMode, setSelectedStrokeTargetMode] = useState<
+    "layer" | "new" | "selected"
+  >("new");
+  const [selectedStrokeWidth, setSelectedStrokeWidth] = useState(3);
   const [maskBrushOptions, setMaskBrushOptions] = useState<MaskBrushOptions>({
     mode: "hide",
     opacity: 1,
@@ -203,6 +212,18 @@ export function EditorPage() {
   };
   const selectedLayer = layers.find((layer) => layer.isSelected) ?? null;
   const activeDocument = tabs.find((tab) => tab.isActive) ?? tabs[0] ?? null;
+  const strokeLayers = layers.filter((layer) => layer.type === "stroke");
+
+  useEffect(() => {
+    if (
+      selectedStrokeTargetMode === "layer" &&
+      selectedStrokeTargetLayerId &&
+      !strokeLayers.some((layer) => layer.id === selectedStrokeTargetLayerId)
+    ) {
+      setSelectedStrokeTargetLayerId(null);
+      setSelectedStrokeTargetMode("new");
+    }
+  }, [selectedStrokeTargetLayerId, selectedStrokeTargetMode, strokeLayers]);
 
   useEffect(() => {
     let didCancel = false;
@@ -510,8 +531,27 @@ export function EditorPage() {
             ...options
           }))
         }
+        onStrokeColorChange={setSelectedStrokeColor}
+        onStrokeModeChange={setSelectedStrokeMode}
+        onStrokeStyleChange={(style) => {
+          setSelectedStrokeStyle(style);
+          setSelectedStrokeColor(getDefaultStrokeColor(style));
+          setSelectedStrokeWidth(getDefaultStrokeWidth(style));
+        }}
+        onStrokeTargetChange={(target) => {
+          setSelectedStrokeTargetLayerId(target.layerId);
+          setSelectedStrokeTargetMode(target.mode);
+        }}
+        onStrokeWidthChange={(width) => setSelectedStrokeWidth(Math.max(1, width || 1))}
         saveStatus={saveStatus}
+        selectedStrokeColor={selectedStrokeColor}
+        selectedStrokeMode={selectedStrokeMode}
+        selectedStrokeStyle={selectedStrokeStyle}
+        selectedStrokeTargetLayerId={selectedStrokeTargetLayerId}
+        selectedStrokeTargetMode={selectedStrokeTargetMode}
+        selectedStrokeWidth={selectedStrokeWidth}
         selectedTool={selectedTool}
+        strokeLayers={strokeLayers}
         zoomPercentage={zoomPercentage}
       />
       <section
@@ -527,6 +567,8 @@ export function EditorPage() {
       >
         <ToolsPanel
           onSelectTool={setSelectedTool}
+          onSelectShape={setSelectedShape}
+          selectedShape={selectedShape}
           selectedTool={selectedTool}
           tools={editorTools}
         />
@@ -585,6 +627,13 @@ export function EditorPage() {
               projectSaveRequest={projectSaveRequest}
               selectLayerRequest={selectLayerRequest}
               selectionCommandRequest={selectionCommandRequest}
+              selectedShape={selectedShape}
+              selectedStrokeColor={selectedStrokeColor}
+              selectedStrokeMode={selectedStrokeMode}
+              selectedStrokeStyle={selectedStrokeStyle}
+              selectedStrokeTargetLayerId={selectedStrokeTargetLayerId}
+              selectedStrokeTargetMode={selectedStrokeTargetMode}
+              selectedStrokeWidth={selectedStrokeWidth}
               selectedTool={selectedTool}
               uploadRequest={uploadRequest}
             />
@@ -793,6 +842,36 @@ function getProjectFilename(title: string) {
   const safeTitle = (title.trim() || "untitled").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-");
 
   return safeTitle.toLowerCase().endsWith(".webster") ? safeTitle : `${safeTitle}.webster`;
+}
+
+function getDefaultStrokeWidth(style: StrokeStyle) {
+  switch (style) {
+    case "brush":
+      return 14;
+    case "highlighter":
+      return 30;
+    case "marker":
+      return 22;
+    case "pen":
+      return 6;
+    case "pencil":
+      return 3;
+  }
+}
+
+function getDefaultStrokeColor(style: StrokeStyle): [number, number, number, number] {
+  switch (style) {
+    case "brush":
+      return [0.05, 0.06, 0.07, 0.88];
+    case "highlighter":
+      return [1, 0.78, 0.22, 0.36];
+    case "marker":
+      return [0.1, 0.42, 0.88, 0.95];
+    case "pen":
+      return [0.07, 0.08, 0.09, 1];
+    case "pencil":
+      return [0.07, 0.08, 0.09, 0.82];
+  }
 }
 
 function ResizeHandle({

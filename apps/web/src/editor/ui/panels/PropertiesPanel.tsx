@@ -25,7 +25,7 @@ type TextLayerSummary = LayerSummary & {
 
 type ShapeLayerSummary = LayerSummary & {
   fillColor: [number, number, number, number];
-  shape: "rectangle" | "circle" | "line";
+  shape: "rectangle" | "circle" | "line" | "triangle" | "diamond" | "arrow";
   strokeColor: [number, number, number, number];
   strokeWidth: number;
 };
@@ -310,28 +310,6 @@ export function PropertiesPanel({
         {isShapeLayerSummary(selectedLayer) ? (
           <div className={propertySectionClass}>
             <h3 className={propertySectionTitleClass}>Shape</h3>
-            <label className={propertyRowClass}>
-              <span className={propertyLabelClass}>Kind</span>
-              <select
-                className={propertyInputClass}
-                disabled={selectedLayer.locked}
-                onChange={(event) =>
-                  updateSelectedLayer({
-                    shape:
-                      event.target.value === "circle"
-                        ? "circle"
-                        : event.target.value === "line"
-                          ? "line"
-                          : "rectangle"
-                  })
-                }
-                value={selectedLayer.shape}
-              >
-                <option value="rectangle">Rectangle</option>
-                <option value="circle">Circle</option>
-                <option value="line">Line</option>
-              </select>
-            </label>
             <label className={propertyRowClass}>
               <span className={propertyLabelClass}>Fill color</span>
               <input

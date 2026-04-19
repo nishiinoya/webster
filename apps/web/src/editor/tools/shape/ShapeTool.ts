@@ -124,8 +124,8 @@ export class ShapeTool {
 
     const end = useDefaultSize
       ? {
-          x: start.x + (layer.shape === "circle" ? 140 : 180),
-          y: start.y + (layer.shape === "circle" ? 140 : 120)
+          x: start.x + (layer.shape === "circle" || layer.shape === "diamond" ? 140 : 180),
+          y: start.y + (layer.shape === "circle" || layer.shape === "diamond" ? 140 : 120)
         }
       : point;
     let left = Math.min(start.x, end.x);
@@ -133,7 +133,7 @@ export class ShapeTool {
     let width = Math.max(1, Math.abs(end.x - start.x));
     let height = Math.max(1, Math.abs(end.y - start.y));
 
-    if (layer.shape === "circle") {
+    if (layer.shape === "circle" || layer.shape === "diamond") {
       const size = Math.max(width, height);
 
       width = size;
@@ -170,11 +170,20 @@ function getDefaultStrokeWidth() {
 }
 
 function getShapeName(shape: ShapeKind) {
-  if (shape === "circle") {
-    return "Circle";
+  switch (shape) {
+    case "arrow":
+      return "Arrow";
+    case "circle":
+      return "Circle";
+    case "diamond":
+      return "Diamond";
+    case "line":
+      return "Line";
+    case "triangle":
+      return "Triangle";
+    case "rectangle":
+      return "Rectangle";
   }
-
-  return shape === "line" ? "Line" : "Rectangle";
 }
 
 function normalizeRotation(rotation: number) {

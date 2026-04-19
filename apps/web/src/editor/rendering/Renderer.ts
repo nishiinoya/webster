@@ -10,8 +10,11 @@ import {
 import { ImageLayer } from "../layers/ImageLayer";
 import { Layer } from "../layers/Layer";
 import { ShapeLayer } from "../layers/ShapeLayer";
+import { StrokeLayer } from "../layers/StrokeLayer";
+import type { StrokePath, StrokeStyle } from "../layers/StrokeLayer";
 import { TextLayer } from "../layers/TextLayer";
 import { CheckerboardShaderProgram } from "./shaders/CheckerboardShaderProgram";
+import { BrushShaderProgram } from "./shaders/BrushShaderProgram";
 import { loadShaderSource } from "./shaders/loadShaderSource";
 import { Quad } from "./geometry/Quad";
 import { EllipseMesh } from "./geometry/EllipseMesh";
@@ -24,8 +27,11 @@ import type { BitmapTextRect } from "./text/BitmapText";
 import { FontLoader } from "./text/FontLoader";
 import { buildCompiledTextGeometry } from "./text/CompiledTextGeometry";
 import type { CompiledTextGeometry, TextCharacterBox } from "./text/CompiledTextGeometry";
+import earcut from "earcut";
 
 export type RendererShaderSources = {
+  brushFragment: string;
+  brushVertex: string;
   checkerboardFragment: string;
   checkerboardVertex: string;
   solidFragment: string;
@@ -46,6 +52,19 @@ export type RenderOptions = {
   } | null;
 };
 
+type CachedStrokePathGeometry = {
+  brushSize: number;
+  brushStyle: number;
+  color: [number, number, number, number];
+  texCoords: Float32Array;
+  vertices: Float32Array;
+};
+
+type StrokeGeometryCacheEntry = {
+  paths: CachedStrokePathGeometry[];
+  revision: number;
+};
+
 export const editorRenderOptions: RenderOptions = {
   documentBackground: "checkerboard",
   showSelectionOverlay: true,
@@ -63,6 +82,7 @@ export const imageExportRenderOptions: RenderOptions = {
 export class Renderer {
   private readonly gl: WebGLRenderingContext;
   private readonly solidColorShaderProgram: SolidColorShaderProgram;
+  private readonly brushShaderProgram: BrushShaderProgram;
   private readonly checkerboardShaderProgram: CheckerboardShaderProgram;
   private readonly texturedShaderProgram: TexturedShaderProgram;
   private readonly textureManager: TextureManager;
@@ -76,6 +96,7 @@ export class Renderer {
   private readonly textGeometryPositionBuffer: WebGLBuffer;
   private readonly textGeometryTexCoordBuffer: WebGLBuffer;
   private readonly supportsUint32Indices: boolean;
+  private readonly strokeGeometryCache = new WeakMap<StrokeLayer, StrokeGeometryCacheEntry>();
   private width = 0;
   private height = 0;
   private cssWidth = 1;
@@ -83,11 +104,13 @@ export class Renderer {
 
   static async create(
     canvas: HTMLCanvasElement,
-    options: { alpha?: boolean; preserveDrawingBuffer?: boolean } = {}
+    options: { alpha?: boolean; premultipliedAlpha?: boolean; preserveDrawingBuffer?: boolean } = {}
   ) {
     const [
       checkerboardFragment,
       checkerboardVertex,
+      brushFragment,
+      brushVertex,
       solidFragment,
       solidVertex,
       texturedFragment,
@@ -96,6 +119,8 @@ export class Renderer {
     ] = await Promise.all([
       loadShaderSource("/glsl/checkerboard.frag.glsl"),
       loadShaderSource("/glsl/checkerboard.vert.glsl"),
+      loadShaderSource("/glsl/brush.frag.glsl"),
+      loadShaderSource("/glsl/brush.vert.glsl"),
       loadShaderSource("/glsl/solid.frag.glsl"),
       loadShaderSource("/glsl/solid.vert.glsl"),
       loadShaderSource("/glsl/textured.frag.glsl"),
@@ -106,6 +131,8 @@ export class Renderer {
     return new Renderer(
       canvas,
       {
+        brushFragment,
+        brushVertex,
         checkerboardFragment,
         checkerboardVertex,
         solidFragment,
@@ -122,12 +149,13 @@ export class Renderer {
     private readonly canvas: HTMLCanvasElement,
     shaderSources: RendererShaderSources,
     fontLoader: FontLoader,
-    options: { alpha?: boolean; preserveDrawingBuffer?: boolean } = {}
+    options: { alpha?: boolean; premultipliedAlpha?: boolean; preserveDrawingBuffer?: boolean } = {}
   ) {
     const gl = canvas.getContext("webgl", {
       alpha: options.alpha ?? false,
       antialias: true,
       depth: false,
+      premultipliedAlpha: options.premultipliedAlpha ?? true,
       preserveDrawingBuffer: options.preserveDrawingBuffer ?? false,
       stencil: false
     });
@@ -141,6 +169,11 @@ export class Renderer {
       gl,
       shaderSources.solidVertex,
       shaderSources.solidFragment
+    );
+    this.brushShaderProgram = new BrushShaderProgram(
+      gl,
+      shaderSources.brushVertex,
+      shaderSources.brushFragment
     );
     this.checkerboardShaderProgram = new CheckerboardShaderProgram(
       gl,
@@ -246,6 +279,10 @@ export class Renderer {
         this.drawShapeLayer(layer, camera);
       }
 
+      if (layer instanceof StrokeLayer) {
+        this.drawStrokeLayer(layer, camera);
+      }
+
       if (layer instanceof ImageLayer) {
         this.texturedShaderProgram.use();
         this.texturedShaderProgram.setProjection(camera.projectionMatrix);
@@ -284,6 +321,7 @@ export class Renderer {
     this.textureManager.dispose();
     this.texturedShaderProgram.dispose();
     this.checkerboardShaderProgram.dispose();
+    this.brushShaderProgram.dispose();
     this.solidColorShaderProgram.dispose();
     this.ellipseMesh.dispose();
     this.gl.deleteBuffer(this.localRectanglePositionBuffer);
@@ -329,7 +367,7 @@ export class Renderer {
 
   private bindMask(
     layer: Layer,
-    shaderProgram: SolidColorShaderProgram | TexturedShaderProgram
+    shaderProgram: BrushShaderProgram | SolidColorShaderProgram | TexturedShaderProgram
   ) {
     const mask = layer.mask;
     const isMaskEnabled = Boolean(mask?.enabled);
@@ -463,6 +501,91 @@ export class Renderer {
 
     if (layer.shape === "line") {
       this.drawLineShape(layer);
+      return;
+    }
+
+    this.drawPolygonShape(layer);
+  }
+
+  private drawStrokeLayer(layer: StrokeLayer, camera: Camera2D) {
+    if (layer.paths.length === 0) {
+      return;
+    }
+
+    const cachedGeometry = this.getStrokeGeometry(layer);
+
+    this.brushShaderProgram.use();
+    this.brushShaderProgram.setProjection(camera.projectionMatrix);
+    this.bindMask(layer, this.brushShaderProgram);
+
+    for (const path of cachedGeometry.paths) {
+      this.brushShaderProgram.setColor([
+        path.color[0],
+        path.color[1],
+        path.color[2],
+        path.color[3] * layer.opacity
+      ]);
+      this.brushShaderProgram.setBrushStyle(path.brushStyle);
+      this.brushShaderProgram.setBrushSize(path.brushSize);
+      this.drawBrushLayerLocalVertexData(layer, path.vertices, path.texCoords);
+    }
+  }
+
+  private getStrokeGeometry(layer: StrokeLayer) {
+    const cachedGeometry = this.strokeGeometryCache.get(layer);
+
+    if (cachedGeometry?.revision === layer.revision) {
+      return cachedGeometry;
+    }
+
+    const nextGeometry: StrokeGeometryCacheEntry = {
+      paths: layer.paths.map((path) => buildStrokePathGeometry(layer, path)),
+      revision: layer.revision
+    };
+
+    this.strokeGeometryCache.set(layer, nextGeometry);
+
+    return nextGeometry;
+  }
+
+  private drawPolygonShape(layer: ShapeLayer) {
+    const points = getPolygonShapePoints(layer);
+
+    if (points.length < 3) {
+      return;
+    }
+
+    if (layer.fillColor[3] > 0) {
+      this.solidColorShaderProgram.setColor([
+        layer.fillColor[0],
+        layer.fillColor[1],
+        layer.fillColor[2],
+        layer.fillColor[3] * layer.opacity
+      ]);
+      this.bindMask(layer, this.solidColorShaderProgram);
+      this.drawLayerLocalPolygon(layer, points);
+    }
+
+    if (layer.strokeWidth <= 0 || layer.strokeColor[3] <= 0) {
+      return;
+    }
+
+    this.solidColorShaderProgram.setColor([
+      layer.strokeColor[0],
+      layer.strokeColor[1],
+      layer.strokeColor[2],
+      layer.strokeColor[3] * layer.opacity
+    ]);
+    this.bindMask(layer, this.solidColorShaderProgram);
+
+    const strokeWidth =
+      layer.strokeWidth / Math.max(1e-6, (Math.abs(layer.scaleX) + Math.abs(layer.scaleY)) / 2);
+
+    for (let index = 0; index < points.length; index += 1) {
+      const start = points[index];
+      const end = points[(index + 1) % points.length];
+
+      this.drawLayerLocalLine(layer, start, end, strokeWidth);
     }
   }
 
@@ -838,6 +961,180 @@ export class Renderer {
     this.gl.drawArrays(this.gl.TRIANGLES, 0, 6);
   }
 
+  private drawLayerLocalPolygon(layer: Layer, points: Array<{ x: number; y: number }>) {
+    const flatPoints = points.flatMap((point) => [point.x, point.y]);
+    const indices = earcut(flatPoints, undefined, 2);
+
+    this.drawLayerLocalTriangles(
+      layer,
+      indices.map((index) => points[index])
+    );
+  }
+
+  private drawLayerLocalLine(
+    layer: Layer,
+    start: { x: number; y: number },
+    end: { x: number; y: number },
+    width: number
+  ) {
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const length = Math.hypot(dx, dy);
+
+    if (length <= 1e-6) {
+      return;
+    }
+
+    const normalX = (-dy / length) * (width / 2);
+    const normalY = (dx / length) * (width / 2);
+    const a = { x: start.x + normalX, y: start.y + normalY };
+    const b = { x: end.x + normalX, y: end.y + normalY };
+    const c = { x: end.x - normalX, y: end.y - normalY };
+    const d = { x: start.x - normalX, y: start.y - normalY };
+
+    this.drawLayerLocalTriangles(layer, [a, b, d, d, b, c]);
+  }
+
+
+  private drawLayerLocalCircle(layer: Layer, center: { x: number; y: number }, radius: number) {
+    const points: Array<{ x: number; y: number }> = [];
+    const segments = 18;
+
+    for (let index = 0; index < segments; index += 1) {
+      const angle = (index / segments) * Math.PI * 2;
+
+      points.push({
+        x: center.x + Math.cos(angle) * radius,
+        y: center.y + Math.sin(angle) * radius
+      });
+    }
+
+    this.drawLayerLocalPolygon(layer, points);
+  }
+
+  private drawLayerLocalTriangles(layer: Layer, points: Array<{ x: number; y: number }>) {
+    if (points.length === 0) {
+      return;
+    }
+
+    const vertices = new Float32Array(points.length * 2);
+    const texCoords = new Float32Array(points.length * 2);
+
+    for (let index = 0; index < points.length; index += 1) {
+      const point = points[index];
+      const vertexIndex = index * 2;
+
+      vertices[vertexIndex] = point.x / layer.width;
+      vertices[vertexIndex + 1] = point.y / layer.height;
+      texCoords[vertexIndex] = point.x / layer.width;
+      texCoords[vertexIndex + 1] = point.y / layer.height;
+    }
+
+    this.solidColorShaderProgram.setModel(getModelMatrix(layer));
+
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.localRectanglePositionBuffer);
+    this.gl.bufferData(this.gl.ARRAY_BUFFER, vertices, this.gl.DYNAMIC_DRAW);
+    this.gl.enableVertexAttribArray(this.solidColorShaderProgram.positionAttributeLocation);
+    this.gl.vertexAttribPointer(
+      this.solidColorShaderProgram.positionAttributeLocation,
+      2,
+      this.gl.FLOAT,
+      false,
+      0,
+      0
+    );
+
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.localRectangleTexCoordBuffer);
+    this.gl.bufferData(this.gl.ARRAY_BUFFER, texCoords, this.gl.DYNAMIC_DRAW);
+    this.gl.enableVertexAttribArray(this.solidColorShaderProgram.texCoordAttributeLocation);
+    this.gl.vertexAttribPointer(
+      this.solidColorShaderProgram.texCoordAttributeLocation,
+      2,
+      this.gl.FLOAT,
+      false,
+      0,
+      0
+    );
+
+    this.gl.drawArrays(this.gl.TRIANGLES, 0, points.length);
+  }
+
+  private drawLayerLocalVertexData(
+    layer: Layer,
+    vertices: Float32Array,
+    texCoords: Float32Array
+  ) {
+    if (vertices.length === 0) {
+      return;
+    }
+
+    this.solidColorShaderProgram.setModel(getModelMatrix(layer));
+
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.localRectanglePositionBuffer);
+    this.gl.bufferData(this.gl.ARRAY_BUFFER, vertices, this.gl.DYNAMIC_DRAW);
+    this.gl.enableVertexAttribArray(this.solidColorShaderProgram.positionAttributeLocation);
+    this.gl.vertexAttribPointer(
+      this.solidColorShaderProgram.positionAttributeLocation,
+      2,
+      this.gl.FLOAT,
+      false,
+      0,
+      0
+    );
+
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.localRectangleTexCoordBuffer);
+    this.gl.bufferData(this.gl.ARRAY_BUFFER, texCoords, this.gl.DYNAMIC_DRAW);
+    this.gl.enableVertexAttribArray(this.solidColorShaderProgram.texCoordAttributeLocation);
+    this.gl.vertexAttribPointer(
+      this.solidColorShaderProgram.texCoordAttributeLocation,
+      2,
+      this.gl.FLOAT,
+      false,
+      0,
+      0
+    );
+
+    this.gl.drawArrays(this.gl.TRIANGLES, 0, vertices.length / 2);
+  }
+
+  private drawBrushLayerLocalVertexData(
+    layer: Layer,
+    vertices: Float32Array,
+    texCoords: Float32Array
+  ) {
+    if (vertices.length === 0) {
+      return;
+    }
+
+    this.brushShaderProgram.setModel(getModelMatrix(layer));
+
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.localRectanglePositionBuffer);
+    this.gl.bufferData(this.gl.ARRAY_BUFFER, vertices, this.gl.DYNAMIC_DRAW);
+    this.gl.enableVertexAttribArray(this.brushShaderProgram.positionAttributeLocation);
+    this.gl.vertexAttribPointer(
+      this.brushShaderProgram.positionAttributeLocation,
+      2,
+      this.gl.FLOAT,
+      false,
+      0,
+      0
+    );
+
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.localRectangleTexCoordBuffer);
+    this.gl.bufferData(this.gl.ARRAY_BUFFER, texCoords, this.gl.DYNAMIC_DRAW);
+    this.gl.enableVertexAttribArray(this.brushShaderProgram.texCoordAttributeLocation);
+    this.gl.vertexAttribPointer(
+      this.brushShaderProgram.texCoordAttributeLocation,
+      2,
+      this.gl.FLOAT,
+      false,
+      0,
+      0
+    );
+
+    this.gl.drawArrays(this.gl.TRIANGLES, 0, vertices.length / 2);
+  }
+
   async prepareSceneFonts(scene: Scene) {
     const tasks: Promise<unknown>[] = [];
 
@@ -866,4 +1163,385 @@ function isFiniteFloatArray(values: Float32Array) {
   }
 
   return true;
+}
+
+function getPolygonShapePoints(layer: ShapeLayer) {
+  const width = layer.width;
+  const height = layer.height;
+
+  if (layer.shape === "triangle") {
+    return [
+      { x: width / 2, y: height },
+      { x: width, y: 0 },
+      { x: 0, y: 0 }
+    ];
+  }
+
+  if (layer.shape === "diamond") {
+    return [
+      { x: width / 2, y: height },
+      { x: width, y: height / 2 },
+      { x: width / 2, y: 0 },
+      { x: 0, y: height / 2 }
+    ];
+  }
+
+  if (layer.shape === "arrow") {
+    return [
+      { x: 0, y: height * 0.25 },
+      { x: width * 0.62, y: height * 0.25 },
+      { x: width * 0.62, y: 0 },
+      { x: width, y: height * 0.5 },
+      { x: width * 0.62, y: height },
+      { x: width * 0.62, y: height * 0.75 },
+      { x: 0, y: height * 0.75 }
+    ];
+  }
+
+  return [];
+}
+
+function buildStrokePathGeometry(layer: StrokeLayer, path: StrokePath): CachedStrokePathGeometry {
+  const width = getRenderedStrokeWidth(path.strokeStyle, path.strokeWidth);
+  const points = simplifyStrokePoints(path.points, Math.max(0.75, width * 0.08));
+  const triangles =
+    points.length === 1
+      ? getSinglePointStrokeGeometry(path.strokeStyle, points[0], width / 2)
+      : [
+          ...getPolylineTriangles(points, width),
+          ...getStrokeCaps(path.strokeStyle, points, width / 2)
+        ];
+  const vertices = new Float32Array(triangles.length * 2);
+  const texCoords = new Float32Array(triangles.length * 2);
+
+  for (let index = 0; index < triangles.length; index += 1) {
+    const point = triangles[index];
+    const vertexIndex = index * 2;
+
+    vertices[vertexIndex] = point.x / Math.max(1e-6, layer.width);
+    vertices[vertexIndex + 1] = point.y / Math.max(1e-6, layer.height);
+    texCoords[vertexIndex] = vertices[vertexIndex];
+    texCoords[vertexIndex + 1] = vertices[vertexIndex + 1];
+  }
+
+  return {
+    brushSize: path.strokeWidth,
+    brushStyle: getBrushStyleUniform(path.strokeStyle),
+    color: getRenderedStrokeColor(path.strokeStyle, path.color),
+    texCoords,
+    vertices
+  };
+}
+
+function getBrushStyleUniform(style: StrokeStyle) {
+  if (style === "pencil") {
+    return 1;
+  }
+
+  if (style === "brush") {
+    return 2;
+  }
+
+  if (style === "marker") {
+    return 3;
+  }
+
+  if (style === "highlighter") {
+    return 4;
+  }
+
+  return 0;
+}
+
+function simplifyStrokePoints(points: Array<{ x: number; y: number }>, minDistance: number) {
+  if (points.length <= 2) {
+    return points;
+  }
+
+  const simplified = [points[0]];
+
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const previous = simplified[simplified.length - 1];
+    const point = points[index];
+
+    if (Math.hypot(point.x - previous.x, point.y - previous.y) >= minDistance) {
+      simplified.push(point);
+    }
+  }
+
+  simplified.push(points[points.length - 1]);
+
+  return simplified;
+}
+
+function getRenderedStrokeWidth(style: StrokeStyle, width: number) {
+  if (style === "pencil") {
+    return width * 0.62;
+  }
+
+  if (style === "marker") {
+    return width * 0.9;
+  }
+
+  if (style === "highlighter") {
+    return width * 1.1;
+  }
+
+  if (style === "brush") {
+    return width * 1.05;
+  }
+
+  return width;
+}
+
+function getRenderedStrokeColor(
+  style: StrokeStyle,
+  color: [number, number, number, number]
+): [number, number, number, number] {
+  if (style === "pencil") {
+    return [color[0], color[1], color[2], color[3] * 0.88];
+  }
+
+  if (style === "highlighter") {
+    return [color[0], color[1], color[2], color[3] * 0.52];
+  }
+
+  if (style === "marker") {
+    return [color[0], color[1], color[2], color[3] * 0.94];
+  }
+
+  return color;
+}
+
+function getPolylineTriangles(points: Array<{ x: number; y: number }>, width: number) {
+  if (points.length < 2) {
+    return [];
+  }
+
+  const halfWidth = width / 2;
+  const segmentNormals: Array<{ x: number; y: number }> = [];
+
+  for (let index = 1; index < points.length; index += 1) {
+    const start = points[index - 1];
+    const end = points[index];
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const length = Math.hypot(dx, dy);
+
+    segmentNormals.push(
+      length <= 1e-6
+        ? { x: 0, y: 1 }
+        : {
+            x: -dy / length,
+            y: dx / length
+          }
+    );
+  }
+
+  const left: Array<{ x: number; y: number }> = [];
+  const right: Array<{ x: number; y: number }> = [];
+
+  for (let index = 0; index < points.length; index += 1) {
+    const previousNormal = segmentNormals[Math.max(0, index - 1)];
+    const nextNormal = segmentNormals[Math.min(segmentNormals.length - 1, index)];
+    const normal =
+      index === 0
+        ? nextNormal
+        : index === points.length - 1
+          ? previousNormal
+          : getJoinNormal(previousNormal, nextNormal);
+    const miterScale =
+      index === 0 || index === points.length - 1
+        ? 1
+        : Math.min(1.8, Math.max(1, 1 / Math.max(0.45, Math.abs(dot(normal, nextNormal)))));
+    const point = points[index];
+
+    left.push({
+      x: point.x + normal.x * halfWidth * miterScale,
+      y: point.y + normal.y * halfWidth * miterScale
+    });
+    right.push({
+      x: point.x - normal.x * halfWidth * miterScale,
+      y: point.y - normal.y * halfWidth * miterScale
+    });
+  }
+
+  const triangles: Array<{ x: number; y: number }> = [];
+
+  for (let index = 1; index < points.length; index += 1) {
+    triangles.push(left[index - 1], left[index], right[index - 1]);
+    triangles.push(right[index - 1], left[index], right[index]);
+  }
+
+  return triangles;
+}
+
+function getLocalCirclePoints(center: { x: number; y: number }, radius: number) {
+  const points: Array<{ x: number; y: number }> = [];
+  const segments = 12;
+
+  for (let index = 0; index < segments; index += 1) {
+    const startAngle = (index / segments) * Math.PI * 2;
+    const endAngle = ((index + 1) / segments) * Math.PI * 2;
+
+    points.push(
+      center,
+      {
+        x: center.x + Math.cos(startAngle) * radius,
+        y: center.y + Math.sin(startAngle) * radius
+      },
+      {
+        x: center.x + Math.cos(endAngle) * radius,
+        y: center.y + Math.sin(endAngle) * radius
+      }
+    );
+  }
+
+  return points;
+}
+
+function getSinglePointStrokeGeometry(
+  style: StrokeStyle,
+  center: { x: number; y: number },
+  radius: number
+) {
+  if (style === "marker" || style === "highlighter") {
+    return getLocalSquarePoints(center, radius);
+  }
+
+  return getLocalCirclePoints(center, radius);
+}
+
+function getStrokeCaps(style: StrokeStyle, points: Array<{ x: number; y: number }>, radius: number) {
+  if (style === "marker" || style === "highlighter") {
+    return [];
+  }
+
+  const start = points[0];
+  const next = points[1];
+  const end = points[points.length - 1];
+  const previous = points[points.length - 2];
+
+  if (style === "pencil" || style === "brush") {
+    return [
+      ...getLocalTaperCap(start, next, radius),
+      ...getLocalTaperCap(end, previous, radius)
+    ];
+  }
+
+  return [
+    ...getLocalRoundCap(start, next, radius),
+    ...getLocalRoundCap(end, previous, radius)
+  ];
+}
+
+function getLocalSquarePoints(center: { x: number; y: number }, radius: number) {
+  return [
+    { x: center.x - radius, y: center.y - radius },
+    { x: center.x + radius, y: center.y - radius },
+    { x: center.x - radius, y: center.y + radius },
+    { x: center.x - radius, y: center.y + radius },
+    { x: center.x + radius, y: center.y - radius },
+    { x: center.x + radius, y: center.y + radius }
+  ];
+}
+
+function getLocalRoundCap(
+  center: { x: number; y: number },
+  neighbor: { x: number; y: number },
+  radius: number
+) {
+  const dx = center.x - neighbor.x;
+  const dy = center.y - neighbor.y;
+  const length = Math.hypot(dx, dy);
+
+  if (length <= 1e-6) {
+    return getLocalCirclePoints(center, radius);
+  }
+
+  const outwardDirection = { x: dx / length, y: dy / length };
+
+  return getLocalSemicirclePoints(center, outwardDirection, radius);
+}
+
+function getLocalTaperCap(
+  center: { x: number; y: number },
+  neighbor: { x: number; y: number },
+  radius: number
+) {
+  const dx = center.x - neighbor.x;
+  const dy = center.y - neighbor.y;
+  const length = Math.hypot(dx, dy);
+
+  if (length <= 1e-6) {
+    return getLocalCirclePoints(center, radius);
+  }
+
+  const direction = { x: dx / length, y: dy / length };
+  const normal = { x: -direction.y, y: direction.x };
+  const tipDistance = radius * 0.75;
+
+  return [
+    {
+      x: center.x + normal.x * radius,
+      y: center.y + normal.y * radius
+    },
+    {
+      x: center.x - normal.x * radius,
+      y: center.y - normal.y * radius
+    },
+    {
+      x: center.x + direction.x * tipDistance,
+      y: center.y + direction.y * tipDistance
+    }
+  ];
+}
+
+function getLocalSemicirclePoints(
+  center: { x: number; y: number },
+  outwardDirection: { x: number; y: number },
+  radius: number
+) {
+  const points: Array<{ x: number; y: number }> = [];
+  const segments = 8;
+  const angle = Math.atan2(outwardDirection.y, outwardDirection.x);
+  const startAngle = angle - Math.PI / 2;
+
+  for (let index = 0; index < segments; index += 1) {
+    const a0 = startAngle + (index / segments) * Math.PI;
+    const a1 = startAngle + ((index + 1) / segments) * Math.PI;
+
+    points.push(
+      center,
+      {
+        x: center.x + Math.cos(a0) * radius,
+        y: center.y + Math.sin(a0) * radius
+      },
+      {
+        x: center.x + Math.cos(a1) * radius,
+        y: center.y + Math.sin(a1) * radius
+      }
+    );
+  }
+
+  return points;
+}
+
+function getJoinNormal(a: { x: number; y: number }, b: { x: number; y: number }) {
+  const x = a.x + b.x;
+  const y = a.y + b.y;
+  const length = Math.hypot(x, y);
+
+  if (length <= 1e-6) {
+    return b;
+  }
+
+  return {
+    x: x / length,
+    y: y / length
+  };
+}
+
+function dot(a: { x: number; y: number }, b: { x: number; y: number }) {
+  return a.x * b.x + a.y * b.y;
 }

@@ -1,4 +1,6 @@
 import { Camera2D } from "../../geometry/Camera2D";
+import { DrawingTool } from "../drawing/DrawingTool";
+import type { DrawingToolOptions } from "../drawing/DrawingTool";
 import { Scene } from "../../scene/Scene";
 import { MaskBrushTool } from "../mask-brush/MaskBrushTool";
 import type { MaskBrushOptions } from "../mask-brush/MaskBrushTypes";
@@ -6,8 +8,10 @@ import { MoveTool } from "../move/MoveTool";
 import type { ToolCursor, ToolPointerEvent } from "../move/MoveTool";
 import { SelectionTool } from "../selection/SelectionTool";
 import { ShapeTool } from "../shape/ShapeTool";
+import type { ShapeKind } from "../../layers/ShapeLayer";
 
 export class InputController {
+  private readonly drawingTool: DrawingTool;
   private readonly maskBrushTool: MaskBrushTool;
   private readonly moveTool: MoveTool;
   private readonly selectionTool: SelectionTool;
@@ -15,6 +19,7 @@ export class InputController {
   private selectedTool = "Move";
 
   constructor(canvas: HTMLCanvasElement, scene: Scene, camera: Camera2D) {
+    this.drawingTool = new DrawingTool(canvas, scene, camera);
     this.moveTool = new MoveTool(canvas, scene, camera);
     this.maskBrushTool = new MaskBrushTool(canvas, scene, camera);
     this.selectionTool = new SelectionTool(canvas, scene, camera);
@@ -22,6 +27,7 @@ export class InputController {
   }
 
   setScene(scene: Scene) {
+    this.drawingTool.setScene(scene);
     this.maskBrushTool.setScene(scene);
     this.moveTool.setScene(scene);
     this.selectionTool.setScene(scene);
@@ -30,21 +36,6 @@ export class InputController {
 
   setSelectedTool(tool: string) {
     this.selectedTool = tool;
-
-    if (tool === "Rectangle") {
-      this.shapeTool.setShape("rectangle");
-      return;
-    }
-
-    if (tool === "Circle") {
-      this.shapeTool.setShape("circle");
-      return;
-    }
-
-    if (tool === "Line") {
-      this.shapeTool.setShape("line");
-      return;
-    }
 
     if (tool === "Ellipse Select") {
       this.selectionTool.setShape("ellipse");
@@ -56,8 +47,16 @@ export class InputController {
     }
   }
 
+  setShape(shape: ShapeKind) {
+    this.shapeTool.setShape(shape);
+  }
+
   setMaskBrushOptions(options: Partial<MaskBrushOptions>) {
     this.maskBrushTool.setOptions(options);
+  }
+
+  setDrawingToolOptions(options: Partial<DrawingToolOptions>) {
+    this.drawingTool.setOptions(options);
   }
 
   pointerDown(event: ToolPointerEvent) {
@@ -71,6 +70,10 @@ export class InputController {
 
     if (isShapeTool(this.selectedTool)) {
       return this.shapeTool.pointerDown(event);
+    }
+
+    if (this.selectedTool === "Draw") {
+      return this.drawingTool.pointerDown(event);
     }
 
     if (this.selectedTool !== "Move") {
@@ -93,6 +96,10 @@ export class InputController {
       return this.shapeTool.pointerMove(event);
     }
 
+    if (this.selectedTool === "Draw") {
+      return this.drawingTool.pointerMove(event);
+    }
+
     if (this.selectedTool !== "Move") {
       return false;
     }
@@ -113,10 +120,15 @@ export class InputController {
       return this.shapeTool.pointerUp();
     }
 
+    if (this.selectedTool === "Draw") {
+      return this.drawingTool.pointerUp();
+    }
+
     return this.moveTool.pointerUp();
   }
 
   cancel() {
+    this.drawingTool.cancel();
     this.maskBrushTool.cancel();
     this.moveTool.cancel();
     this.selectionTool.cancel();
@@ -144,6 +156,10 @@ export class InputController {
       return this.shapeTool.getCursor();
     }
 
+    if (this.selectedTool === "Draw") {
+      return this.drawingTool.getCursor();
+    }
+
     if (this.selectedTool !== "Move") {
       return "default";
     }
@@ -157,5 +173,5 @@ function isSelectionTool(tool: string) {
 }
 
 function isShapeTool(tool: string) {
-  return tool === "Rectangle" || tool === "Circle" || tool === "Line";
+  return tool === "Shape";
 }

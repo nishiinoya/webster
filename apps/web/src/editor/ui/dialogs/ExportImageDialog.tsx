@@ -1,4 +1,4 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import type { ImageExportBackground, ImageExportFormat } from "../../app/EditorApp";
 
 type ExportImageDialogProps = {
@@ -8,13 +8,19 @@ type ExportImageDialogProps = {
 
 export function ExportImageDialog({ onClose, onExport }: ExportImageDialogProps) {
   const [format, setFormat] = useState<ImageExportFormat>("png");
-  const [opaqueBackground, setOpaqueBackground] = useState<"checkerboard" | "white">("white");
+  const [background, setBackground] = useState<ImageExportBackground>("white");
+
+  useEffect(() => {
+    if (format !== "png" && background === "transparent") {
+      setBackground("white");
+    }
+  }, [background, format]);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     onExport({
-      background: format === "png" ? "transparent" : opaqueBackground,
+      background,
       format
     });
   }
@@ -47,7 +53,7 @@ export function ExportImageDialog({ onClose, onExport }: ExportImageDialogProps)
               type="radio"
             />
             <span>PNG</span>
-            <strong className={dialogRadioHintClass}>Transparent background</strong>
+            <strong className={dialogRadioHintClass}>Choose transparent or opaque</strong>
           </label>
           <label className={dialogRadioClass}>
             <input
@@ -68,20 +74,30 @@ export function ExportImageDialog({ onClose, onExport }: ExportImageDialogProps)
             <strong className={dialogRadioHintClass}>Single-page document</strong>
           </label>
         </fieldset>
-        <fieldset className={dialogFieldsetClass} disabled={format === "png"}>
-          <legend className={dialogLegendClass}>Opaque background</legend>
+        <fieldset className={dialogFieldsetClass}>
+          <legend className={dialogLegendClass}>Background</legend>
           <label className={dialogRadioClass}>
             <input
-              checked={opaqueBackground === "white"}
-              onChange={() => setOpaqueBackground("white")}
+              checked={background === "transparent"}
+              disabled={format !== "png"}
+              onChange={() => setBackground("transparent")}
+              type="radio"
+            />
+            <span>Transparent</span>
+            <strong className={dialogRadioHintClass}>PNG only</strong>
+          </label>
+          <label className={dialogRadioClass}>
+            <input
+              checked={background === "white"}
+              onChange={() => setBackground("white")}
               type="radio"
             />
             <span>White</span>
           </label>
           <label className={dialogRadioClass}>
             <input
-              checked={opaqueBackground === "checkerboard"}
-              onChange={() => setOpaqueBackground("checkerboard")}
+              checked={background === "checkerboard"}
+              onChange={() => setBackground("checkerboard")}
               type="radio"
             />
             <span>Checkerboard</span>

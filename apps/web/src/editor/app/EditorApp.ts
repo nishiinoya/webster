@@ -1,6 +1,7 @@
 import { editorRenderOptions, imageExportRenderOptions, Renderer } from "../rendering/Renderer";
 import { InputController } from "../tools/input/InputController";
 import type { MaskBrushOptions } from "../tools/mask-brush/MaskBrushTypes";
+import type { DrawingToolOptions } from "../tools/drawing/DrawingTool";
 import type { ToolPointerEvent } from "../tools/move/MoveTool";
 import { Camera2D } from "../geometry/Camera2D";
 import { Scene } from "../scene/Scene";
@@ -8,6 +9,7 @@ import type { LayerMaskAction } from "../scene/Scene";
 import { exportScenePackage, importScenePackage } from "../projects/ProjectPackage";
 import { ImageLayer } from "../layers/ImageLayer";
 import { TextLayer } from "../layers/TextLayer";
+import type { ShapeKind } from "../layers/ShapeLayer";
 
 
 export type CameraSnapshot = {
@@ -229,6 +231,7 @@ export class EditorApp {
     const canvas = document.createElement("canvas");
     const renderer = await Renderer.create(canvas, {
       alpha: format === "png" && background === "transparent",
+      premultipliedAlpha: false,
       preserveDrawingBuffer: true
     });
     const camera = new Camera2D();
@@ -284,6 +287,14 @@ export class EditorApp {
 
   setMaskBrushOptions(options: Partial<MaskBrushOptions>) {
     this.inputController.setMaskBrushOptions(options);
+  }
+
+  setDrawingToolOptions(options: Partial<DrawingToolOptions>) {
+    this.inputController.setDrawingToolOptions(options);
+  }
+
+  setShapeToolKind(shape: ShapeKind) {
+    this.inputController.setShape(shape);
   }
 
   selectLayer(layerId: string | null) {
@@ -739,11 +750,11 @@ function getExportRenderBackground(
   format: ImageExportFormat,
   background: ImageExportBackground
 ): ImageExportBackground {
-  if (format === "png") {
-    return "transparent";
+  if (format !== "png" && background === "transparent") {
+    return "white";
   }
 
-  return background === "transparent" ? "white" : background;
+  return background;
 }
 
 async function loadImageElement(file: File) {

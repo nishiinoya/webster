@@ -20,6 +20,8 @@ import type { SaveStatus } from "./hooks/useProjectFileActions";
 import type { WebsterFileHandle } from "../projects/projectFiles";
 import type { EditorDocumentTab } from "./editorDocuments";
 import type { MaskBrushOptions } from "../tools/mask-brush/MaskBrushTypes";
+import type { ShapeKind } from "../layers/ShapeLayer";
+import type { StrokeStyle } from "../layers/StrokeLayer";
 import { cn } from "./classNames";
 
 type CanvasViewProps = {
@@ -53,6 +55,13 @@ type CanvasViewProps = {
   selectLayerRequest: { layerId: string; id: number } | null;
   selectionCommandRequest: { command: SelectionCommand; id: number } | null;
   selectedTool: string;
+  selectedShape: ShapeKind;
+  selectedStrokeColor: [number, number, number, number];
+  selectedStrokeMode: "draw" | "erase";
+  selectedStrokeStyle: StrokeStyle;
+  selectedStrokeTargetLayerId: string | null;
+  selectedStrokeTargetMode: "layer" | "new" | "selected";
+  selectedStrokeWidth: number;
   uploadRequest: { file: File; id: number } | null;
 };
 
@@ -76,6 +85,13 @@ export function CanvasView({
   projectSaveRequest,
   selectLayerRequest,
   selectionCommandRequest,
+  selectedShape,
+  selectedStrokeColor,
+  selectedStrokeMode,
+  selectedStrokeStyle,
+  selectedStrokeTargetLayerId,
+  selectedStrokeTargetMode,
+  selectedStrokeWidth,
   selectedTool,
   uploadRequest
 }: CanvasViewProps) {
@@ -85,6 +101,13 @@ export function CanvasView({
     maskBrushOptions,
     onLayersChange,
     onZoomChange,
+    selectedShape,
+    selectedStrokeColor,
+    selectedStrokeMode,
+    selectedStrokeStyle,
+    selectedStrokeTargetLayerId,
+    selectedStrokeTargetMode,
+    selectedStrokeWidth,
     selectedTool
   });
   const { canvasCursor, pointerHandlers } = useCanvasPointerInput({

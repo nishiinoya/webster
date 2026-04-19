@@ -1,7 +1,7 @@
 import { Layer } from "./Layer";
 import type { LayerOptions, SerializedShapeLayer } from "./Layer";
 
-export type ShapeKind = "rectangle" | "circle" | "line";
+export type ShapeKind = "rectangle" | "circle" | "line" | "triangle" | "diamond" | "arrow";
 
 export type ShapeLayerOptions = Omit<LayerOptions, "type"> & {
   fillColor?: [number, number, number, number];

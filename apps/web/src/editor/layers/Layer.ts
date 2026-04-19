@@ -1,7 +1,9 @@
 import { LayerMask } from "../masks/LayerMask";
 import type { SerializedLayerMask } from "../masks/LayerMask";
 
-export type LayerType = "shape" | "image" | "text";
+import type { StrokePath, StrokePoint, StrokeStyle } from "./StrokeLayer";
+
+export type LayerType = "shape" | "image" | "text" | "stroke";
 
 export type SerializedLayerBase = {
   height: number;
@@ -22,7 +24,7 @@ export type SerializedLayerBase = {
 
 export type SerializedShapeLayer = SerializedLayerBase & {
   fillColor: [number, number, number, number];
-  shape: "rectangle" | "circle" | "ellipse" | "line";
+  shape: "rectangle" | "circle" | "ellipse" | "line" | "triangle" | "diamond" | "arrow";
   strokeColor:[number, number, number, number];
   strokeWidth: number;
   type: "shape";
@@ -46,7 +48,20 @@ export type SerializedTextLayer = SerializedLayerBase & {
   type: "text";
 };
 
-export type SerializedLayer = SerializedShapeLayer | SerializedImageLayer | SerializedTextLayer;
+export type SerializedStrokeLayer = SerializedLayerBase & {
+  color: [number, number, number, number];
+  paths?: Array<StrokePath | StrokePoint[]>;
+  points?: StrokePoint[];
+  strokeStyle: StrokeStyle;
+  strokeWidth: number;
+  type: "stroke";
+};
+
+export type SerializedLayer =
+  | SerializedShapeLayer
+  | SerializedImageLayer
+  | SerializedTextLayer
+  | SerializedStrokeLayer;
 
 export type LayerOptions = {
   id: string;
@@ -146,6 +161,19 @@ export abstract class Layer {
         fontSize: data.fontSize,
         italic: data.italic,
         text: data.text
+      });
+    }
+
+    if (data.type === "stroke") {
+      const { StrokeLayer } = await import("./StrokeLayer");
+
+      return new StrokeLayer({
+        ...getLayerOptions(data),
+        color: data.color,
+        paths: data.paths,
+        points: data.points,
+        strokeStyle: data.strokeStyle,
+        strokeWidth: data.strokeWidth
       });
     }
 

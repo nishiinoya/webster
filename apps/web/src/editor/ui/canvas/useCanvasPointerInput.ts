@@ -156,10 +156,9 @@ export function useCanvasPointerInput({
 function isCanvasInputTool(tool: string) {
   return (
     tool === "Move" ||
+    tool === "Draw" ||
     tool === "Mask Brush" ||
-    tool === "Rectangle" ||
-    tool === "Circle" ||
-    tool === "Line" ||
+    tool === "Shape" ||
     tool === "Marquee" ||
     tool === "Rectangle Select" ||
     tool === "Ellipse Select"
