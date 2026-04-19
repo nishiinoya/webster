@@ -82,9 +82,9 @@ Legend:
 | Selection to mask | Present | Selection can be rasterized into the selected layer mask. |
 | Brush inside selection | Present | Mask Brush respects the active selection. |
 | Mask brush | Present | Paints reveal/hide values into layer masks with size, opacity, and mode controls. |
-| Free drawing / pencil | Planned | General paint/pencil drawing is not implemented yet. |
-| Text tool | Planned | Text creation, text color, size, and font/style controls are not implemented yet. |
-| Shape elements | Partial | Rectangle-like shape layer exists. Triangle, arrows, custom shape library, and shape insertion UI are planned. |
+| Free drawing / pencil | Present | General paint/pencil drawing |
+| Text tool | Present | Text creation, text color, size, and font/style controls. |
+| Shape elements | Present | Shape layer exists. |
 | History panel | Partial | Panel exists, but full undo/redo history is not implemented. Mask brush stroke undo exists. |
 | Save `.webster` | Present | Saves a portable project package with `manifest.json` and image assets. |
 | Open `.webster` | Present | Opens saved Webster project packages. |
@@ -283,9 +283,9 @@ This section maps the expected demo requirements to current project status.
 | Modify user profile | Planned | No user profile system yet. |
 | Project templates | Partial | Built-in document presets exist. User templates are planned. |
 | Create new project | Present | New document dialog exists. |
-| Add/work with text | Present | Text tool/layers are not implemented. |
-| Free drawing/pencil | Planned | General drawing tool is not implemented. |
-| Shape elements | Partial | Basic shape layer exists; more shapes and insertion UI are planned. |
+| Add/work with text | Present | Text tool/layers are implemented. |
+| Free drawing/pencil | Present | General drawing tool is implemented. |
+| Shape elements | Present | Basic shape layer exists; |
 | Add pictures as elements | Present | Import image as layer works. |
 | Move elements with mouse | Present | Move tool works. |
 | Move elements with keyboard | Planned | Arrow-key movement is not implemented. |
