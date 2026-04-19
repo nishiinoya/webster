@@ -106,11 +106,32 @@ export class DrawingTool {
     const point = this.clientToWorld(event.clientX, event.clientY);
     const lastPoint = this.points.at(-1);
 
-    if (lastPoint && Math.hypot(point.x - lastPoint.x, point.y - lastPoint.y) < 1.5 / this.camera.zoom) {
+    if (!lastPoint) {
+      this.points.push(point);
+      this.activeLayer.setWorldPathAt(this.activePathIndex, this.points);
+      return true;
+    }
+
+    const dx = point.x - lastPoint.x;
+    const dy = point.y - lastPoint.y;
+    const distance = Math.hypot(dx, dy);
+    const spacing = Math.max(0.5 / this.camera.zoom, this.options.strokeWidth * 0.18);
+
+    if (distance < spacing) {
       return false;
     }
 
-    this.points.push(point);
+    const stepCount = Math.max(1, Math.floor(distance / spacing));
+
+    for (let index = 1; index <= stepCount; index += 1) {
+      const amount = index / stepCount;
+
+      this.points.push({
+        x: lastPoint.x + dx * amount,
+        y: lastPoint.y + dy * amount
+      });
+    }
+
     this.activeLayer.setWorldPathAt(this.activePathIndex, this.points);
 
     return true;

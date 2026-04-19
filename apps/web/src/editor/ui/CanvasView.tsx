@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import type {
   ImageExportBackground,
@@ -96,6 +96,7 @@ export function CanvasView({
   uploadRequest
 }: CanvasViewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [fps, setFps] = useState(0);
   const { editorAppRef, editorReadyId, setWebglError, webglError } = useEditorApp({
     canvasRef,
     maskBrushOptions,
@@ -221,6 +222,35 @@ export function CanvasView({
   }
 
   useEffect(() => {
+    let animationFrameId = 0;
+    let lastTime = performance.now();
+    let frameCount = 0;
+    let accumulatedTime = 0;
+
+    const updateFps = (now: number) => {
+      const delta = now - lastTime;
+      lastTime = now;
+
+      frameCount += 1;
+      accumulatedTime += delta;
+
+      if (accumulatedTime >= 500) {
+        setFps(Math.round((frameCount * 1000) / accumulatedTime));
+        frameCount = 0;
+        accumulatedTime = 0;
+      }
+
+      animationFrameId = requestAnimationFrame(updateFps);
+    };
+
+    animationFrameId = requestAnimationFrame(updateFps);
+
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!imageExportRequest || !editorAppRef.current) {
       return;
     }
@@ -316,6 +346,9 @@ export function CanvasView({
           </p>
           <p className="pointer-events-none absolute bottom-[18px] right-[18px] z-[2] m-0 rounded-lg border border-white/10 bg-[rgba(23,25,29,0.9)] px-3 py-2 text-[13px] font-semibold text-[#eef1f4]">
             Workspace - {selectedTool} tool selected
+          </p>
+          <p className="pointer-events-none absolute bottom-[58px] right-[18px] z-[2] m-0 rounded-lg border border-white/10 bg-[rgba(23,25,29,0.9)] px-3 py-2 text-[13px] font-semibold text-[#eef1f4]">
+            FPS - {fps}
           </p>
         </div>
       </div>
