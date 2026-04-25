@@ -1,3 +1,4 @@
+/** Bitmap fallback text layout helpers. */
 import { TextLayer } from "../../layers/TextLayer";
 
 export type BitmapTextRect = {

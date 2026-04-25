@@ -1,3 +1,4 @@
+/** Scene selection state, draft selection state, and selection-to-mask helpers. */
 import type { Layer } from "../layers/Layer";
 import { ensureLayerMaskResolution } from "../masks/LayerMaskResolution";
 import { getModelMatrix } from "../geometry/TransformGeometry";

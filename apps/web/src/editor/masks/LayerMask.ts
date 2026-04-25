@@ -6,6 +6,7 @@ export type SerializedLayerMask = {
   width: number;
 };
 
+/** Raster layer mask storage plus dirty-region tracking. */
 export type MaskDirtyRect = {
   height: number;
   width: number;

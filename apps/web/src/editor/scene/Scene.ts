@@ -1,13 +1,25 @@
 import { AdjustmentLayer } from "../layers/AdjustmentLayer";
-import { ImageLayer } from "../layers/ImageLayer";
 import { Layer } from "../layers/Layer";
-import { normalizeLayerFilters } from "../layers/Layer";
 import type { LayerFilterSettings, SerializedLayer } from "../layers/Layer";
 import { ShapeLayer } from "../layers/ShapeLayer";
-import { StrokeLayer } from "../layers/StrokeLayer";
-import { TextLayer } from "../layers/TextLayer"
 import { SelectionManager } from "../selection/SelectionManager";
-import { ensureLayerMaskResolution } from "../masks/LayerMaskResolution";
+import { disposeLayer, cloneLayer } from "./sceneLayerCloning";
+import { hitTestVisibleLayer } from "./sceneHitTesting";
+import { applySceneLayerUpdates } from "./sceneLayerUpdates";
+import type { SceneLayerUpdates } from "./sceneLayerUpdates";
+import { applyLayerMaskAction } from "./sceneMaskActions";
+import type { LayerMaskAction } from "./sceneMaskActions";
+import {
+  clampDocumentSize,
+  getDocumentResizeOffset
+} from "./sceneResize";
+import type { DocumentResizeAnchor } from "./sceneResize";
+import { loadSceneFromJSON, serializeSceneToJSON } from "./sceneSerialization";
+import { getLayerSummary } from "./sceneSummaries";
+
+export type { LayerMaskAction } from "./sceneMaskActions";
+export type { DocumentResizeAnchor } from "./sceneResize";
+export type { SceneLayerUpdates } from "./sceneLayerUpdates";
 
 export type DocumentBounds = {
   x: number;
@@ -31,6 +43,9 @@ export type SerializedScene = {
   version: 1;
 };
 
+/**
+ * Owns the editable document state, layer stack, and scene-level mutations.
+ */
 export class Scene {
   readonly document: DocumentBounds;
   readonly selection = new SelectionManager();
@@ -74,33 +89,27 @@ export class Scene {
     }
   }
 
+  /**
+   * Recreates a scene from serialized project data and referenced binary assets.
+   */
   static async fromJSON(data: SerializedScene, assets = new Map<string, Blob>()) {
-    if (!data || data.version !== 1 || !Array.isArray(data.layers)) {
-      throw new Error("Unsupported scene JSON.");
-    }
-
     const scene = new Scene({ createDefaultLayer: false });
+    const loaded = await loadSceneFromJSON(data, assets);
 
-    scene.document.x = data.canvas.x ?? -data.canvas.width / 2;
-    scene.document.y = data.canvas.y ?? -data.canvas.height / 2;
-    scene.document.width = data.canvas.width;
-    scene.document.height = data.canvas.height;
-    scene.document.color = data.canvas.background;
-
-    for (const layerData of data.layers) {
-      scene.layers.push(await Layer.fromJSON(layerData, assets));
-    }
-
-    scene.selectedLayerId =
-      data.selectedLayerId === undefined
-        ? scene.layers.at(-1)?.id ?? null
-        : data.selectedLayerId
-          ? scene.getLayer(data.selectedLayerId)?.id ?? scene.layers.at(-1)?.id ?? null
-          : null;
+    scene.document.x = loaded.document.x;
+    scene.document.y = loaded.document.y;
+    scene.document.width = loaded.document.width;
+    scene.document.height = loaded.document.height;
+    scene.document.color = loaded.document.color;
+    scene.layers.push(...loaded.layers);
+    scene.selectedLayerId = loaded.selectedLayerId;
 
     return scene;
   }
 
+  /**
+   * Appends a layer to the scene and makes it the active selection.
+   */
   addLayer(layer: Layer) {
     this.layers.push(layer);
     this.selectedLayerId = layer.id;
@@ -108,6 +117,9 @@ export class Scene {
     return layer;
   }
 
+  /**
+   * Creates a full-document adjustment layer and inserts it into the scene.
+   */
   addAdjustmentLayer() {
     return this.addLayer(
       new AdjustmentLayer({
@@ -121,6 +133,9 @@ export class Scene {
     );
   }
 
+  /**
+   * Resizes the document bounds and shifts the origin according to the resize anchor.
+   */
   resizeDocument(width: number, height: number, anchor: DocumentResizeAnchor = "center") {
     const nextWidth = clampDocumentSize(width);
     const nextHeight = clampDocumentSize(height);
@@ -138,6 +153,9 @@ export class Scene {
     return this.document;
   }
 
+  /**
+   * Removes a layer from the stack and disposes any resources it owns.
+   */
   removeLayer(layerId: string) {
     const layerIndex = this.layers.findIndex((layer) => layer.id === layerId);
 
@@ -156,10 +174,16 @@ export class Scene {
     return removedLayer;
   }
 
+  /**
+   * Returns the layer with the provided id when it exists.
+   */
   getLayer(layerId: string) {
     return this.layers.find((layer) => layer.id === layerId) ?? null;
   }
 
+  /**
+   * Updates the selected layer and returns the resolved layer when selection succeeds.
+   */
   selectLayer(layerId: string | null) {
     if (layerId === null) {
       this.selectedLayerId = null;
@@ -177,26 +201,16 @@ export class Scene {
     return layer;
   }
 
+  /**
+   * Finds the topmost visible editable layer under the provided world-space point.
+   */
   hitTestLayer(x: number, y: number) {
-    for (let index = this.layers.length - 1; index >= 0; index -= 1) {
-      const layer = this.layers[index];
-
-      if (!layer.visible || layer.opacity <= 0) {
-        continue;
-      }
-
-      if (layer instanceof AdjustmentLayer) {
-        continue;
-      }
-
-      if (isPointInsideLayer(layer, x, y)) {
-        return layer;
-      }
-    }
-
-    return null;
+    return hitTestVisibleLayer(this.layers, x, y);
   }
 
+  /**
+   * Moves an unlocked layer to a new world position.
+   */
   moveLayer(layerId: string, x: number, y: number) {
     const layer = this.getLayer(layerId);
 
@@ -210,154 +224,21 @@ export class Scene {
     return layer;
   }
 
-  updateLayer(
-    layerId: string,
-    updates: Partial<{
-      align: "left" | "center" | "right";
-      bold: boolean;
-      color: [number, number, number, number];
-      fillColor: [number, number, number, number];
-      filters: Partial<LayerFilterSettings>;
-      fontFamily: string;
-      fontSize: number;
-      height: number;
-      italic: boolean;
-      locked: boolean;
-      name: string;
-      opacity: number;
-      rotation: number;
-      shape: "rectangle" | "circle" | "line" | "triangle" | "diamond" | "arrow";
-      strokeColor: [number, number, number, number];
-      strokeWidth: number;
-      text: string;
-      visible: boolean;
-      width: number;
-      x: number;
-      y: number;
-  }>
-  ) {
+  /**
+   * Applies a partial update object to a layer and returns the updated instance.
+   */
+  updateLayer(layerId: string, updates: SceneLayerUpdates) {
     const layer = this.getLayer(layerId);
 
     if (!layer) {
       return null;
     }
-
-    if (updates.name !== undefined) {
-      layer.name = updates.name;
-    }
-
-    if (updates.visible !== undefined) {
-      layer.visible = updates.visible;
-    }
-
-    if (updates.locked !== undefined) {
-      layer.locked = updates.locked;
-    }
-
-    if (updates.opacity !== undefined) {
-      layer.opacity = clamp(updates.opacity, 0, 1);
-    }
-
-    if (updates.filters !== undefined) {
-      layer.filters = normalizeLayerFilters({
-        ...layer.filters,
-        ...updates.filters
-      });
-    }
-
-    if (!layer.locked) {
-      if (updates.x !== undefined) {
-        layer.x = updates.x;
-      }
-
-      if (updates.y !== undefined) {
-        layer.y = updates.y;
-      }
-
-      if (updates.rotation !== undefined) {
-        layer.rotation = normalizeRotation(updates.rotation);
-      }
-
-      if (updates.width !== undefined && !(layer instanceof TextLayer)) {
-        layer.scaleX = Math.max(1, updates.width) / layer.width;
-      }
-
-      if (updates.height !== undefined && !(layer instanceof TextLayer)) {
-        layer.scaleY = Math.max(1, updates.height) / layer.height;
-      }
-    }
-
-    if (layer instanceof ShapeLayer && !layer.locked) {
-      if (updates.shape !== undefined) {
-        layer.shape = updates.shape;
-      }
-
-      if (updates.fillColor !== undefined) {
-        layer.fillColor = updates.fillColor;
-      }
-
-      if (updates.strokeColor !== undefined) {
-        layer.strokeColor = updates.strokeColor;
-      }
-
-      if (updates.strokeWidth !== undefined) {
-        layer.strokeWidth = Math.max(0, updates.strokeWidth);
-      }
-    }
-
-    if (layer instanceof StrokeLayer && !layer.locked) {
-      if (updates.color !== undefined) {
-        layer.color = updates.color;
-      }
-
-      if (updates.strokeWidth !== undefined) {
-        layer.strokeWidth = Math.max(1, updates.strokeWidth);
-      }
-    }
-
-    if (layer instanceof TextLayer && !layer.locked) {
-      if (updates.text !== undefined) {
-        layer.text = updates.text;
-      }
-
-      if (updates.fontSize !== undefined) {
-        layer.fontSize = Math.max(1, updates.fontSize);
-      }
-
-      if (updates.fontFamily !== undefined) {
-        layer.fontFamily = updates.fontFamily;
-      }
-
-      if (updates.color !== undefined) {
-        layer.color = updates.color;
-      }
-
-      if (updates.bold !== undefined) {
-        layer.bold = updates.bold;
-      }
-
-      if (updates.italic !== undefined) {
-        layer.italic = updates.italic;
-      }
-
-      if (updates.align !== undefined) {
-        layer.align = updates.align;
-      }
-
-      if (updates.width !== undefined) {
-        layer.width = Math.max(1, updates.width);
-        layer.scaleX = 1;
-      }
-
-      if (updates.height !== undefined) {
-        layer.height = Math.max(1, updates.height);
-        layer.scaleY = 1;
-      }
-    }
-
-    return layer;
+    return applySceneLayerUpdates(layer, updates);
   }
 
+  /**
+   * Applies a mask command to an unlocked layer.
+   */
   updateLayerMask(layerId: string, action: LayerMaskAction) {
     const layer = this.getLayer(layerId);
 
@@ -368,6 +249,9 @@ export class Scene {
     return applyLayerMaskAction(layer, action);
   }
 
+  /**
+   * Duplicates a layer, inserts the copy above the source, and selects it.
+   */
   duplicateLayer(layerId: string) {
     const layer = this.getLayer(layerId);
 
@@ -384,6 +268,9 @@ export class Scene {
     return copy;
   }
 
+  /**
+   * Moves a layer to a clamped index within the current layer stack.
+   */
   reorderLayer(layerId: string, targetIndex: number) {
     const currentIndex = this.layers.findIndex((layer) => layer.id === layerId);
 
@@ -426,299 +313,30 @@ export class Scene {
     return this.reorderLayer(layerId, 0);
   }
 
+  /**
+   * Returns UI-facing layer summaries in top-to-bottom display order.
+   */
   getLayerSummaries() {
     return this.layers.map((layer) => getLayerSummary(layer, this.selectedLayerId)).reverse();
   }
 
+  /**
+   * Serializes the current scene into the persisted project format.
+   */
   async toJSON(): Promise<SerializedScene> {
-    return {
-      app: "webster",
-      canvas: {
-        background: this.document.color,
-        height: this.document.height,
-        width: this.document.width,
-        x: this.document.x,
-        y: this.document.y
-      },
-      layers: await Promise.all(this.layers.map((layer) => layer.toJSON())),
-      selectedLayerId: this.selectedLayerId,
-      version: 1
-    };
+    return serializeSceneToJSON({
+      document: this.document,
+      layers: this.layers,
+      selectedLayerId: this.selectedLayerId
+    });
   }
 
+  /**
+   * Disposes all layers currently owned by the scene.
+   */
   dispose() {
     for (const layer of this.layers) {
       disposeLayer(layer);
     }
   }
-}
-
-function disposeLayer(layer: Layer) {
-  if ("dispose" in layer && typeof layer.dispose === "function") {
-    layer.dispose();
-  }
-}
-
-function cloneLayer(layer: Layer) {
-  const options = {
-    height: layer.height,
-    id: crypto.randomUUID(),
-    locked: false,
-    mask: layer.mask?.clone() ?? null,
-    name: `${layer.name} copy`,
-    opacity: layer.opacity,
-    filters: layer.filters,
-    rotation: layer.rotation,
-    scaleX: layer.scaleX,
-    scaleY: layer.scaleY,
-    visible: layer.visible,
-    width: layer.width,
-    x: layer.x + 24,
-    y: layer.y - 24
-  };
-
-  if (layer instanceof ShapeLayer) {
-    return new ShapeLayer({
-      ...options,
-      fillColor: [...layer.fillColor],
-      shape: layer.shape,
-      strokeColor: [...layer.strokeColor],
-      strokeWidth: layer.strokeWidth
-    });
-  }
-
-  if (layer instanceof ImageLayer) {
-    return new ImageLayer({
-      ...options,
-      assetId: layer.assetId,
-      image: layer.image,
-      mimeType: layer.mimeType,
-      objectUrl: "",
-      originalAssetId: layer.originalAssetId,
-      originalImage: layer.originalImage,
-      originalMimeType: layer.originalMimeType,
-      originalObjectUrl: ""
-    });
-  }
-
-  if (layer instanceof TextLayer) {
-    return new TextLayer({
-      ...options,
-      align: layer.align,
-      bold: layer.bold,
-      color: [...layer.color],
-      fontFamily: layer.fontFamily,
-      fontSize: layer.fontSize,
-      italic: layer.italic,
-      text: layer.text
-    });
-  }
-
-  if (layer instanceof AdjustmentLayer) {
-    return new AdjustmentLayer(options);
-  }
-
-  if (layer instanceof StrokeLayer) {
-    return new StrokeLayer({
-      ...options,
-      color: [...layer.color],
-      paths: layer.paths.map((path) => ({
-        ...path,
-        color: [...path.color],
-        points: path.points.map((point) => ({ ...point }))
-      })),
-      strokeStyle: layer.strokeStyle,
-      strokeWidth: layer.strokeWidth
-    });
-  }
-
-  throw new Error(`Unsupported layer type: ${layer.type}`);
-}
-
-export type LayerMaskAction =
-  | "add"
-  | "clear-black"
-  | "clear-white"
-  | "delete"
-  | "disable"
-  | "enable"
-  | "invert"
-  | "toggle-enabled";
-
-function applyLayerMaskAction(layer: Layer, action: LayerMaskAction) {
-  if (action === "delete") {
-    layer.mask = null;
-    return layer;
-  }
-
-  if (action === "add" && !layer.mask) {
-    ensureLayerMaskResolution(layer);
-    return layer;
-  }
-
-  if (!layer.mask) {
-    return layer;
-  }
-
-  if (action === "enable") {
-    layer.mask.enabled = true;
-  }
-
-  if (action === "disable") {
-    layer.mask.enabled = false;
-  }
-
-  if (action === "toggle-enabled") {
-    layer.mask.enabled = !layer.mask.enabled;
-  }
-
-  if (action === "invert") {
-    layer.mask.invert();
-  }
-
-  if (action === "clear-white") {
-    layer.mask.clear(255);
-  }
-
-  if (action === "clear-black") {
-    layer.mask.clear(0);
-  }
-
-  return layer;
-}
-
-function isPointInsideLayer(layer: Layer, x: number, y: number) {
-  const width = layer.width * layer.scaleX;
-  const height = layer.height * layer.scaleY;
-
-  const centerX = layer.x + width / 2;
-  const centerY = layer.y + height / 2;
-
-  const radians = (-layer.rotation * Math.PI) / 180;
-  const cos = Math.cos(radians);
-  const sin = Math.sin(radians);
-
-  const dx = x - centerX;
-  const dy = y - centerY;
-
-  const localX = dx * cos - dy * sin;
-  const localY = dx * sin + dy * cos;
-
-  return (
-    localX >= -width / 2 &&
-    localX <= width / 2 &&
-    localY >= -height / 2 &&
-    localY <= height / 2
-  );
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max);
-}
-
-export type DocumentResizeAnchor =
-  | "bottom"
-  | "bottom-left"
-  | "bottom-right"
-  | "center"
-  | "left"
-  | "right"
-  | "top"
-  | "top-left"
-  | "top-right";
-
-function clampDocumentSize(value: number) {
-  if (!Number.isFinite(value)) {
-    return 800;
-  }
-
-  return Math.min(Math.max(Math.round(value), 1), 12000);
-}
-
-function getDocumentResizeOffset(
-  deltaWidth: number,
-  deltaHeight: number,
-  anchor: DocumentResizeAnchor
-) {
-  const horizontal = anchor.includes("left")
-    ? 0
-    : anchor.includes("right")
-      ? -deltaWidth
-      : -deltaWidth / 2;
-  const vertical = anchor.includes("bottom")
-    ? 0
-    : anchor.includes("top")
-      ? -deltaHeight
-      : -deltaHeight / 2;
-
-  return { x: horizontal, y: vertical };
-}
-
-function normalizeRotation(rotation: number) {
-  return ((rotation % 360) + 360) % 360;
-}
-
-function getLayerSummary(layer: Layer, selectedLayerId: string | null) {
-  const baseSummary = {
-    hasMask: Boolean(layer.mask),
-    id: layer.id,
-    isSelected: layer.id === selectedLayerId,
-    isVisible: layer.visible,
-    locked: layer.locked,
-    maskEnabled: layer.mask?.enabled ?? false,
-    name: layer.name,
-    opacity: layer.opacity,
-    filters: layer.filters,
-    rotation: layer.rotation,
-    type: layer.type,
-    x: layer.x,
-    y: layer.y,
-    width: layer.width * layer.scaleX,
-    height: layer.height * layer.scaleY
-  };
-
-  if (layer instanceof ShapeLayer) {
-    return {
-      ...baseSummary,
-      fillColor: layer.fillColor,
-      shape: layer.shape,
-      strokeColor: layer.strokeColor,
-      strokeWidth: layer.strokeWidth
-    };
-  }
-
-  if (layer instanceof TextLayer) {
-    return {
-      ...baseSummary,
-      align: layer.align,
-      bold: layer.bold,
-      color: layer.color,
-      fontFamily: layer.fontFamily,
-      fontSize: layer.fontSize,
-      italic: layer.italic,
-      text: layer.text
-    };
-  }
-
-  if (layer instanceof StrokeLayer) {
-    return {
-      ...baseSummary,
-      color: layer.color,
-      strokeStyle: layer.strokeStyle,
-      strokeWidth: layer.strokeWidth
-    };
-  }
-
-  if (layer instanceof ImageLayer) {
-    return {
-      ...baseSummary,
-      canRestoreOriginalPixels: layer.hasWorkingImageChanges,
-      imagePixelHeight: layer.image.naturalHeight || layer.image.height,
-      imagePixelWidth: layer.image.naturalWidth || layer.image.width,
-      originalImagePixelHeight: layer.originalImage.naturalHeight || layer.originalImage.height,
-      originalImagePixelWidth: layer.originalImage.naturalWidth || layer.originalImage.width
-    };
-  }
-
-  return baseSummary;
 }

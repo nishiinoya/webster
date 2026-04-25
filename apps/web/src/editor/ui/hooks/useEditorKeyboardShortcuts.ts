@@ -1,3 +1,4 @@
+/** Hook that registers shell-level keyboard shortcuts for the editor. */
 import { useEffect } from "react";
 
 type EditorKeyboardShortcutHandlers = {

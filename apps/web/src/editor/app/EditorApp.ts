@@ -10,6 +10,53 @@ import { exportScenePackage, importScenePackage } from "../projects/ProjectPacka
 import { ImageLayer } from "../layers/ImageLayer";
 import { TextLayer } from "../layers/TextLayer";
 import type { ShapeKind } from "../layers/ShapeLayer";
+import {
+  createBlankDocumentScene,
+  forgetEditorDocument,
+  rememberEditorDocument,
+  replaceEditorScene,
+  switchEditorDocument
+} from "./document/documentLifecycle";
+import {
+  canvasToBlob,
+  createPdfFromJpeg,
+  getExportRenderBackground
+} from "./export/exportFileUtils";
+import type { ImageExportBackground, ImageExportFormat } from "./export/exportFileUtils";
+import {
+  clampImagePixels,
+  loadImageElement
+} from "./image/imageFileUtils";
+import {
+  addImageFileToScene,
+  createImageDocumentFromFile,
+  resampleImageLayerInScene,
+  restoreOriginalImageLayerInScene
+} from "./image/imageLayerOperations";
+import {
+  applyDocumentCommandToScene,
+  applyImageLayerCommandToScene,
+  applyLayerCommandToScene,
+  applySelectionCommandToScene
+} from "./commands/commandDispatch";
+import {
+  clearTextSelection,
+  createDefaultTextLayer,
+  deleteTextBackward as deleteTextBackwardState,
+  deleteTextForward as deleteTextForwardState,
+  endTextSelection as endTextSelectionState,
+  finishTextEdit as finishTextEditState,
+  getSelectedTextInput as getSelectedTextInputState,
+  insertTextInput as insertTextInputState,
+  moveTextCaret as moveTextCaretState,
+  selectAllTextInput as selectAllTextInputState,
+  startTextEditAtClientPoint as startTextEditAtClientPointState,
+  startTextSelectionAtClientPoint as startTextSelectionAtClientPointState,
+  updateTextSelectionAtClientPoint as updateTextSelectionAtClientPointState
+} from "./text/textEditing";
+import type { TextEditingState } from "./text/textEditing";
+
+export type { ImageExportBackground, ImageExportFormat } from "./export/exportFileUtils";
 
 
 export type CameraSnapshot = {
@@ -53,10 +100,9 @@ export type LayerCommand =
 
 export type SelectionCommand = "clear" | "convert-to-mask" | "invert";
 
-export type ImageExportBackground = "checkerboard" | "transparent" | "white";
-
-export type ImageExportFormat = "jpeg" | "pdf" | "png";
-
+/**
+ * Coordinates the active scene, renderer, tool input, and document-level editor workflows.
+ */
 export class EditorApp {
   private readonly renderer: Renderer;
   private scene: Scene;
@@ -74,6 +120,9 @@ export class EditorApp {
   private textSelectionStart: number | null = null;
   private readonly tabScenes = new Map<string, Scene>();
 
+  /**
+   * Creates the app coordinator and initializes the shared renderer.
+   */
   static async create(
     canvas: HTMLCanvasElement,
     onCameraChange?: (camera: CameraSnapshot) => void
@@ -93,6 +142,25 @@ export class EditorApp {
     this.inputController = new InputController(canvas, this.scene, this.camera);
   }
 
+  private get textEditingState(): TextEditingState {
+    return {
+      caretIndex: this.textCaretIndex,
+      layerId: this.textEditLayerId,
+      selectionEnd: this.textSelectionEnd,
+      selectionStart: this.textSelectionStart
+    };
+  }
+
+  private set textEditingState(state: TextEditingState) {
+    this.textCaretIndex = state.caretIndex;
+    this.textEditLayerId = state.layerId;
+    this.textSelectionEnd = state.selectionEnd;
+    this.textSelectionStart = state.selectionStart;
+  }
+
+  /**
+   * Starts the render loop if it is not already running.
+   */
   start() {
     if (this.animationFrameId !== null || this.isDisposed) {
       return;
@@ -122,6 +190,9 @@ export class EditorApp {
     this.animationFrameId = window.requestAnimationFrame(tick);
   }
 
+  /**
+   * Stops rendering and disposes all editor-owned resources.
+   */
   dispose() {
     this.isDisposed = true;
 
@@ -178,42 +249,20 @@ export class EditorApp {
     };
   }
 
+  /**
+   * Replaces the current scene with a new blank document scene.
+   */
   createDocument(width: number, height: number) {
-    this.replaceScene(
-      new Scene({
-        createDefaultLayer: false,
-        documentHeight: height,
-        documentWidth: width
-      })
-    );
+    this.replaceScene(createBlankDocumentScene(width, height));
 
     return this.scene;
   }
 
+  /**
+   * Replaces the current scene with a document created from an imported image file.
+   */
   async createImageDocument(file: File) {
-    const image = await loadImageElement(file);
-    const width = image.naturalWidth || image.width;
-    const height = image.naturalHeight || image.height;
-    const scene = new Scene({
-      createDefaultLayer: false,
-      documentHeight: height,
-      documentWidth: width
-    });
-
-    scene.addLayer(
-      new ImageLayer({
-        assetId: crypto.randomUUID(),
-        id: crypto.randomUUID(),
-        image,
-        mimeType: file.type || "image/png",
-        name: getImageLayerName(file),
-        objectUrl: image.src,
-        x: scene.document.x,
-        y: scene.document.y,
-        width,
-        height
-      })
-    );
+    const scene = await createImageDocumentFromFile(file);
 
     this.replaceScene(scene);
     this.camera.fitBounds(scene.document);
@@ -222,72 +271,61 @@ export class EditorApp {
     return scene;
   }
 
+  /**
+   * Swaps the active scene and rebinds camera and input systems to it.
+   */
   replaceScene(nextScene: Scene, options: { disposeCurrent?: boolean } = {}) {
-    if (nextScene === this.scene) {
-      return this.scene;
-    }
-
-    if (options.disposeCurrent ?? true) {
-      this.scene.dispose();
-    }
-
-    this.scene = nextScene;
-    this.camera.setBounds(this.scene.document);
-    this.inputController.setScene(this.scene);
-    this.notifyCameraChange();
+    this.scene = replaceEditorScene({
+      camera: this.camera,
+      currentScene: this.scene,
+      disposeCurrent: options.disposeCurrent,
+      inputController: this.inputController,
+      nextScene,
+      notifyCameraChange: this.notifyCameraChange.bind(this)
+    });
 
     return this.scene;
   }
 
+  /**
+   * Switches the active document tab, creating a blank scene when needed.
+   */
   switchDocument(document: { height: number; id: string; width: number }) {
-    if (this.activeDocumentId === document.id) {
-      return this.scene;
-    }
-
-    if (this.activeDocumentId) {
-      this.tabScenes.set(this.activeDocumentId, this.scene);
-    }
-
-    let nextScene = this.tabScenes.get(document.id);
-
-    if (!nextScene) {
-      nextScene = new Scene({
-        createDefaultLayer: false,
-        documentHeight: document.height,
-        documentWidth: document.width
-      });
-    }
-
-    this.tabScenes.set(document.id, nextScene);
-    this.replaceScene(nextScene, { disposeCurrent: false });
-    this.activeDocumentId = document.id;
+    const result = switchEditorDocument({
+      activeDocumentId: this.activeDocumentId,
+      currentScene: this.scene,
+      document,
+      replaceScene: this.replaceScene.bind(this),
+      tabScenes: this.tabScenes
+    });
+    this.activeDocumentId = result.activeDocumentId;
 
     return this.scene;
   }
 
   rememberDocument(documentId: string) {
-    this.activeDocumentId = documentId;
-    this.tabScenes.set(documentId, this.scene);
+    this.activeDocumentId = rememberEditorDocument(this.tabScenes, documentId, this.scene);
   }
 
   forgetDocument(documentId: string) {
-    const scene = this.tabScenes.get(documentId);
-
-    if (scene && scene !== this.scene) {
-      scene.dispose();
-    }
-
-    this.tabScenes.delete(documentId);
-
-    if (this.activeDocumentId === documentId) {
-      this.activeDocumentId = null;
-    }
+    this.activeDocumentId = forgetEditorDocument({
+      activeDocumentId: this.activeDocumentId,
+      currentScene: this.scene,
+      documentId,
+      tabScenes: this.tabScenes
+    });
   }
 
+  /**
+   * Exports the active scene as a native project package.
+   */
   async exportProjectFile() {
     return exportScenePackage(this.scene);
   }
 
+  /**
+   * Renders the current scene into an exported image or PDF blob using an offscreen renderer.
+   */
   async exportImageFile(format: ImageExportFormat, background: ImageExportBackground) {
     this.finishTextEdit();
 
@@ -332,6 +370,9 @@ export class EditorApp {
     }
   }
 
+  /**
+   * Imports a project package and replaces the active scene with it.
+   */
   async importProjectFile(file: File) {
     const nextScene = await importScenePackage(file);
     this.replaceScene(nextScene);
@@ -368,63 +409,38 @@ export class EditorApp {
     return this.scene.selectLayer(layerId);
   }
 
+  /**
+   * Applies a layer command against the active scene.
+   */
   applyLayerCommand(command: LayerCommand) {
-    switch (command.type) {
-      case "add-adjustment":
-        return this.scene.addAdjustmentLayer();
-      case "delete":
-        return this.scene.removeLayer(command.layerId);
-      case "duplicate":
-        return this.scene.duplicateLayer(command.layerId);
-      case "mask":
-        return this.scene.updateLayerMask(command.layerId, command.action);
-      case "move-down":
-        return this.scene.moveLayerBackward(command.layerId);
-      case "move-up":
-        return this.scene.moveLayerForward(command.layerId);
-      case "select":
-        return this.scene.selectLayer(command.layerId);
-      case "update":
-        return this.scene.updateLayer(command.layerId, command.updates);
-    }
+    return applyLayerCommandToScene(this.scene, command);
   }
 
+  /**
+   * Applies a document command and keeps camera bounds in sync.
+   */
   applyDocumentCommand(command: DocumentCommand) {
-    if (command.type === "resize") {
-      const document = this.scene.resizeDocument(command.width, command.height, command.anchor);
-
+    return applyDocumentCommandToScene(this.scene, command, (document) => {
       this.camera.setBounds(document);
       this.notifyCameraChange();
-
-      return document;
-    }
+    });
   }
 
+  /**
+   * Applies an image-layer command against the active scene.
+   */
   async applyImageLayerCommand(command: ImageLayerCommand) {
-    if (command.type === "resample") {
-      return this.resampleImageLayer(command.layerId, command.width, command.height);
-    }
-
-    return this.restoreOriginalImageLayer(command.layerId);
+    return applyImageLayerCommandToScene(command, {
+      resampleImageLayer: this.resampleImageLayer.bind(this),
+      restoreOriginalImageLayer: this.restoreOriginalImageLayer.bind(this)
+    });
   }
 
+  /**
+   * Applies a selection command against the active scene selection.
+   */
   applySelectionCommand(command: SelectionCommand) {
-    if (command === "clear") {
-      this.scene.selection.clear();
-      return true;
-    }
-
-    if (command === "invert") {
-      return this.scene.selection.invert();
-    }
-
-    const layer = this.scene.selectedLayerId ? this.scene.getLayer(this.scene.selectedLayerId) : null;
-
-    if (command === "convert-to-mask" && layer && !layer.locked) {
-      return this.scene.selection.convertToLayerMask(layer);
-    }
-
-    return false;
+    return applySelectionCommandToScene(this.scene, command);
   }
 
   selectLayerAt(clientX: number, clientY: number) {
@@ -464,307 +480,112 @@ export class EditorApp {
   }
 
   startTextEditAtClientPoint(clientX: number, clientY: number) {
-    const screenPoint = this.getCanvasPoint(clientX, clientY);
-    const worldPoint = this.camera.screenToWorld(screenPoint.x, screenPoint.y);
-    const layer = this.scene.hitTestLayer(worldPoint.x, worldPoint.y);
-
-    if (layer instanceof TextLayer) {
-      this.scene.selectLayer(layer.id);
-      this.textEditLayerId = layer.id;
-      this.textCaretIndex = layer.text.length;
-      this.clearTextSelection();
-
-      return layer;
-    }
-
-    const width = 360;
-    const height = 120;
-    const nextLayer = new TextLayer({
-      id: crypto.randomUUID(),
-      name: "Text",
-      x: worldPoint.x,
-      y: worldPoint.y - height,
-      width,
-      height,
-      text: "",
-      fontSize: 48,
-      fontFamily: "Arial",
-      color: [0.05, 0.06, 0.07, 1],
-      bold: false,
-      italic: false,
-      align: "left"
+    const state = this.textEditingState;
+    const result = startTextEditAtClientPointState({
+      camera: this.camera,
+      clientX,
+      clientY,
+      getCanvasPoint: this.getCanvasPoint.bind(this),
+      scene: this.scene,
+      state
     });
 
-    this.scene.addLayer(nextLayer);
-    this.textEditLayerId = nextLayer.id;
-    this.textCaretIndex = 0;
-    this.clearTextSelection();
+    this.textEditingState = state;
 
-    return nextLayer;
+    return result;
   }
 
   startTextSelectionAtClientPoint(clientX: number, clientY: number) {
-    const layer = this.startTextEditAtClientPoint(clientX, clientY);
+    const state = this.textEditingState;
+    const result = startTextSelectionAtClientPointState({
+      camera: this.camera,
+      clientX,
+      clientY,
+      getCanvasPoint: this.getCanvasPoint.bind(this),
+      scene: this.scene,
+      state
+    });
 
-    if (!layer) {
-      return false;
-    }
+    this.textEditingState = state;
 
-    const index = this.getTextIndexAtClientPoint(layer, clientX, clientY);
-
-    this.textCaretIndex = index;
-    this.textSelectionStart = index;
-    this.textSelectionEnd = index;
-
-    return true;
+    return result;
   }
 
   updateTextSelectionAtClientPoint(clientX: number, clientY: number) {
-    const layer = this.getActiveTextEditLayer();
+    const state = this.textEditingState;
+    const result = updateTextSelectionAtClientPointState({
+      camera: this.camera,
+      clientX,
+      clientY,
+      getCanvasPoint: this.getCanvasPoint.bind(this),
+      scene: this.scene,
+      state
+    });
 
-    if (!layer || this.textSelectionStart === null) {
-      return false;
-    }
+    this.textEditingState = state;
 
-    this.textSelectionEnd = this.getTextIndexAtClientPoint(layer, clientX, clientY);
-    this.textCaretIndex = this.textSelectionEnd;
-
-    return true;
+    return result;
   }
 
   endTextSelection() {
-    return this.textSelectionStart !== null;
+    return endTextSelectionState(this.textEditingState);
   }
 
   finishTextEdit() {
-    this.textEditLayerId = null;
-    this.textCaretIndex = 0;
-    this.clearTextSelection();
+    const state = this.textEditingState;
+    finishTextEditState(state);
+    this.textEditingState = state;
   }
 
   insertTextInput(text: string) {
-    const layer = this.getActiveTextEditLayer();
-
-    if (!layer || layer.locked || !text) {
-      return false;
-    }
-
-    const selection = this.getTextSelectionRange(layer);
-    const insertStart = selection?.start ?? this.textCaretIndex;
-    const insertEnd = selection?.end ?? this.textCaretIndex;
-
-    layer.text = layer.text.slice(0, insertStart) + text + layer.text.slice(insertEnd);
-    this.textCaretIndex = insertStart + text.length;
-    this.clearTextSelection();
-
-    return true;
+    const state = this.textEditingState;
+    const result = insertTextInputState(this.scene, state, text);
+    this.textEditingState = state;
+    return result;
   }
 
   deleteTextBackward() {
-    const layer = this.getActiveTextEditLayer();
-
-    if (!layer || layer.locked) {
-      return false;
-    }
-
-    const selection = this.getTextSelectionRange(layer);
-
-    if (selection) {
-      layer.text = layer.text.slice(0, selection.start) + layer.text.slice(selection.end);
-      this.textCaretIndex = selection.start;
-      this.clearTextSelection();
-      return true;
-    }
-
-    if (this.textCaretIndex <= 0) {
-      return false;
-    }
-
-    layer.text =
-      layer.text.slice(0, this.textCaretIndex - 1) + layer.text.slice(this.textCaretIndex);
-    this.textCaretIndex -= 1;
-    this.clearTextSelection();
-
-    return true;
+    const state = this.textEditingState;
+    const result = deleteTextBackwardState(this.scene, state);
+    this.textEditingState = state;
+    return result;
   }
 
   deleteTextForward() {
-    const layer = this.getActiveTextEditLayer();
-
-    if (!layer || layer.locked) {
-      return false;
-    }
-
-    const selection = this.getTextSelectionRange(layer);
-
-    if (selection) {
-      layer.text = layer.text.slice(0, selection.start) + layer.text.slice(selection.end);
-      this.textCaretIndex = selection.start;
-      this.clearTextSelection();
-      return true;
-    }
-
-    if (this.textCaretIndex >= layer.text.length) {
-      return false;
-    }
-
-    layer.text =
-      layer.text.slice(0, this.textCaretIndex) + layer.text.slice(this.textCaretIndex + 1);
-    this.clearTextSelection();
-
-    return true;
+    const state = this.textEditingState;
+    const result = deleteTextForwardState(this.scene, state);
+    this.textEditingState = state;
+    return result;
   }
 
   getSelectedTextInput() {
-    const layer = this.getActiveTextEditLayer();
-
-    if (!layer) {
-      return null;
-    }
-
-    const selection = this.getTextSelectionRange(layer);
-
-    return selection ? layer.text.slice(selection.start, selection.end) : null;
+    return getSelectedTextInputState(this.scene, this.textEditingState);
   }
 
   selectAllTextInput() {
-    const layer = this.getActiveTextEditLayer();
-
-    if (!layer) {
-      return false;
-    }
-
-    this.textSelectionStart = 0;
-    this.textSelectionEnd = layer.text.length;
-    this.textCaretIndex = layer.text.length;
-
-    return true;
+    const state = this.textEditingState;
+    const result = selectAllTextInputState(this.scene, state);
+    this.textEditingState = state;
+    return result;
   }
 
   moveTextCaret(direction: "end" | "home" | "left" | "right") {
-    const layer = this.getActiveTextEditLayer();
-
-    if (!layer) {
-      return false;
-    }
-
-    if (direction === "home") {
-      this.textCaretIndex = 0;
-      this.clearTextSelection();
-      return true;
-    }
-
-    if (direction === "end") {
-      this.textCaretIndex = layer.text.length;
-      this.clearTextSelection();
-      return true;
-    }
-
-    if (direction === "left") {
-      this.textCaretIndex = Math.max(0, this.textCaretIndex - 1);
-      this.clearTextSelection();
-      return true;
-    }
-
-    this.textCaretIndex = Math.min(layer.text.length, this.textCaretIndex + 1);
-    this.clearTextSelection();
-
-    return true;
+    const state = this.textEditingState;
+    const result = moveTextCaretState(this.scene, state, direction);
+    this.textEditingState = state;
+    return result;
   }
 
   async addImageFile(file: File) {
-    const image = await loadImageElement(file);
-    const width = image.naturalWidth || image.width;
-    const height = image.naturalHeight || image.height;
-    const maxInitialSize = 420;
-    const scale = Math.min(1, maxInitialSize / Math.max(width, height));
-
-    const layer = new ImageLayer({
-      assetId: crypto.randomUUID(),
-      id: crypto.randomUUID(),
-      name: getImageLayerName(file),
-      image,
-      mimeType: file.type || "image/png",
-      objectUrl: image.src,
-      x: (-width * scale) / 2,
-      y: (-height * scale) / 2,
-      width,
-      height,
-      scaleX: scale,
-      scaleY: scale
-    });
-
-    this.scene.addLayer(layer);
-
-    return layer;
+    return addImageFileToScene(this.scene, file);
   }
 
   private async resampleImageLayer(layerId: string, width: number, height: number) {
-    const layer = this.scene.getLayer(layerId);
-
-    if (!(layer instanceof ImageLayer) || layer.locked) {
-      return null;
-    }
-
-    const currentPixelWidth = layer.image.naturalWidth || layer.image.width;
-    const currentPixelHeight = layer.image.naturalHeight || layer.image.height;
-    const nextPixelWidth = clampImagePixels(width);
-    const nextPixelHeight = clampImagePixels(height);
-
-    if (nextPixelWidth === currentPixelWidth && nextPixelHeight === currentPixelHeight) {
-      return layer;
-    }
-
-    const visibleWidth = layer.width * layer.scaleX;
-    const visibleHeight = layer.height * layer.scaleY;
-    const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d");
-
-    if (!context) {
-      throw new Error("Unable to resample image layer.");
-    }
-
-    canvas.width = nextPixelWidth;
-    canvas.height = nextPixelHeight;
-    context.imageSmoothingEnabled = true;
-    context.imageSmoothingQuality =
-      nextPixelWidth * nextPixelHeight >= currentPixelWidth * currentPixelHeight
-        ? "high"
-        : "medium";
-    context.drawImage(layer.image, 0, 0, nextPixelWidth, nextPixelHeight);
-
-    const blob = await canvasToBlob(canvas, getSerializableImageMimeType(layer.mimeType), 0.92);
-    const image = await loadImageElementFromBlob(blob);
-
-    layer.replaceImage(image, image.src, {
-      assetId: crypto.randomUUID(),
-      mimeType: blob.type || getSerializableImageMimeType(layer.mimeType)
-    });
-    layer.width = nextPixelWidth;
-    layer.height = nextPixelHeight;
-    layer.scaleX = visibleWidth / nextPixelWidth;
-    layer.scaleY = visibleHeight / nextPixelHeight;
-
-    return layer;
+    return resampleImageLayerInScene(this.scene, layerId, width, height);
   }
 
   private restoreOriginalImageLayer(layerId: string) {
-    const layer = this.scene.getLayer(layerId);
-
-    if (!(layer instanceof ImageLayer) || layer.locked) {
-      return null;
-    }
-
-    const originalPixelWidth = layer.originalImage.naturalWidth || layer.originalImage.width;
-    const originalPixelHeight = layer.originalImage.naturalHeight || layer.originalImage.height;
-
-    layer.restoreOriginalImage();
-    layer.width = originalPixelWidth;
-    layer.height = originalPixelHeight;
-    layer.scaleX = 1;
-    layer.scaleY = 1;
-
-    return layer;
+    return restoreOriginalImageLayerInScene(this.scene, layerId);
   }
 
   private getCanvasPoint(clientX: number, clientY: number) {
@@ -793,258 +614,14 @@ export class EditorApp {
   }
 
   addTextLayer() {
-    const layer = new TextLayer({
-      id: crypto.randomUUID(),
-      name: "Text",
-      x: -160,
-      y: -60,
-      width: 320,
-      height: 120,
-      text: "Text",
-      fontSize: 48,
-      fontFamily: "Arial",
-      color: [0.05, 0.06, 0.07, 1],
-      bold: false,
-      italic: false,
-      align: "left"
-    });
+    const layer = createDefaultTextLayer();
 
     this.scene.addLayer(layer);
 
     return layer;
   }
-
-  private getActiveTextEditLayer() {
-    if (!this.textEditLayerId) {
-      return null;
-    }
-
-    const layer = this.scene.getLayer(this.textEditLayerId);
-
-    if (!(layer instanceof TextLayer)) {
-      this.finishTextEdit();
-      return null;
-    }
-
-    return layer;
-  }
-
-  private getTextIndexAtClientPoint(layer: TextLayer, clientX: number, clientY: number) {
-    const screenPoint = this.getCanvasPoint(clientX, clientY);
-    const worldPoint = this.camera.screenToWorld(screenPoint.x, screenPoint.y);
-    const width = layer.width * layer.scaleX;
-    const height = layer.height * layer.scaleY;
-    const centerX = layer.x + width / 2;
-    const centerY = layer.y + height / 2;
-    const radians = (-layer.rotation * Math.PI) / 180;
-    const cos = Math.cos(radians);
-    const sin = Math.sin(radians);
-    const dx = worldPoint.x - centerX;
-    const dy = worldPoint.y - centerY;
-    const localX = (dx * cos - dy * sin + width / 2) / Math.max(1e-6, layer.scaleX);
-    const localY = (dx * sin + dy * cos + height / 2) / Math.max(1e-6, layer.scaleY);
-    const boxes = layer.lastTextCharacterBoxes;
-
-    if (boxes.length === 0) {
-      return layer.text.length;
-    }
-
-    let nearestIndex = layer.text.length;
-    let nearestDistance = Number.POSITIVE_INFINITY;
-
-    for (const box of boxes) {
-      const centerY = box.y + box.height / 2;
-      const lineDistance = Math.abs(localY - centerY);
-      const xIndex = localX < box.x + box.width / 2 ? box.index : box.index + 1;
-      const xDistance =
-        localX < box.x
-          ? box.x - localX
-          : localX > box.x + box.width
-            ? localX - (box.x + box.width)
-            : 0;
-      const distance = lineDistance * 4 + xDistance;
-
-      if (distance < nearestDistance) {
-        nearestDistance = distance;
-        nearestIndex = xIndex;
-      }
-    }
-
-    return Math.max(0, Math.min(layer.text.length, nearestIndex));
-  }
-
-  private clearTextSelection() {
-    this.textSelectionStart = null;
-    this.textSelectionEnd = null;
-  }
-
-  private getTextSelectionRange(layer: TextLayer) {
-    if (this.textSelectionStart === null || this.textSelectionEnd === null) {
-      return null;
-    }
-
-    const start = Math.max(0, Math.min(layer.text.length, this.textSelectionStart));
-    const end = Math.max(0, Math.min(layer.text.length, this.textSelectionEnd));
-
-    if (start === end) {
-      return null;
-    }
-
-    return {
-      end: Math.max(start, end),
-      start: Math.min(start, end)
-    };
-  }
-
 }
 
 function shouldShowSelectionOutline(tool: string) {
   return tool === "Move" || tool === "Text";
-}
-
-function getExportRenderBackground(
-  format: ImageExportFormat,
-  background: ImageExportBackground
-): ImageExportBackground {
-  if (format !== "png" && background === "transparent") {
-    return "white";
-  }
-
-  return background;
-}
-
-function getImageLayerName(file: File) {
-  return file.name.replace(/\.[^.]+$/u, "") || "Image";
-}
-
-function clampImagePixels(value: number) {
-  if (!Number.isFinite(value)) {
-    return 1;
-  }
-
-  return Math.min(Math.max(Math.round(value), 1), 12000);
-}
-
-function getSerializableImageMimeType(mimeType: string) {
-  return mimeType === "image/jpeg" || mimeType === "image/webp" ? mimeType : "image/png";
-}
-
-async function loadImageElement(file: File) {
-  const objectUrl = URL.createObjectURL(file);
-  const image = new Image();
-  image.decoding = "async";
-  image.src = objectUrl;
-
-  try {
-    await image.decode();
-  } catch {
-    await new Promise<void>((resolve, reject) => {
-      image.onload = () => resolve();
-      image.onerror = () => reject(new Error(`Unable to load image: ${file.name}`));
-    });
-  }
-
-  return image;
-}
-
-async function loadImageElementFromBlob(blob: Blob) {
-  const file = new File([blob], "resampled-image", { type: blob.type || "image/png" });
-
-  return loadImageElement(file);
-}
-
-function canvasToBlob(canvas: HTMLCanvasElement, mimeType: string, quality?: number) {
-  return new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => {
-        if (blob) {
-          resolve(blob);
-          return;
-        }
-
-        reject(new Error("Unable to export image."));
-      },
-      mimeType,
-      quality
-    );
-  });
-}
-
-async function createPdfFromJpeg(jpeg: Blob, width: number, height: number) {
-  const imageBytes = new Uint8Array(await jpeg.arrayBuffer());
-  const contentStream = `q\n${width} 0 0 ${height} 0 0 cm\n/Im0 Do\nQ\n`;
-  const objects: PdfObject[] = [
-    { body: "<< /Type /Catalog /Pages 2 0 R >>" },
-    { body: "<< /Type /Pages /Kids [3 0 R] /Count 1 >>" },
-    {
-      body: `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} ${height}] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>`
-    },
-    {
-      body: `<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${imageBytes.length} >>`,
-      stream: imageBytes
-    },
-    {
-      body: `<< /Length ${contentStream.length} >>`,
-      stream: asciiBytes(contentStream)
-    }
-  ];
-  const parts: PdfPart[] = ["%PDF-1.4\n"];
-  const offsets = [0];
-
-  for (let index = 0; index < objects.length; index += 1) {
-    offsets.push(sumByteLengths(parts));
-    parts.push(`${index + 1} 0 obj\n${objects[index].body}\n`);
-
-    const stream = objects[index].stream;
-
-    if (stream) {
-      parts.push("stream\n");
-      parts.push(stream);
-      parts.push("\nendstream\n");
-    }
-
-    parts.push("endobj\n");
-  }
-
-  const xrefOffset = sumByteLengths(parts);
-  const xrefRows = offsets.map((offset, index) =>
-    index === 0 ? "0000000000 65535 f " : `${String(offset).padStart(10, "0")} 00000 n `
-  );
-
-  parts.push(
-    `xref\n0 ${offsets.length}\n${xrefRows.join("\n")}\ntrailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`
-  );
-
-  return new Blob(parts.map(toBlobPart), { type: "application/pdf" });
-}
-
-type PdfObject = {
-  body: string;
-  stream?: Uint8Array;
-};
-
-type PdfPart = string | Uint8Array;
-
-function asciiBytes(value: string) {
-  return new TextEncoder().encode(value);
-}
-
-function sumByteLengths(parts: PdfPart[]) {
-  return parts.reduce((total, part) => total + getPdfPartLength(part), 0);
-}
-
-function getPdfPartLength(part: PdfPart) {
-  return typeof part === "string" ? asciiBytes(part).length : part.byteLength;
-}
-
-function toBlobPart(part: PdfPart): BlobPart {
-  if (typeof part === "string") {
-    return part;
-  }
-
-  const copy = new Uint8Array(part.byteLength);
-
-  copy.set(part);
-
-  return copy.buffer;
 }

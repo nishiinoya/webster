@@ -1,3 +1,4 @@
+/** Import/export helpers for the native `.webster` project package format. */
 import { ImageLayer } from "../layers/ImageLayer";
 import { Scene, SerializedScene } from "../scene/Scene";
 import { blobEntry, createZip, readZip, readZipText, textEntry } from "./ZipStore";

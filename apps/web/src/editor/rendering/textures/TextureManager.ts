@@ -1,4 +1,5 @@
 import { ImageLayer } from "../../layers/ImageLayer";
+/** WebGL texture lifetime management for images and layer masks. */
 import { LayerMask } from "../../masks/LayerMask";
 
 export class TextureManager {

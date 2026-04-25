@@ -1,3 +1,6 @@
+/**
+ * Geometry helpers for transform handles, rotated layer bounds, and model matrices.
+ */
 import { Camera2D } from "./Camera2D";
 import { Layer } from "../layers/Layer";
 
@@ -40,6 +43,9 @@ export type TransformRectangle = {
   y: number;
 };
 
+/**
+ * Returns the rendered layer size after scale is applied.
+ */
 export function getLayerSize(layer: Layer) {
   return {
     width: layer.width * layer.scaleX,
@@ -47,6 +53,9 @@ export function getLayerSize(layer: Layer) {
   };
 }
 
+/**
+ * Returns the center point of the scaled layer rectangle.
+ */
 export function getLayerCenter(layer: Layer) {
   const { width, height } = getLayerSize(layer);
 
@@ -56,6 +65,9 @@ export function getLayerCenter(layer: Layer) {
   };
 }
 
+/**
+ * Returns the four transformed corners for a possibly rotated layer.
+ */
 export function getLayerCorners(layer: Layer): LayerCorners {
   const { width, height } = getLayerSize(layer);
   const center = getLayerCenter(layer);
@@ -68,6 +80,9 @@ export function getLayerCorners(layer: Layer): LayerCorners {
   };
 }
 
+/**
+ * Builds the visible resize and rotation handles for the current camera zoom level.
+ */
 export function getTransformHandles(layer: Layer, camera: Camera2D): TransformHandle[] {
   const corners = getLayerCorners(layer);
   const rotationGap = 34 / camera.zoom;
@@ -95,6 +110,9 @@ export function getTransformHandles(layer: Layer, camera: Camera2D): TransformHa
   ];
 }
 
+/**
+ * Rotates a vector around the origin by the supplied angle in degrees.
+ */
 export function rotateVector(point: Point, rotation: number) {
   const radians = degreesToRadians(rotation);
   const cos = Math.cos(radians);
@@ -106,6 +124,9 @@ export function rotateVector(point: Point, rotation: number) {
   };
 }
 
+/**
+ * Rotates a point around a center point by the supplied angle in degrees.
+ */
 export function rotatePoint(point: Point, center: Point, rotation: number) {
   const rotated = rotateVector(
     {
@@ -121,6 +142,9 @@ export function rotatePoint(point: Point, center: Point, rotation: number) {
   };
 }
 
+/**
+ * Returns the midpoint between two points.
+ */
 export function midpoint(a: Point, b: Point) {
   return {
     x: (a.x + b.x) / 2,
@@ -128,10 +152,16 @@ export function midpoint(a: Point, b: Point) {
   };
 }
 
+/**
+ * Returns the Euclidean distance between two points.
+ */
 export function distance(a: Point, b: Point) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
+/**
+ * Normalizes a vector, falling back to a unit-safe divisor for zero-length input.
+ */
 export function normalize(point: Point) {
   const length = Math.hypot(point.x, point.y) || 1;
 
@@ -141,10 +171,16 @@ export function normalize(point: Point) {
   };
 }
 
+/**
+ * Converts an angle from degrees to radians.
+ */
 export function degreesToRadians(degrees: number) {
   return (degrees * Math.PI) / 180;
 }
 
+/**
+ * Builds a column-major model matrix for a scaled and rotated rectangle.
+ */
 export function getModelMatrix(rectangle: TransformRectangle) {
   const width = rectangle.width * (rectangle.scaleX ?? 1);
   const height = rectangle.height * (rectangle.scaleY ?? 1);

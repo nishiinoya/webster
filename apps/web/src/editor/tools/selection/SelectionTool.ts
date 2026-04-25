@@ -1,3 +1,4 @@
+/** Rectangle and ellipse selection tool implementation. */
 import { Camera2D } from "../../geometry/Camera2D";
 import { Scene } from "../../scene/Scene";
 import type { SelectionShape } from "../../selection/SelectionManager";

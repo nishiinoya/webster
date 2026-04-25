@@ -1,3 +1,4 @@
+/** Hook that creates and owns the shared `EditorApp` instance. */
 import { MutableRefObject, useEffect, useRef, useState } from "react";
 import type { LayerSummary } from "../../app/EditorApp";
 import { EditorApp } from "../../app/EditorApp";

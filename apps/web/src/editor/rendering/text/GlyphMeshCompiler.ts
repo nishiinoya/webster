@@ -1,3 +1,4 @@
+/** Glyph outline flattening and triangulation helpers. */
 import earcut from "earcut";
 import type { CompiledGlyph } from "./CompiledFont";
 

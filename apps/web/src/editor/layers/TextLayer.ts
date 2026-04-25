@@ -1,3 +1,4 @@
+/** Text layer model. */
 import { Layer } from "./Layer";
 import type { LayerOptions, SerializedTextLayer } from "./Layer";
 import type { BitmapTextRect } from "../rendering/text/BitmapText";

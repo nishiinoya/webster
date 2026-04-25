@@ -1,3 +1,4 @@
+/** Shape creation tool implementation. */
 import { Camera2D } from "../../geometry/Camera2D";
 import { ShapeLayer } from "../../layers/ShapeLayer";
 import type { ShapeKind } from "../../layers/ShapeLayer";

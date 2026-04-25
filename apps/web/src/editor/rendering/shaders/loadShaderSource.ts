@@ -1,3 +1,4 @@
+/** Shader asset loading helper. */
 export async function loadShaderSource(path: string) {
   const response = await fetch(path);
 

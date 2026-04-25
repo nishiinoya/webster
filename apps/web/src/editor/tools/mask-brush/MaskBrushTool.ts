@@ -1,3 +1,4 @@
+/** Mask brush tool implementation and undo snapshot support. */
 import { Camera2D } from "../../geometry/Camera2D";
 import { invert3x3, transformPoint3x3 } from "../../geometry/Matrix3";
 import { Scene } from "../../scene/Scene";

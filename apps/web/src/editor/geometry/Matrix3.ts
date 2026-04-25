@@ -1,3 +1,4 @@
+/** Minimal 3x3 matrix math helpers used by editor transforms. */
 import type { Point } from "./TransformGeometry";
 
 export type Matrix3 = Float32Array;

@@ -1,3 +1,4 @@
+/** Base layer model shared by all editable scene layer types. */
 import { LayerMask } from "../masks/LayerMask";
 import type { SerializedLayerMask } from "../masks/LayerMask";
 

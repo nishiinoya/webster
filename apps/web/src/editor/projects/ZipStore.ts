@@ -1,3 +1,4 @@
+/** Lightweight ZIP read/write helpers used by project packaging. */
 type ZipEntry = {
   data: Uint8Array;
   name: string;

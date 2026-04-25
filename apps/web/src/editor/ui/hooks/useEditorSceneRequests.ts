@@ -1,3 +1,4 @@
+/** Hook that coordinates async scene commands, imports, exports, and UI loading state. */
 import { MutableRefObject, useEffect, useRef } from "react";
 import type { ImageLayerCommand, LayerCommand, LayerSummary } from "../../app/EditorApp";
 import { EditorApp } from "../../app/EditorApp";

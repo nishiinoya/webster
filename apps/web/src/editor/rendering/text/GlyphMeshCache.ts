@@ -1,3 +1,4 @@
+/** Glyph mesh cache keyed by compiled font and glyph index. */
 import type { CompiledGlyph } from "./CompiledFont";
 import { compileGlyphMesh } from "./GlyphMeshCompiler";
 

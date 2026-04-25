@@ -1,0 +1,151 @@
+import { normalizeLayerFilters } from "../layers/Layer";
+import type { LayerFilterSettings } from "../layers/Layer";
+import { Layer } from "../layers/Layer";
+import { ShapeLayer } from "../layers/ShapeLayer";
+import { StrokeLayer } from "../layers/StrokeLayer";
+import { TextLayer } from "../layers/TextLayer";
+import { clamp, normalizeRotation } from "./sceneResize";
+
+export type SceneLayerUpdates = Partial<{
+  align: "left" | "center" | "right";
+  bold: boolean;
+  color: [number, number, number, number];
+  fillColor: [number, number, number, number];
+  filters: Partial<LayerFilterSettings>;
+  fontFamily: string;
+  fontSize: number;
+  height: number;
+  italic: boolean;
+  locked: boolean;
+  name: string;
+  opacity: number;
+  rotation: number;
+  shape: "rectangle" | "circle" | "line" | "triangle" | "diamond" | "arrow";
+  strokeColor: [number, number, number, number];
+  strokeWidth: number;
+  text: string;
+  visible: boolean;
+  width: number;
+  x: number;
+  y: number;
+}>;
+
+/**
+ * Applies partial property updates to a layer, respecting each layer type's edit rules.
+ */
+export function applySceneLayerUpdates(layer: Layer, updates: SceneLayerUpdates) {
+  if (updates.name !== undefined) {
+    layer.name = updates.name;
+  }
+
+  if (updates.visible !== undefined) {
+    layer.visible = updates.visible;
+  }
+
+  if (updates.locked !== undefined) {
+    layer.locked = updates.locked;
+  }
+
+  if (updates.opacity !== undefined) {
+    layer.opacity = clamp(updates.opacity, 0, 1);
+  }
+
+  if (updates.filters !== undefined) {
+    layer.filters = normalizeLayerFilters({
+      ...layer.filters,
+      ...updates.filters
+    });
+  }
+
+  if (!layer.locked) {
+    if (updates.x !== undefined) {
+      layer.x = updates.x;
+    }
+
+    if (updates.y !== undefined) {
+      layer.y = updates.y;
+    }
+
+    if (updates.rotation !== undefined) {
+      layer.rotation = normalizeRotation(updates.rotation);
+    }
+
+    if (updates.width !== undefined && !(layer instanceof TextLayer)) {
+      layer.scaleX = Math.max(1, updates.width) / layer.width;
+    }
+
+    if (updates.height !== undefined && !(layer instanceof TextLayer)) {
+      layer.scaleY = Math.max(1, updates.height) / layer.height;
+    }
+  }
+
+  if (layer instanceof ShapeLayer && !layer.locked) {
+    if (updates.shape !== undefined) {
+      layer.shape = updates.shape;
+    }
+
+    if (updates.fillColor !== undefined) {
+      layer.fillColor = updates.fillColor;
+    }
+
+    if (updates.strokeColor !== undefined) {
+      layer.strokeColor = updates.strokeColor;
+    }
+
+    if (updates.strokeWidth !== undefined) {
+      layer.strokeWidth = Math.max(0, updates.strokeWidth);
+    }
+  }
+
+  if (layer instanceof StrokeLayer && !layer.locked) {
+    if (updates.color !== undefined) {
+      layer.color = updates.color;
+    }
+
+    if (updates.strokeWidth !== undefined) {
+      layer.strokeWidth = Math.max(1, updates.strokeWidth);
+    }
+  }
+
+  if (layer instanceof TextLayer && !layer.locked) {
+    if (updates.text !== undefined) {
+      layer.text = updates.text;
+    }
+
+    if (updates.fontSize !== undefined) {
+      layer.fontSize = Math.max(1, updates.fontSize);
+    }
+
+    if (updates.fontFamily !== undefined) {
+      layer.fontFamily = updates.fontFamily;
+    }
+
+    if (updates.color !== undefined) {
+      layer.color = updates.color;
+    }
+
+    if (updates.bold !== undefined) {
+      layer.bold = updates.bold;
+    }
+
+    if (updates.italic !== undefined) {
+      layer.italic = updates.italic;
+    }
+
+    if (updates.align !== undefined) {
+      layer.align = updates.align;
+    }
+
+    if (updates.width !== undefined) {
+      layer.width = Math.max(1, updates.width);
+      layer.scaleX = 1;
+    }
+
+    if (updates.height !== undefined) {
+      layer.height = Math.max(1, updates.height);
+      layer.scaleY = 1;
+    }
+  }
+
+  return layer;
+}

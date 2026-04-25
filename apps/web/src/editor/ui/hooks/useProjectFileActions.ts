@@ -1,3 +1,4 @@
+/** Hook that provides open/save actions for `.webster` project files. */
 import { MutableRefObject, useCallback, useEffect, useRef } from "react";
 import { EditorApp } from "../../app/EditorApp";
 import { useEditorKeyboardShortcuts } from "./useEditorKeyboardShortcuts";

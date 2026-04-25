@@ -1,3 +1,4 @@
+/** Shape layer model. */
 import { Layer } from "./Layer";
 import type { LayerOptions, SerializedShapeLayer } from "./Layer";
 

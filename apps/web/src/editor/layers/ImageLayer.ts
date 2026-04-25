@@ -1,3 +1,4 @@
+/** Image layer model and serialization helpers. */
 import { Layer } from "./Layer";
 import type { LayerOptions, SerializedImageLayer } from "./Layer";
 
