@@ -159,6 +159,7 @@ export class EditorApp {
     callbacks: {
       onCameraChange?: (camera: CameraSnapshot) => void;
       onHistoryChange?: (history: HistoryStateSnapshot) => void;
+      onStrokeLayerCreated?: (layerId: string) => void;
     } = {}
   ) {
     return new EditorApp(canvas, await Renderer.create(canvas), callbacks);
@@ -170,6 +171,7 @@ export class EditorApp {
     callbacks: {
       onCameraChange?: (camera: CameraSnapshot) => void;
       onHistoryChange?: (history: HistoryStateSnapshot) => void;
+      onStrokeLayerCreated?: (layerId: string) => void;
     } = {}
   ) {
     this.renderer = renderer;
@@ -178,7 +180,12 @@ export class EditorApp {
     this.scene = new Scene({ createDefaultLayer: false });
     this.camera = new Camera2D();
     this.camera.setBounds(this.scene.document);
-    this.inputController = new InputController(canvas, this.scene, this.camera);
+    this.inputController = new InputController(
+      canvas,
+      this.scene,
+      this.camera,
+      callbacks.onStrokeLayerCreated
+    );
     this.notifyHistoryChange();
   }
 

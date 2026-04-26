@@ -32,7 +32,8 @@ export class DrawingTool {
   constructor(
     private readonly canvas: HTMLCanvasElement,
     private scene: Scene,
-    private readonly camera: Camera2D
+    private readonly camera: Camera2D,
+    private readonly onLayerCreated?: (layerId: string) => void
   ) {}
 
   setScene(scene: Scene) {
@@ -103,6 +104,7 @@ export class DrawingTool {
 
     if (!targetLayer) {
       this.scene.addLayer(layer);
+      this.onLayerCreated?.(layer.id);
     } else {
       this.scene.selectLayer(layer.id);
     }

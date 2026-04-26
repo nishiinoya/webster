@@ -10,6 +10,7 @@ type UseEditorAppOptions = {
   canvasRef: MutableRefObject<HTMLCanvasElement | null>;
   onHistoryChange: (history: HistoryStateSnapshot) => void;
   onLayersChange: (layers: LayerSummary[]) => void;
+  onStrokeLayerCreated: (layerId: string) => void;
   onZoomChange: (zoomPercentage: number) => void;
   maskBrushOptions: MaskBrushOptions;
   selectedTool: string;
@@ -28,6 +29,7 @@ export function useEditorApp({
   maskBrushOptions,
   onHistoryChange,
   onLayersChange,
+  onStrokeLayerCreated,
   onZoomChange,
   selectedShape,
   showCanvasBorder,
@@ -41,6 +43,7 @@ export function useEditorApp({
 }: UseEditorAppOptions) {
   const editorAppRef = useRef<EditorApp | null>(null);
   const maskBrushOptionsRef = useRef(maskBrushOptions);
+  const onStrokeLayerCreatedRef = useRef(onStrokeLayerCreated);
   const selectedShapeRef = useRef(selectedShape);
   const selectedStrokeColorRef = useRef(selectedStrokeColor);
   const selectedStrokeModeRef = useRef(selectedStrokeMode);
@@ -51,6 +54,10 @@ export function useEditorApp({
   const selectedToolRef = useRef(selectedTool);
   const [editorReadyId, setEditorReadyId] = useState(0);
   const [webglError, setWebglError] = useState<string | null>(null);
+
+  useEffect(() => {
+    onStrokeLayerCreatedRef.current = onStrokeLayerCreated;
+  }, [onStrokeLayerCreated]);
 
   useEffect(() => {
     selectedToolRef.current = selectedTool;
@@ -107,7 +114,10 @@ export function useEditorApp({
         onCameraChange: ({ zoom }) => {
           onZoomChange(Math.round(zoom * 100));
         },
-        onHistoryChange
+        onHistoryChange,
+        onStrokeLayerCreated: (layerId) => {
+          onStrokeLayerCreatedRef.current(layerId);
+        }
       })
         .then((editorApp) => {
           if (didCancel) {

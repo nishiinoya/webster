@@ -50,6 +50,7 @@ type CanvasViewProps = {
   onHistoryChange: (history: HistoryStateSnapshot) => void;
   onHistoryCommandRequestHandled: (requestId: number) => void;
   onLayersChange: (layers: LayerSummary[]) => void;
+  onStrokeLayerCreated: (layerId: string) => void;
   onDocumentCommandRequestHandled: (requestId: number) => void;
   onImageDocumentRequestHandled: (requestId: number) => void;
   onImageLayerCommandRequestHandled: (requestId: number) => void;
@@ -97,6 +98,7 @@ export function CanvasView({
   onHistoryChange,
   onHistoryCommandRequestHandled,
   onLayersChange,
+  onStrokeLayerCreated,
   onDocumentCommandRequestHandled,
   onImageDocumentRequestHandled,
   onImageLayerCommandRequestHandled,
@@ -132,6 +134,7 @@ export function CanvasView({
     maskBrushOptions,
     onHistoryChange,
     onLayersChange,
+    onStrokeLayerCreated,
     onZoomChange,
     selectedShape,
     showCanvasBorder,

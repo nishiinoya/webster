@@ -19,8 +19,13 @@ export class InputController {
   private readonly shapeTool: ShapeTool;
   private selectedTool = "Move";
 
-  constructor(canvas: HTMLCanvasElement, scene: Scene, camera: Camera2D) {
-    this.drawingTool = new DrawingTool(canvas, scene, camera);
+  constructor(
+    canvas: HTMLCanvasElement,
+    scene: Scene,
+    camera: Camera2D,
+    onStrokeLayerCreated?: (layerId: string) => void
+  ) {
+    this.drawingTool = new DrawingTool(canvas, scene, camera, onStrokeLayerCreated);
     this.moveTool = new MoveTool(canvas, scene, camera);
     this.maskBrushTool = new MaskBrushTool(canvas, scene, camera);
     this.selectionTool = new SelectionTool(canvas, scene, camera);

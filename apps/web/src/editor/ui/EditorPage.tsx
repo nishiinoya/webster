@@ -713,6 +713,10 @@ export function EditorPage() {
               imageExportRequest={imageExportRequest}
               onHistoryChange={setHistoryState}
               onLayersChange={setLayers}
+              onStrokeLayerCreated={(layerId) => {
+                setSelectedStrokeTargetLayerId(layerId);
+                setSelectedStrokeTargetMode("layer");
+              }}
               onHistoryCommandRequestHandled={(requestId) =>
                 setHistoryCommandRequest((request) => (request?.id === requestId ? null : request))
               }
