@@ -4,6 +4,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import type {
   DocumentCommand,
+  HistoryStateSnapshot,
   ImageExportBackground,
   ImageExportFormat,
   ImageLayerCommand,
@@ -109,8 +110,6 @@ const editorTools: ToolDefinition[] = [
 ];
 
 const initialLayers: LayerSummary[] = [];
-
-const mockHistory = ["New document", "Selected Move tool"];
 const documentPresets: Array<NewDocumentSize & { label: string }> = [
   { height: 800, label: "Canvas 1200 x 800", width: 1200 },
   { height: 1080, label: "HD 1920 x 1080", width: 1920 },
@@ -134,6 +133,14 @@ type EditorLayoutVars = CSSProperties & {
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
+
+const emptyHistoryState: HistoryStateSnapshot = {
+  canRedo: false,
+  canUndo: false,
+  entries: [],
+  redoLabel: null,
+  undoLabel: null
+};
 
 export function EditorPage() {
   const emptyImageInputRef = useRef<HTMLInputElement | null>(null);
@@ -171,6 +178,7 @@ export function EditorPage() {
     useState<ImageLayerCommandPendingState | null>(null);
   const [recentProjects, setRecentProjects] = useState<RecentProjectHandle[]>([]);
   const [recentProjectError, setRecentProjectError] = useState<string | null>(null);
+  const [historyState, setHistoryState] = useState<HistoryStateSnapshot>(emptyHistoryState);
   const [layers, setLayers] = useState<LayerSummary[]>(initialLayers);
   const [uploadRequest, setUploadRequest] = useState<{ file: File; id: number } | null>(null);
   const [imageDocumentRequest, setImageDocumentRequest] = useState<{
@@ -210,6 +218,10 @@ export function EditorPage() {
     id: number;
     title: string;
   } | null>(null);
+  const [historyCommandRequest, setHistoryCommandRequest] = useState<{
+    command: "redo" | "undo";
+    id: number;
+  } | null>(null);
   const [selectionCommandRequest, setSelectionCommandRequest] = useState<{
     command: SelectionCommand;
     id: number;
@@ -237,6 +249,7 @@ export function EditorPage() {
   const selectedLayer = layers.find((layer) => layer.isSelected) ?? null;
   const selectedImageLayer = isImageLayerSummary(selectedLayer) ? selectedLayer : null;
   const activeDocument = tabs.find((tab) => tab.isActive) ?? tabs[0] ?? null;
+  const activeHistoryState = activeDocument ? historyState : emptyHistoryState;
   const strokeLayers = layers.filter((layer) => layer.type === "stroke");
 
   useEffect(() => {
@@ -249,6 +262,12 @@ export function EditorPage() {
       setSelectedStrokeTargetMode("new");
     }
   }, [selectedStrokeTargetLayerId, selectedStrokeTargetMode, strokeLayers]);
+
+  useEffect(() => {
+    if (!activeDocument) {
+      setHistoryState(emptyHistoryState);
+    }
+  }, [activeDocument]);
 
   useEffect(() => {
     let didCancel = false;
@@ -572,6 +591,8 @@ export function EditorPage() {
     <main className="grid h-screen min-h-0 grid-rows-[64px_1fr] overflow-hidden bg-[#101113] text-[13px] text-[#e7e9ec] min-[1400px]:text-[14px] max-[760px]:h-[100svh] max-[760px]:grid-rows-[118px_1fr]">
       <Toolbar
         canEditDocument={Boolean(activeDocument)}
+        canRedo={activeHistoryState.canRedo}
+        canUndo={activeHistoryState.canUndo}
         canvasSize={
           activeDocument
             ? {
@@ -587,6 +608,7 @@ export function EditorPage() {
         onOpenImageResize={() => setIsResizeImageDialogOpen(true)}
         onOpenProject={openProjectInNewTab}
         onOpenImageDocument={(file) => void openImageAsNewDocument(file)}
+        onRedo={() => setHistoryCommandRequest({ command: "redo", id: Date.now() })}
         onRestoreImageOriginal={() => {
           if (!selectedImageLayer) {
             return;
@@ -606,6 +628,7 @@ export function EditorPage() {
         onSelectionCommand={(command) => setSelectionCommandRequest({ command, id: Date.now() })}
         onSelectTool={setSelectedTool}
         onShowCanvasBorderChange={setShowCanvasBorder}
+        onUndo={() => setHistoryCommandRequest({ command: "undo", id: Date.now() })}
         onUploadImage={(file) => setUploadRequest({ file, id: Date.now() })}
         maskBrushOptions={maskBrushOptions}
         onMaskBrushOptionsChange={(options) =>
@@ -637,6 +660,8 @@ export function EditorPage() {
         selectedTool={selectedTool}
         showCanvasBorder={showCanvasBorder}
         strokeLayers={strokeLayers}
+        redoLabel={activeHistoryState.redoLabel}
+        undoLabel={activeHistoryState.undoLabel}
         zoomPercentage={zoomPercentage}
       />
       <section
@@ -680,12 +705,17 @@ export function EditorPage() {
               activeDocument={activeDocument}
               closedDocumentRequest={closedDocumentRequest}
               documentCommandRequest={documentCommandRequest}
+              historyCommandRequest={historyCommandRequest}
               imageDocumentRequest={imageDocumentRequest}
               imageLayerCommandRequest={imageLayerCommandRequest}
               layerCommandRequest={layerCommandRequest}
               maskBrushOptions={maskBrushOptions}
               imageExportRequest={imageExportRequest}
+              onHistoryChange={setHistoryState}
               onLayersChange={setLayers}
+              onHistoryCommandRequestHandled={(requestId) =>
+                setHistoryCommandRequest((request) => (request?.id === requestId ? null : request))
+              }
               onLayerCommandRequestHandled={(requestId) =>
                 setLayerCommandRequest((request) => (request?.id === requestId ? null : request))
               }
@@ -918,7 +948,7 @@ export function EditorPage() {
             )}
           >
             <HistoryPanel
-              entries={mockHistory}
+              entries={activeHistoryState.entries}
               isCollapsed={collapsedSidePanels.history}
               onToggleCollapsed={() => toggleSidePanelCollapsed("history")}
             />

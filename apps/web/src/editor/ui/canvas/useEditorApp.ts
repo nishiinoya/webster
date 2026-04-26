@@ -1,6 +1,6 @@
 /** Hook that creates and owns the shared `EditorApp` instance. */
 import { MutableRefObject, useEffect, useRef, useState } from "react";
-import type { LayerSummary } from "../../app/EditorApp";
+import type { HistoryStateSnapshot, LayerSummary } from "../../app/EditorApp";
 import { EditorApp } from "../../app/EditorApp";
 import type { ShapeKind } from "../../layers/ShapeLayer";
 import type { StrokeStyle } from "../../layers/StrokeLayer";
@@ -8,6 +8,7 @@ import type { MaskBrushOptions } from "../../tools/mask-brush/MaskBrushTypes";
 
 type UseEditorAppOptions = {
   canvasRef: MutableRefObject<HTMLCanvasElement | null>;
+  onHistoryChange: (history: HistoryStateSnapshot) => void;
   onLayersChange: (layers: LayerSummary[]) => void;
   onZoomChange: (zoomPercentage: number) => void;
   maskBrushOptions: MaskBrushOptions;
@@ -25,6 +26,7 @@ type UseEditorAppOptions = {
 export function useEditorApp({
   canvasRef,
   maskBrushOptions,
+  onHistoryChange,
   onLayersChange,
   onZoomChange,
   selectedShape,
@@ -101,8 +103,11 @@ export function useEditorApp({
     let didCancel = false;
 
     try {
-      EditorApp.create(canvasRef.current, ({ zoom }) => {
-        onZoomChange(Math.round(zoom * 100));
+      EditorApp.create(canvasRef.current, {
+        onCameraChange: ({ zoom }) => {
+          onZoomChange(Math.round(zoom * 100));
+        },
+        onHistoryChange
       })
         .then((editorApp) => {
           if (didCancel) {
@@ -143,7 +148,7 @@ export function useEditorApp({
       editorAppRef.current?.dispose();
       editorAppRef.current = null;
     };
-  }, [canvasRef, onLayersChange, onZoomChange]);
+  }, [canvasRef, onHistoryChange, onLayersChange, onZoomChange]);
 
   return {
     editorReadyId,

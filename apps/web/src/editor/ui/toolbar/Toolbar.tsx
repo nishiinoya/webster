@@ -14,6 +14,8 @@ import { cn } from "../classNames";
 
 type ToolbarProps = {
   canEditDocument: boolean;
+  canRedo: boolean;
+  canUndo: boolean;
   canvasSize: { height: number; width: number } | null;
   documentTitle: string;
   onNewDocument: () => void;
@@ -22,6 +24,7 @@ type ToolbarProps = {
   onOpenExportDialog: () => void;
   onOpenImageResize: () => void;
   onOpenProject: (file: File, handle?: WebsterFileHandle | null) => void;
+  onRedo: () => void;
   onRestoreImageOriginal: () => void;
   onSaveAsProject: () => void;
   onSaveProject: () => void;
@@ -29,6 +32,7 @@ type ToolbarProps = {
   onSelectionCommand: (command: SelectionCommand) => void;
   onSelectTool: (tool: string) => void;
   onShowCanvasBorderChange: (show: boolean) => void;
+  onUndo: () => void;
   onUploadImage: (file: File) => void;
   maskBrushOptions: MaskBrushOptions;
   onMaskBrushOptionsChange: (options: Partial<MaskBrushOptions>) => void;
@@ -48,6 +52,8 @@ type ToolbarProps = {
   selectedTool: string;
   showCanvasBorder: boolean;
   strokeLayers: LayerSummary[];
+  redoLabel: string | null;
+  undoLabel: string | null;
   zoomPercentage: number;
 };
 
@@ -58,6 +64,8 @@ export type StrokeTargetSelection = {
 
 export function Toolbar({
   canEditDocument,
+  canRedo,
+  canUndo,
   canvasSize,
   documentTitle,
   onNewDocument,
@@ -66,6 +74,7 @@ export function Toolbar({
   onOpenExportDialog,
   onOpenImageResize,
   onOpenProject,
+  onRedo,
   onRestoreImageOriginal,
   onSaveAsProject,
   onSaveProject,
@@ -73,6 +82,7 @@ export function Toolbar({
   onSelectionCommand,
   onSelectTool,
   onShowCanvasBorderChange,
+  onUndo,
   onUploadImage,
   maskBrushOptions,
   onMaskBrushOptionsChange,
@@ -92,6 +102,8 @@ export function Toolbar({
   selectedTool,
   showCanvasBorder,
   strokeLayers,
+  redoLabel,
+  undoLabel,
   zoomPercentage
 }: ToolbarProps) {
   const toolbarRef = useRef<HTMLElement | null>(null);
@@ -267,11 +279,29 @@ export function Toolbar({
         <details className="toolbar-menu relative" onToggle={closeSiblingMenus}>
           <summary className={toolbarButtonClass}>Edit</summary>
           <div className={toolbarMenuClass} role="menu">
-            <button className={toolbarMenuItemClass} disabled type="button">
-              Undo <span className={toolbarMenuHintClass}>TODO</span>
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!canUndo}
+              onClick={(event) => {
+                closeMenu(event);
+                onUndo();
+              }}
+              type="button"
+            >
+              <span>{undoLabel ? `Undo ${undoLabel}` : "Undo"}</span>
+              <span className={toolbarMenuHintClass}>Ctrl/Cmd+Z</span>
             </button>
-            <button className={toolbarMenuItemClass} disabled type="button">
-              Redo <span className={toolbarMenuHintClass}>TODO</span>
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!canRedo}
+              onClick={(event) => {
+                closeMenu(event);
+                onRedo();
+              }}
+              type="button"
+            >
+              <span>{redoLabel ? `Redo ${redoLabel}` : "Redo"}</span>
+              <span className={toolbarMenuHintClass}>Shift+Ctrl/Cmd+Z</span>
             </button>
             <MenuSeparator />
             <button className={toolbarMenuItemClass} disabled type="button">

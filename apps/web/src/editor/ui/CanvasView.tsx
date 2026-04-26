@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import type {
   DocumentCommand,
+  HistoryStateSnapshot,
   ImageExportBackground,
   ImageExportFormat,
   ImageLayerCommand,
@@ -31,6 +32,7 @@ type CanvasViewProps = {
   activeDocument: EditorDocumentTab;
   closedDocumentRequest: { id: number; tabId: string } | null;
   documentCommandRequest: { command: DocumentCommand; id: number } | null;
+  historyCommandRequest: { command: "redo" | "undo"; id: number } | null;
   imageExportRequest: {
     background: ImageExportBackground;
     format: ImageExportFormat;
@@ -45,6 +47,8 @@ type CanvasViewProps = {
   imageLayerCommandRequest: { command: ImageLayerCommand; id: number } | null;
   layerCommandRequest: { command: LayerCommand; id: number } | null;
   maskBrushOptions: MaskBrushOptions;
+  onHistoryChange: (history: HistoryStateSnapshot) => void;
+  onHistoryCommandRequestHandled: (requestId: number) => void;
   onLayersChange: (layers: LayerSummary[]) => void;
   onDocumentCommandRequestHandled: (requestId: number) => void;
   onImageDocumentRequestHandled: (requestId: number) => void;
@@ -84,11 +88,14 @@ export function CanvasView({
   activeDocument,
   closedDocumentRequest,
   documentCommandRequest,
+  historyCommandRequest,
   imageExportRequest,
   imageDocumentRequest,
   imageLayerCommandRequest,
   layerCommandRequest,
   maskBrushOptions,
+  onHistoryChange,
+  onHistoryCommandRequestHandled,
   onLayersChange,
   onDocumentCommandRequestHandled,
   onImageDocumentRequestHandled,
@@ -123,6 +130,7 @@ export function CanvasView({
   const { editorAppRef, editorReadyId, setWebglError, webglError } = useEditorApp({
     canvasRef,
     maskBrushOptions,
+    onHistoryChange,
     onLayersChange,
     onZoomChange,
     selectedShape,
@@ -181,9 +189,34 @@ export function CanvasView({
     onSceneChange: rememberActiveScene,
     projectFileRequest,
     projectSaveRequest,
-    selectedTool,
     setWebglError
   });
+
+  useEffect(() => {
+    if (!historyCommandRequest || !editorAppRef.current) {
+      return;
+    }
+
+    const didApply =
+      historyCommandRequest.command === "undo"
+        ? editorAppRef.current.undo()
+        : editorAppRef.current.redo();
+
+    if (didApply) {
+      onLayersChange(editorAppRef.current.getLayerSummaries());
+      onZoomChange(Math.round(editorAppRef.current.getCameraSnapshot().zoom * 100));
+      rememberActiveScene();
+    }
+
+    onHistoryCommandRequestHandled(historyCommandRequest.id);
+  }, [
+    editorAppRef,
+    historyCommandRequest,
+    onHistoryCommandRequestHandled,
+    onLayersChange,
+    onZoomChange,
+    rememberActiveScene
+  ]);
 
   useEffect(() => {
     if (!documentCommandRequest || !editorAppRef.current) {

@@ -1,7 +1,8 @@
+import type { HistoryEntrySummary } from "../../app/EditorApp";
 import { cn } from "../classNames";
 
 type HistoryPanelProps = {
-  entries: string[];
+  entries: HistoryEntrySummary[];
   isCollapsed: boolean;
   onToggleCollapsed: () => void;
 };
@@ -30,15 +31,37 @@ export function HistoryPanel({
       </div>
       <ol
         className={cn(
-          "m-0 grid min-h-0 gap-2 overflow-auto px-3 pb-3 pl-8 text-[13px] text-[#d9dde3] min-[1400px]:text-sm",
+          "m-0 grid min-h-0 gap-2 overflow-auto px-3 pb-3 pl-3 text-[13px] min-[1400px]:text-sm",
           isCollapsed && "hidden"
         )}
       >
-        {entries.map((entry) => (
-          <li className="py-1" key={entry}>
-            {entry}
+        {entries.length > 0 ? (
+          entries.map((entry, index) => (
+            <li
+              className={cn(
+                "grid grid-cols-[auto_1fr_auto] items-center gap-2 rounded-lg border px-2.5 py-2",
+                entry.isCurrent &&
+                  "border-[#4aa391] bg-[#203731] text-[#eef1f4]",
+                !entry.isCurrent &&
+                  !entry.isUndone &&
+                  "border-[#30353d] bg-[#202329] text-[#d9dde3]",
+                entry.isUndone &&
+                  "border-transparent bg-transparent text-[#6f7680]"
+              )}
+              key={entry.id}
+            >
+              <span className="text-[11px] font-bold text-inherit">{index + 1}</span>
+              <span className="truncate font-semibold">{entry.label}</span>
+              <span className="text-[10px] font-bold uppercase tracking-normal text-inherit">
+                {entry.isCurrent ? "Current" : entry.isUndone ? "Redo" : "Done"}
+              </span>
+            </li>
+          ))
+        ) : (
+          <li className="rounded-lg border border-dashed border-[#30353d] px-2.5 py-3 text-[#8b929b]">
+            No edits yet.
           </li>
-        ))}
+        )}
       </ol>
     </section>
   );

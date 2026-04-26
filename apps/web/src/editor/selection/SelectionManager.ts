@@ -24,6 +24,11 @@ export type SelectionDraft = {
   shape: SelectionShape;
 };
 
+export type SelectionManagerState = {
+  current: Selection | null;
+  draft: SelectionDraft | null;
+};
+
 export type SelectionSnapshot = Selection & {
   isDraft: boolean;
 };
@@ -55,6 +60,20 @@ export class SelectionManager {
           isDraft: false
         }
       : null;
+  }
+
+  getSnapshot(): SelectionManagerState {
+    return cloneSelectionManagerState({
+      current: this.currentSelection,
+      draft: this.draftSelection
+    });
+  }
+
+  restoreSnapshot(snapshot: SelectionManagerState) {
+    const nextSnapshot = cloneSelectionManagerState(snapshot);
+
+    this.currentSelection = nextSnapshot.current;
+    this.draftSelection = nextSnapshot.draft;
   }
 
   clear() {
@@ -178,6 +197,13 @@ export function normalizeBounds(bounds: SelectionBounds): SelectionBounds {
   };
 }
 
+export function cloneSelectionManagerState(state: SelectionManagerState): SelectionManagerState {
+  return {
+    current: state.current ? cloneSelection(state.current) : null,
+    draft: state.draft ? cloneSelectionDraft(state.draft) : null
+  };
+}
+
 export function containsSelectionPoint(selection: Selection, x: number, y: number) {
   const bounds = selection.bounds;
   const insideBounds =
@@ -199,4 +225,19 @@ export function containsSelectionPoint(selection: Selection, x: number, y: numbe
   }
 
   return selection.inverted ? !insideShape : insideShape;
+}
+
+function cloneSelection(selection: Selection): Selection {
+  return {
+    bounds: { ...selection.bounds },
+    inverted: selection.inverted,
+    shape: selection.shape
+  };
+}
+
+function cloneSelectionDraft(selection: SelectionDraft): SelectionDraft {
+  return {
+    bounds: { ...selection.bounds },
+    shape: selection.shape
+  };
 }
