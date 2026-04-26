@@ -4,8 +4,8 @@ import { ShaderProgram } from "./ShaderProgram";
 export type BlurRegion = {
   bounds: [number, number, number, number];
   inverseMatrix: [number, number, number, number, number, number, number, number, number];
+  localBounds: [number, number, number, number];
   radius: number;
-  size: [number, number];
 };
 
 const maxBlurRegions = 4;
@@ -15,8 +15,8 @@ export class PostProcessShaderProgram extends ShaderProgram {
   private readonly blurRegionBoundsUniformLocations: WebGLUniformLocation[];
   private readonly blurRegionCountUniformLocation: WebGLUniformLocation;
   private readonly blurRegionInverseMatrixUniformLocations: WebGLUniformLocation[];
+  private readonly blurRegionLocalBoundsUniformLocations: WebGLUniformLocation[];
   private readonly blurRegionRadiusUniformLocations: WebGLUniformLocation[];
-  private readonly blurRegionSizeUniformLocations: WebGLUniformLocation[];
   private readonly backgroundModeUniformLocation: WebGLUniformLocation;
   private readonly checkerColorAUniformLocation: WebGLUniformLocation;
   private readonly checkerColorBUniformLocation: WebGLUniformLocation;
@@ -53,8 +53,8 @@ export class PostProcessShaderProgram extends ShaderProgram {
       "u_blurRegionInverseMatrix",
       maxBlurRegions
     );
-    this.blurRegionSizeUniformLocations = this.getUniformArrayLocations(
-      "u_blurRegionSize",
+    this.blurRegionLocalBoundsUniformLocations = this.getUniformArrayLocations(
+      "u_blurRegionLocalBounds",
       maxBlurRegions
     );
 
@@ -80,8 +80,11 @@ export class PostProcessShaderProgram extends ShaderProgram {
         false,
         region?.inverseMatrix ?? [1, 0, 0, 0, 1, 0, 0, 0, 1]
       );
+      this.gl.uniform4fv(
+        this.blurRegionLocalBoundsUniformLocations[index],
+        region?.localBounds ?? [0, 0, 0, 0]
+      );
       this.gl.uniform1f(this.blurRegionRadiusUniformLocations[index], region?.radius ?? 0);
-      this.gl.uniform2fv(this.blurRegionSizeUniformLocations[index], region?.size ?? [0, 0]);
     }
   }
 

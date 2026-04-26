@@ -43,14 +43,12 @@ import {
 } from "./primitives/layerPrimitives";
 import { drawWorldLine, renderEditorOverlays } from "./overlays/renderEditorOverlays";
 import {
-  getAdjustmentBlurRegions,
-  getAdjustmentLayerBlurRegion,
   getEffectiveLayerFilters,
   getTopmostAdjustmentBlurIndex,
-  hasAdjustmentBlur,
-  toClipOnlyBlurRegions
+  hasAdjustmentBlur
 } from "./filters/layerFilters";
 import type { EffectiveLayerFilters } from "./filters/layerFilters";
+import { getAdjustmentLayerBlurRegion, getFullscreenBlurRegion } from "./blur/blurMath";
 import { getDropShadowPasses } from "./renderingHelpers";
 import { buildStrokePathGeometry } from "./strokes/strokeGeometry";
 import type { CachedStrokePathGeometry } from "./strokes/strokeGeometry";
@@ -130,6 +128,9 @@ export class Renderer {
   private readonly textGeometryTexCoordBuffer: WebGLBuffer;
   private readonly supportsUint32Indices: boolean;
   private readonly strokeGeometryCache = new WeakMap<StrokeLayer, StrokeGeometryCacheEntry>();
+  private activeRenderTarget: RenderTarget | null = null;
+  private layerBlurRenderTarget: RenderTarget | null = null;
+  private layerSourceRenderTarget: RenderTarget | null = null;
   private postProcessRenderTarget: RenderTarget | null = null;
   private sceneRenderTarget: RenderTarget | null = null;
   private layerRenderOffset = { x: 0, y: 0 };
@@ -267,7 +268,12 @@ export class Renderer {
       this.quad
     );
     this.gl.enable(this.gl.BLEND);
-    this.gl.blendFunc(this.gl.SRC_ALPHA, this.gl.ONE_MINUS_SRC_ALPHA);
+    this.gl.blendFuncSeparate(
+      this.gl.SRC_ALPHA,
+      this.gl.ONE_MINUS_SRC_ALPHA,
+      this.gl.ONE,
+      this.gl.ONE_MINUS_SRC_ALPHA
+    );
   }
 
   /**
@@ -323,6 +329,8 @@ export class Renderer {
   }
 
   private renderScene(scene: Scene, camera: Camera2D, options: RenderOptions) {
+    this.bindRenderTarget(null);
+
     if (hasAdjustmentBlur(scene.layers)) {
       this.renderArtworkWithStackPostProcess(scene, camera, options);
       this.drawEditorOverlays(scene, camera, options);
@@ -383,13 +391,11 @@ export class Renderer {
   ) {
     const renderTarget = this.ensureSceneRenderTarget();
 
-    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, renderTarget.framebuffer);
-    this.gl.viewport(0, 0, renderTarget.width, renderTarget.height);
+    this.bindRenderTarget(renderTarget);
     this.clear(options);
     this.drawArtwork(scene, camera, options);
 
-    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
-    this.gl.viewport(0, 0, this.width, this.height);
+    this.bindRenderTarget(null);
     this.drawPostProcessedTexture(renderTarget.texture, blurRegions, camera);
   }
 
@@ -397,11 +403,9 @@ export class Renderer {
     let currentTarget = this.ensureSceneRenderTarget();
     let nextTarget = this.ensurePostProcessRenderTarget();
     const effectiveFilters = getEffectiveLayerFilters(scene.layers);
-    const topmostBlurAdjustmentIndex = getTopmostAdjustmentBlurIndex(scene.layers)
-    const appliedBlurRegions: BlurRegion[] = [];
+    const topmostBlurAdjustmentIndex = getTopmostAdjustmentBlurIndex(scene.layers);
 
-    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, currentTarget.framebuffer);
-    this.gl.viewport(0, 0, currentTarget.width, currentTarget.height);
+    this.bindRenderTarget(currentTarget);
     this.clearTransparent();
     if (options.documentBackground === "white") {
       this.drawDocumentBackground(scene, camera, options);
@@ -431,14 +435,11 @@ export class Renderer {
           continue;
         }
 
-        appliedBlurRegions.push(blurRegion);
-        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, nextTarget.framebuffer);
-        this.gl.viewport(0, 0, nextTarget.width, nextTarget.height);
+        this.bindRenderTarget(nextTarget);
         this.clearTransparent();
         this.drawPostProcessedTexture(currentTarget.texture, [blurRegion], camera);
         [currentTarget, nextTarget] = [nextTarget, currentTarget];
-        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, currentTarget.framebuffer);
-        this.gl.viewport(0, 0, currentTarget.width, currentTarget.height);
+        this.bindRenderTarget(currentTarget);
         continue;
       }
 
@@ -446,28 +447,14 @@ export class Renderer {
       this.drawLayerContent(layer, camera, options.textEdit, effectiveFilters[layerIndex]);
     }
 
-    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
-    this.gl.viewport(0, 0, this.width, this.height);
+    this.bindRenderTarget(null);
     this.clear(options);
     this.drawDocumentBackground(scene, camera, options);
-        for (let layerIndex = 0; layerIndex <= topmostBlurAdjustmentIndex; layerIndex += 1) {
-      const layer = scene.layers[layerIndex];
-
-      if (!layer.visible || layer.opacity <= 0 || layer instanceof AdjustmentLayer) {
-        continue;
-      }
-
-      this.drawLayerDropShadow(layer, camera, effectiveFilters[layerIndex].filters);
-      this.drawLayerContent(layer, camera, options.textEdit, effectiveFilters[layerIndex]);
-    }
-    this.drawPostProcessedTexture(currentTarget.texture, toClipOnlyBlurRegions(appliedBlurRegions), camera, {
+    this.drawPostProcessedTexture(currentTarget.texture, [], camera, {
       blend: true,
-      clipToBlurRegions: true,
-      filter: "nearest",
-      premultipliedBlend: true
+      filter: "nearest"
     });
 
-    
     for (
       let layerIndex = topmostBlurAdjustmentIndex + 1;
       layerIndex < scene.layers.length;
@@ -503,6 +490,8 @@ export class Renderer {
     this.gl.deleteBuffer(this.textGeometryIndexBuffer);
     this.disposeRenderTarget(this.postProcessRenderTarget);
     this.disposeRenderTarget(this.sceneRenderTarget);
+    this.disposeRenderTarget(this.layerBlurRenderTarget);
+    this.disposeRenderTarget(this.layerSourceRenderTarget);
   }
 
   private drawPostProcessedTexture(
@@ -510,10 +499,15 @@ export class Renderer {
     blurRegions: BlurRegion[],
     camera: Camera2D,
     options: {
+      backgroundMode?: RenderOptions["documentBackground"];
       blend?: boolean;
       clipToBlurRegions?: boolean;
+      cssHeight?: number;
+      cssWidth?: number;
       filter?: "linear" | "nearest";
       premultipliedBlend?: boolean;
+      textureHeight?: number;
+      textureWidth?: number;
     } = {}
   ) {
     if (options.blend) {
@@ -526,19 +520,28 @@ export class Renderer {
     }
     this.postProcessShaderProgram.use();
     this.postProcessShaderProgram.setTextureUnit(0);
-    this.postProcessShaderProgram.setTextureSize(this.width, this.height);
+    this.postProcessShaderProgram.setTextureSize(
+      options.textureWidth ?? this.width,
+      options.textureHeight ?? this.height
+    );
     this.postProcessShaderProgram.setViewport(
       camera.x,
       camera.y,
       camera.zoom,
-      this.cssWidth,
-      this.cssHeight
+      options.cssWidth ?? this.cssWidth,
+      options.cssHeight ?? this.cssHeight
     );
     this.postProcessShaderProgram.setBlurRegions(blurRegions);
     this.postProcessShaderProgram.setClipToBlurRegions(Boolean(options.clipToBlurRegions));
+    this.postProcessShaderProgram.setReplacementBackground(
+      options.backgroundMode ?? "transparent",
+      [0.22, 0.23, 0.25, 1],
+      [0.31, 0.32, 0.35, 1],
+      24
+    );
     this.gl.activeTexture(this.gl.TEXTURE0);
     this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
-        if (options.filter === "nearest") {
+    if (options.filter === "nearest") {
       this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.NEAREST);
       this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.NEAREST);
     }
@@ -548,7 +551,12 @@ export class Renderer {
       this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.LINEAR);
     }
     this.gl.enable(this.gl.BLEND);
-    this.gl.blendFunc(this.gl.SRC_ALPHA, this.gl.ONE_MINUS_SRC_ALPHA);
+    this.gl.blendFuncSeparate(
+      this.gl.SRC_ALPHA,
+      this.gl.ONE_MINUS_SRC_ALPHA,
+      this.gl.ONE,
+      this.gl.ONE_MINUS_SRC_ALPHA
+    );
   }
 
   private ensureSceneRenderTarget() {
@@ -566,6 +574,32 @@ export class Renderer {
     return this.sceneRenderTarget;
   }
 
+  private ensureLayerRenderTargets(width: number, height: number) {
+    if (
+      this.layerSourceRenderTarget &&
+      this.layerBlurRenderTarget &&
+      this.layerSourceRenderTarget.width === width &&
+      this.layerSourceRenderTarget.height === height &&
+      this.layerBlurRenderTarget.width === width &&
+      this.layerBlurRenderTarget.height === height
+    ) {
+      return {
+        blur: this.layerBlurRenderTarget,
+        source: this.layerSourceRenderTarget
+      };
+    }
+
+    this.disposeRenderTarget(this.layerSourceRenderTarget);
+    this.disposeRenderTarget(this.layerBlurRenderTarget);
+    this.layerSourceRenderTarget = this.createRenderTarget(width, height);
+    this.layerBlurRenderTarget = this.createRenderTarget(width, height);
+
+    return {
+      blur: this.layerBlurRenderTarget,
+      source: this.layerSourceRenderTarget
+    };
+  }
+
   private ensurePostProcessRenderTarget() {
     if (
       this.postProcessRenderTarget &&
@@ -579,6 +613,12 @@ export class Renderer {
     this.postProcessRenderTarget = this.createRenderTarget(this.width, this.height);
 
     return this.postProcessRenderTarget;
+  }
+
+  private bindRenderTarget(renderTarget: RenderTarget | null) {
+    this.activeRenderTarget = renderTarget;
+    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, renderTarget?.framebuffer ?? null);
+    this.gl.viewport(0, 0, renderTarget?.width ?? this.width, renderTarget?.height ?? this.height);
   }
 
   private createRenderTarget(width: number, height: number): RenderTarget {
@@ -725,6 +765,59 @@ export class Renderer {
   }
 
   private drawLayerContent(
+    layer: Layer,
+    camera: Camera2D,
+    textEdit: RenderOptions["textEdit"],
+    filters: EffectiveLayerFilters
+  ) {
+    if (filters.filters.blur <= 0.5) {
+      this.drawLayerContentDirect(layer, camera, textEdit, filters);
+      return;
+    }
+
+    const blurPass = this.createIsolatedLayerBlurPass(layer, filters.filters.blur);
+    const blurRegion = getFullscreenBlurRegion(
+      blurPass.camera,
+      blurPass.cssWidth,
+      blurPass.cssHeight,
+      blurPass.textureWidth,
+      filters.filters.blur
+    );
+
+    if (!blurRegion) {
+      this.drawLayerContentDirect(layer, camera, textEdit, filters);
+      return;
+    }
+
+    const renderTargets = this.ensureLayerRenderTargets(blurPass.textureWidth, blurPass.textureHeight);
+    const previousTarget = this.activeRenderTarget;
+
+    this.bindRenderTarget(renderTargets.source);
+    this.clearTransparent();
+    this.drawLayerContentDirect(layer, blurPass.camera, textEdit, {
+      adjustments: [],
+      filters: {
+        ...filters.filters,
+        blur: 0
+      }
+    });
+    this.bindRenderTarget(renderTargets.blur);
+    this.clearTransparent();
+    this.drawPostProcessedTexture(renderTargets.source.texture, [blurRegion], blurPass.camera, {
+      cssHeight: blurPass.cssHeight,
+      cssWidth: blurPass.cssWidth,
+      textureHeight: blurPass.textureHeight,
+      textureWidth: blurPass.textureWidth
+    });
+    this.bindRenderTarget(previousTarget);
+    this.drawTextureQuad(renderTargets.blur.texture, blurPass.bounds, camera, {
+      adjustments: filters.adjustments,
+      textureHeight: blurPass.textureHeight,
+      textureWidth: blurPass.textureWidth
+    });
+  }
+
+  private drawLayerContentDirect(
     layer: Layer,
     camera: Camera2D,
     textEdit: RenderOptions["textEdit"],
@@ -961,6 +1054,105 @@ export class Renderer {
       localRectangleTexCoordBuffer: this.localRectangleTexCoordBuffer,
       getLayerModelMatrix: this.getLayerModelMatrix.bind(this)
     };
+  }
+
+  private drawTextureQuad(
+    texture: WebGLTexture,
+    bounds: [number, number, number, number],
+    camera: Camera2D,
+    options: {
+      adjustments?: EffectiveLayerFilters["adjustments"];
+      opacity?: number;
+      textureHeight: number;
+      textureWidth: number;
+    }
+  ) {
+    this.texturedShaderProgram.use();
+    this.texturedShaderProgram.setProjection(camera.projectionMatrix);
+    this.texturedShaderProgram.setModel(
+      getModelMatrix({
+        height: bounds[3],
+        width: bounds[2],
+        x: bounds[0],
+        y: bounds[1]
+      })
+    );
+    this.texturedShaderProgram.setTextureUnit(0);
+    this.texturedShaderProgram.setMaskEnabled(false);
+    this.texturedShaderProgram.setMaskTextureUnit(1);
+    this.texturedShaderProgram.setOpacity(options.opacity ?? 1);
+    this.texturedShaderProgram.setFilters(defaultLayerFilters);
+    this.texturedShaderProgram.setAdjustmentFilters(options.adjustments ?? []);
+    this.texturedShaderProgram.setTextureSize(options.textureWidth, options.textureHeight);
+    this.texturedShaderProgram.setTintEnabled(false);
+    this.gl.activeTexture(this.gl.TEXTURE0);
+    this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+    this.quad.drawTextured(this.texturedShaderProgram);
+    this.solidColorShaderProgram.use();
+    this.solidColorShaderProgram.setProjection(camera.projectionMatrix);
+    this.solidColorShaderProgram.setFilters(defaultLayerFilters);
+    this.solidColorShaderProgram.setAdjustmentFilters([]);
+  }
+
+  private createIsolatedLayerBlurPass(layer: Layer, blur: number) {
+    const deviceScale = this.width / Math.max(1, this.cssWidth);
+    const baseBounds = this.getLayerWorldBounds(layer);
+    const padding = Math.max(2, blur * 2);
+    const bounds: [number, number, number, number] = [
+      baseBounds[0] - padding,
+      baseBounds[1] - padding,
+      baseBounds[2] + padding * 2,
+      baseBounds[3] + padding * 2
+    ];
+    const cssWidth = Math.max(1, bounds[2]);
+    const cssHeight = Math.max(1, bounds[3]);
+    const textureWidth = Math.max(1, Math.ceil(cssWidth * deviceScale));
+    const textureHeight = Math.max(1, Math.ceil(cssHeight * deviceScale));
+    const blurCamera = new Camera2D();
+
+    blurCamera.x = bounds[0] + bounds[2] / 2;
+    blurCamera.y = bounds[1] + bounds[3] / 2;
+    blurCamera.zoom = 1;
+    blurCamera.resize(cssWidth, cssHeight);
+
+    return {
+      bounds,
+      camera: blurCamera,
+      cssHeight,
+      cssWidth,
+      textureHeight,
+      textureWidth
+    };
+  }
+
+  private getLayerWorldBounds(layer: Layer): [number, number, number, number] {
+    const positionedLayer =
+      this.layerRenderOffset.x === 0 && this.layerRenderOffset.y === 0
+        ? layer
+        : {
+            ...layer,
+            x: layer.x + this.layerRenderOffset.x,
+            y: layer.y + this.layerRenderOffset.y
+          };
+    const corners = getLayerCorners(positionedLayer as Layer);
+    const xs = [
+      corners.topLeft.x,
+      corners.topRight.x,
+      corners.bottomRight.x,
+      corners.bottomLeft.x
+    ];
+    const ys = [
+      corners.topLeft.y,
+      corners.topRight.y,
+      corners.bottomRight.y,
+      corners.bottomLeft.y
+    ];
+    const minX = Math.min(...xs);
+    const minY = Math.min(...ys);
+    const maxX = Math.max(...xs);
+    const maxY = Math.max(...ys);
+
+    return [minX, minY, maxX - minX, maxY - minY];
   }
 
   /**
