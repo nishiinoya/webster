@@ -452,8 +452,7 @@ export class Renderer {
     this.drawDocumentBackground(scene, camera, options);
     this.drawPostProcessedTexture(currentTarget.texture, [], camera, {
       blend: true,
-      filter: "nearest",
-      premultipliedBlend: true
+      filter: "nearest"
     });
 
     for (
