@@ -16,6 +16,7 @@ import type {
 import type { MaskBrushOptions } from "../tools/mask-brush/MaskBrushTypes";
 import type { ShapeKind } from "../layers/ShapeLayer";
 import type { StrokeStyle } from "../layers/StrokeLayer";
+import type { SelectionMode } from "../selection/SelectionManager";
 import {
   canPickProjectFileHandle,
   pickProjectFileWithHandle
@@ -104,17 +105,15 @@ const editorTools: ToolDefinition[] = [
     value: "Ellipse Select"
   },
   {
-    description: "Freehand selection placeholder.",
+    description: "Draw a freehand selection.",
     icon: "L",
     label: "Lasso Select",
-    status: "later",
     value: "Lasso Select"
   },
   {
-    description: "Color-based selection placeholder.",
+    description: "Pick similar image colors.",
     icon: "W",
     label: "Magic Select",
-    status: "later",
     value: "Magic Select"
   }
 ];
@@ -161,6 +160,8 @@ export function EditorPage() {
   const [selectedTool, setSelectedTool] = useState("Move");
   const [showCanvasBorder, setShowCanvasBorder] = useState(true);
   const [selectedShape, setSelectedShape] = useState<ShapeKind>("rectangle");
+  const [selectedSelectionMode, setSelectedSelectionMode] = useState<SelectionMode>("replace");
+  const [magicSelectionTolerance, setMagicSelectionTolerance] = useState(12);
   const [selectedStrokeStyle, setSelectedStrokeStyle] = useState<StrokeStyle>("pencil");
   const [selectedStrokeColor, setSelectedStrokeColor] = useState<[number, number, number, number]>(
     [0.07, 0.08, 0.09, 0.82]
@@ -821,6 +822,7 @@ export function EditorPage() {
         onSaveTemplate={saveCurrentProjectAsTemplate}
         onAddAdjustmentLayer={() => runLayerCommand({ type: "add-adjustment" })}
         onSelectionCommand={(command) => setSelectionCommandRequest({ command, id: Date.now() })}
+        onSelectionModeChange={setSelectedSelectionMode}
         onSelectTool={setSelectedTool}
         onShowCanvasBorderChange={setShowCanvasBorder}
         onUndo={() => setHistoryCommandRequest({ command: "undo", id: Date.now() })}
@@ -846,6 +848,7 @@ export function EditorPage() {
         onStrokeWidthChange={(width) => setSelectedStrokeWidth(Math.max(1, width || 1))}
         saveStatus={saveStatus}
         selectedLayer={selectedLayer}
+        selectedSelectionMode={selectedSelectionMode}
         selectedStrokeColor={selectedStrokeColor}
         selectedStrokeMode={selectedStrokeMode}
         selectedStrokeStyle={selectedStrokeStyle}
@@ -853,6 +856,8 @@ export function EditorPage() {
         selectedStrokeTargetMode={selectedStrokeTargetMode}
         selectedStrokeWidth={selectedStrokeWidth}
         selectedTool={selectedTool}
+        magicSelectionTolerance={magicSelectionTolerance}
+        onMagicSelectionToleranceChange={setMagicSelectionTolerance}
         showCanvasBorder={showCanvasBorder}
         strokeLayers={strokeLayers}
         redoLabel={activeHistoryState.redoLabel}
@@ -906,6 +911,7 @@ export function EditorPage() {
               imageLayerCommandRequest={imageLayerCommandRequest}
               layerCommandRequest={layerCommandRequest}
               maskBrushOptions={maskBrushOptions}
+              magicSelectionTolerance={magicSelectionTolerance}
               imageExportRequest={imageExportRequest}
               onHistoryChange={setHistoryState}
               onLayersChange={setLayers}
@@ -983,6 +989,7 @@ export function EditorPage() {
               selectLayerRequest={selectLayerRequest}
               selectionCommandRequest={selectionCommandRequest}
               selectedShape={selectedShape}
+              selectedSelectionMode={selectedSelectionMode}
               selectedStrokeColor={selectedStrokeColor}
               selectedStrokeMode={selectedStrokeMode}
               selectedStrokeStyle={selectedStrokeStyle}

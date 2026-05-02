@@ -4,6 +4,7 @@ import { ImageLayer } from "../layers/ImageLayer";
 import { Layer } from "../layers/Layer";
 import { LayerMask } from "../masks/LayerMask";
 import type { SelectionManagerState } from "../selection/SelectionManager";
+import type { SelectionMask, SelectionPoint } from "../selection/SelectionManager";
 import { cloneSelectionManagerState } from "../selection/SelectionManager";
 import { ShapeLayer } from "../layers/ShapeLayer";
 import { StrokeLayer } from "../layers/StrokeLayer";
@@ -210,7 +211,15 @@ function cloneLayerForSnapshot(layer: Layer) {
         selectionClip: path.selectionClip
           ? {
               ...path.selectionClip,
-              bounds: { ...path.selectionClip.bounds }
+              bounds: { ...path.selectionClip.bounds },
+              mask: path.selectionClip.mask
+                ? {
+                    data: new Uint8Array(path.selectionClip.mask.data),
+                    height: path.selectionClip.mask.height,
+                    width: path.selectionClip.mask.width
+                  }
+                : undefined,
+              points: path.selectionClip.points?.map((point) => ({ ...point }))
             }
           : null
       })),
@@ -443,7 +452,10 @@ function areSelectionEntriesEqual(
     left.bounds.x === right.bounds.x &&
     left.bounds.y === right.bounds.y &&
     left.bounds.width === right.bounds.width &&
-    left.bounds.height === right.bounds.height
+    left.bounds.height === right.bounds.height &&
+    left.featherRadius === right.featherRadius &&
+    areSelectionPointsEqual(left.points, right.points) &&
+    areSelectionMasksEqual(left.mask, right.mask)
   );
 }
 
@@ -464,8 +476,51 @@ function areDraftSelectionEntriesEqual(
     left.bounds.x === right.bounds.x &&
     left.bounds.y === right.bounds.y &&
     left.bounds.width === right.bounds.width &&
-    left.bounds.height === right.bounds.height
+    left.bounds.height === right.bounds.height &&
+    areSelectionPointsEqual(left.points, right.points)
   );
+}
+
+function areSelectionPointsEqual(
+  left: SelectionPoint[] | undefined,
+  right: SelectionPoint[] | undefined
+) {
+  if (left === right) {
+    return true;
+  }
+
+  if (!left || !right || left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((point, index) => point.x === right[index].x && point.y === right[index].y);
+}
+
+function areSelectionMasksEqual(
+  left: SelectionMask | undefined,
+  right: SelectionMask | undefined
+) {
+  if (left === right) {
+    return true;
+  }
+
+  if (
+    !left ||
+    !right ||
+    left.width !== right.width ||
+    left.height !== right.height ||
+    left.data.length !== right.data.length
+  ) {
+    return false;
+  }
+
+  for (let index = 0; index < left.data.length; index += 1) {
+    if (left.data[index] !== right.data[index]) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function arePathSelectionClipsEqual(
@@ -487,6 +542,8 @@ function arePathSelectionClipsEqual(
     left.bounds.x === right.bounds.x &&
     left.bounds.y === right.bounds.y &&
     left.bounds.width === right.bounds.width &&
-    left.bounds.height === right.bounds.height
+    left.bounds.height === right.bounds.height &&
+    areSelectionPointsEqual(left.points, right.points) &&
+    areSelectionMasksEqual(left.mask, right.mask)
   );
 }

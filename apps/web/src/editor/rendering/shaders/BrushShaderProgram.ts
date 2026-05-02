@@ -3,6 +3,7 @@ import { ShaderProgram } from "./ShaderProgram";
 import type { LayerFilterAdjustment, LayerFilterSettings } from "../../layers/Layer";
 
 const maxAdjustmentFilters = 4;
+const maxSelectionClipPoints = 128;
 
 export class BrushShaderProgram extends ShaderProgram {
   readonly texCoordAttributeLocation: number;
@@ -33,6 +34,8 @@ export class BrushShaderProgram extends ShaderProgram {
   private readonly selectionShapeUniformLocation: WebGLUniformLocation;
   private readonly selectionInvertedUniformLocation: WebGLUniformLocation;
   private readonly selectionBoundsUniformLocation: WebGLUniformLocation;
+  private readonly selectionPointCountUniformLocation: WebGLUniformLocation;
+  private readonly selectionPointUniformLocations: WebGLUniformLocation[];
 
   constructor(gl: WebGLRenderingContext, vertexShaderSource: string, fragmentShaderSource: string) {
     super(gl, vertexShaderSource, fragmentShaderSource);
@@ -76,6 +79,11 @@ export class BrushShaderProgram extends ShaderProgram {
     this.selectionShapeUniformLocation = this.getUniformLocation("u_selectionShape");
     this.selectionInvertedUniformLocation = this.getUniformLocation("u_selectionInverted");
     this.selectionBoundsUniformLocation = this.getUniformLocation("u_selectionBounds");
+    this.selectionPointCountUniformLocation = this.getUniformLocation("u_selectionPointCount");
+    this.selectionPointUniformLocations = this.getUniformArrayLocations(
+      "u_selectionPoints",
+      maxSelectionClipPoints
+    );
 
     if (this.texCoordAttributeLocation < 0) {
       throw new Error("WebGL texture coordinate attribute is unavailable.");
@@ -165,7 +173,8 @@ export class BrushShaderProgram extends ShaderProgram {
     clip: {
       bounds: { height: number; width: number; x: number; y: number };
       inverted: boolean;
-      shape: "ellipse" | "rectangle";
+      points?: Array<{ x: number; y: number }>;
+      shape: "ellipse" | "lasso" | "rectangle";
     } | null
   ) {
     this.gl.uniform1i(this.selectionEnabledUniformLocation, clip ? 1 : 0);
@@ -173,12 +182,13 @@ export class BrushShaderProgram extends ShaderProgram {
     if (!clip) {
       this.gl.uniform1i(this.selectionInvertedUniformLocation, 0);
       this.gl.uniform1i(this.selectionShapeUniformLocation, 0);
+      this.gl.uniform1i(this.selectionPointCountUniformLocation, 0);
       this.gl.uniform4f(this.selectionBoundsUniformLocation, 0, 0, 0, 0);
       return;
     }
 
     this.gl.uniform1i(this.selectionInvertedUniformLocation, clip.inverted ? 1 : 0);
-    this.gl.uniform1i(this.selectionShapeUniformLocation, clip.shape === "ellipse" ? 1 : 0);
+    this.gl.uniform1i(this.selectionShapeUniformLocation, getSelectionShapeUniform(clip.shape));
     this.gl.uniform4f(
       this.selectionBoundsUniformLocation,
       clip.bounds.x,
@@ -186,6 +196,7 @@ export class BrushShaderProgram extends ShaderProgram {
       clip.bounds.width,
       clip.bounds.height
     );
+    this.setSelectionClipPoints(clip.shape === "lasso" ? clip.points ?? [] : []);
   }
 
   private getUniformArrayLocations(name: string, count: number) {
@@ -193,4 +204,46 @@ export class BrushShaderProgram extends ShaderProgram {
       this.getUniformLocation(`${name}[${index}]`)
     );
   }
+
+  private setSelectionClipPoints(points: Array<{ x: number; y: number }>) {
+    const uniformPoints = limitSelectionClipPoints(points, maxSelectionClipPoints);
+
+    this.gl.uniform1i(this.selectionPointCountUniformLocation, uniformPoints.length);
+
+    for (let index = 0; index < uniformPoints.length; index += 1) {
+      const point = uniformPoints[index];
+
+      this.gl.uniform2f(this.selectionPointUniformLocations[index], point.x, point.y);
+    }
+  }
+}
+
+function getSelectionShapeUniform(shape: "ellipse" | "lasso" | "rectangle") {
+  if (shape === "ellipse") {
+    return 1;
+  }
+
+  if (shape === "lasso") {
+    return 2;
+  }
+
+  return 0;
+}
+
+function limitSelectionClipPoints(
+  points: Array<{ x: number; y: number }>,
+  maxPointCount: number
+) {
+  if (points.length <= maxPointCount) {
+    return points;
+  }
+
+  const result: Array<{ x: number; y: number }> = [];
+  const stride = points.length / maxPointCount;
+
+  for (let index = 0; index < maxPointCount; index += 1) {
+    result.push(points[Math.min(points.length - 1, Math.floor(index * stride))]);
+  }
+
+  return result;
 }

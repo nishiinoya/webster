@@ -5,6 +5,7 @@ import { EditorApp } from "../../app/EditorApp";
 import type { ShapeKind } from "../../layers/ShapeLayer";
 import type { StrokeStyle } from "../../layers/StrokeLayer";
 import type { MaskBrushOptions } from "../../tools/mask-brush/MaskBrushTypes";
+import type { SelectionMode } from "../../selection/SelectionManager";
 
 type UseEditorAppOptions = {
   canvasRef: MutableRefObject<HTMLCanvasElement | null>;
@@ -16,12 +17,14 @@ type UseEditorAppOptions = {
   selectedTool: string;
   showCanvasBorder: boolean;
   selectedShape: ShapeKind;
+  selectedSelectionMode: SelectionMode;
   selectedStrokeColor: [number, number, number, number];
   selectedStrokeMode: "draw" | "erase";
   selectedStrokeStyle: StrokeStyle;
   selectedStrokeTargetLayerId: string | null;
   selectedStrokeTargetMode: "layer" | "new" | "selected";
   selectedStrokeWidth: number;
+  magicSelectionTolerance: number;
 };
 
 export function useEditorApp({
@@ -31,7 +34,9 @@ export function useEditorApp({
   onLayersChange,
   onStrokeLayerCreated,
   onZoomChange,
+  magicSelectionTolerance,
   selectedShape,
+  selectedSelectionMode,
   showCanvasBorder,
   selectedStrokeColor,
   selectedStrokeMode,
@@ -45,6 +50,7 @@ export function useEditorApp({
   const maskBrushOptionsRef = useRef(maskBrushOptions);
   const onStrokeLayerCreatedRef = useRef(onStrokeLayerCreated);
   const selectedShapeRef = useRef(selectedShape);
+  const selectedSelectionModeRef = useRef(selectedSelectionMode);
   const selectedStrokeColorRef = useRef(selectedStrokeColor);
   const selectedStrokeModeRef = useRef(selectedStrokeMode);
   const selectedStrokeStyleRef = useRef(selectedStrokeStyle);
@@ -52,6 +58,7 @@ export function useEditorApp({
   const selectedStrokeTargetModeRef = useRef(selectedStrokeTargetMode);
   const selectedStrokeWidthRef = useRef(selectedStrokeWidth);
   const selectedToolRef = useRef(selectedTool);
+  const magicSelectionToleranceRef = useRef(magicSelectionTolerance);
   const [editorReadyId, setEditorReadyId] = useState(0);
   const [webglError, setWebglError] = useState<string | null>(null);
 
@@ -72,6 +79,16 @@ export function useEditorApp({
     selectedShapeRef.current = selectedShape;
     editorAppRef.current?.setShapeToolKind(selectedShape);
   }, [selectedShape]);
+
+  useEffect(() => {
+    selectedSelectionModeRef.current = selectedSelectionMode;
+    editorAppRef.current?.setSelectionMode(selectedSelectionMode);
+  }, [selectedSelectionMode]);
+
+  useEffect(() => {
+    magicSelectionToleranceRef.current = magicSelectionTolerance;
+    editorAppRef.current?.setMagicSelectionTolerance(magicSelectionTolerance);
+  }, [magicSelectionTolerance]);
 
   useEffect(() => {
     selectedStrokeColorRef.current = selectedStrokeColor;
@@ -129,6 +146,8 @@ export function useEditorApp({
           editorApp.setSelectedTool(selectedToolRef.current);
           editorApp.setShowCanvasBorder(showCanvasBorder);
           editorApp.setShapeToolKind(selectedShapeRef.current);
+          editorApp.setSelectionMode(selectedSelectionModeRef.current);
+          editorApp.setMagicSelectionTolerance(magicSelectionToleranceRef.current);
           editorApp.setDrawingToolOptions({
             color: selectedStrokeColorRef.current,
             mode: selectedStrokeModeRef.current,

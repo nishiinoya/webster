@@ -91,9 +91,11 @@ export function useCanvasPointerInput({
 
         if (isCanvasInputTool(selectedTool)) {
           const didHandleInput = editorAppRef.current?.pointerDown({
+            altKey: event.altKey,
             button: event.button,
             clientX: event.clientX,
-            clientY: event.clientY
+            clientY: event.clientY,
+            shiftKey: event.shiftKey
           });
 
           if (didHandleInput && editorAppRef.current) {
@@ -121,9 +123,11 @@ export function useCanvasPointerInput({
         }
 
         const didHandleInput = editorAppRef.current?.pointerMove({
+          altKey: event.altKey,
           button: event.button,
           clientX: event.clientX,
-          clientY: event.clientY
+          clientY: event.clientY,
+          shiftKey: event.shiftKey
         });
 
         if (didHandleInput && editorAppRef.current) {
@@ -162,6 +166,8 @@ function isCanvasInputTool(tool: string) {
     tool === "Shape" ||
     tool === "Marquee" ||
     tool === "Rectangle Select" ||
-    tool === "Ellipse Select"
+    tool === "Ellipse Select" ||
+    tool === "Lasso Select" ||
+    tool === "Magic Select"
   );
 }

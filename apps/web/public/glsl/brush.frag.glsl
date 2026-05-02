@@ -13,6 +13,8 @@ uniform bool u_selectionEnabled;
 uniform int u_selectionShape;
 uniform bool u_selectionInverted;
 uniform vec4 u_selectionBounds;
+uniform int u_selectionPointCount;
+uniform vec2 u_selectionPoints[128];
 uniform float u_filterBrightness;
 uniform float u_filterBlur;
 uniform float u_filterContrast;
@@ -92,6 +94,42 @@ float brushTexture(float along, float across) {
   return 1.0;
 }
 
+bool isInsideSelectionLasso(vec2 layerCoord) {
+  bool inside = false;
+  vec2 previous = u_selectionPoints[0];
+
+  for (int index = 0; index < 128; index += 1) {
+    if (index >= u_selectionPointCount) {
+      break;
+    }
+
+    previous = u_selectionPoints[index];
+  }
+
+  for (int index = 0; index < 128; index += 1) {
+    if (index >= u_selectionPointCount) {
+      break;
+    }
+
+    vec2 current = u_selectionPoints[index];
+    float deltaY = previous.y - current.y;
+    bool intersects =
+      (current.y > layerCoord.y) != (previous.y > layerCoord.y) &&
+      layerCoord.x <
+        ((previous.x - current.x) * (layerCoord.y - current.y)) /
+          (abs(deltaY) > 0.000001 ? deltaY : 0.000001) +
+          current.x;
+
+    if (intersects) {
+      inside = !inside;
+    }
+
+    previous = current;
+  }
+
+  return inside;
+}
+
 float selectionClipMask(vec2 layerCoord) {
   if (!u_selectionEnabled) {
     return 1.0;
@@ -112,6 +150,10 @@ float selectionClipMask(vec2 layerCoord) {
     vec2 normalized = (layerCoord - center) / radius;
 
     inside = dot(normalized, normalized) <= 1.0;
+  }
+
+  if (u_selectionShape == 2) {
+    inside = insideRect && u_selectionPointCount >= 3 && isInsideSelectionLasso(layerCoord);
   }
 
   if (u_selectionInverted) {

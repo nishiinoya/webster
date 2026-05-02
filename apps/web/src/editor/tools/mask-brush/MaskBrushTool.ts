@@ -14,6 +14,7 @@ import { clamp, getBrushRadiiInMaskSpace, paintMaskEllipse } from "./MaskBrushRa
 import type { MaskBrushPixelPredicate } from "./MaskBrushRaster";
 import type { MaskBrushOptions } from "./MaskBrushTypes";
 import type { ToolPointerEvent } from "../move/MoveTool";
+import { containsSelectionPoint } from "../../selection/SelectionManager";
 export type { MaskBrushMode, MaskBrushOptions } from "./MaskBrushTypes";
 
 type StrokeSnapshot = {
@@ -30,6 +31,7 @@ export class MaskBrushTool {
   };
   private lastStrokeSnapshot: StrokeSnapshot | null = null;
   private strokeSnapshot: StrokeSnapshot | null = null;
+  private strokeSelectionPredicate: MaskBrushPixelPredicate | undefined;
   private isPainting = false;
   private lastPaintPoint: MaskPaintPoint | null = null;
 
@@ -71,6 +73,7 @@ export class MaskBrushTool {
       layerId: layer.id,
       mask
     };
+    this.strokeSelectionPredicate = this.createSelectionPixelPredicate(layer, mask);
 
     this.paintAtEvent(event);
     return true;
@@ -100,6 +103,7 @@ export class MaskBrushTool {
     this.isPainting = false;
     this.lastPaintPoint = null;
     this.strokeSnapshot = null;
+    this.strokeSelectionPredicate = undefined;
   }
 
   undoLastStroke() {
@@ -145,7 +149,7 @@ export class MaskBrushTool {
     }
 
     const brushRadii = this.getBrushRadiiInMaskSpace(layer, layer.mask);
-    const step = Math.max(0.5, Math.min(brushRadii.x, brushRadii.y) / 6);
+    const step = Math.max(1, Math.min(brushRadii.x, brushRadii.y) / 4);
     let dirtyRect: MaskDirtyRect | null = null;
 
     if (this.lastPaintPoint) {
@@ -158,8 +162,8 @@ export class MaskBrushTool {
         dirtyRect = unionDirtyRects(
           dirtyRect,
           this.paintMaskCircle(layer, layer.mask, {
-          x: this.lastPaintPoint.x + (point.x - this.lastPaintPoint.x) * amount,
-          y: this.lastPaintPoint.y + (point.y - this.lastPaintPoint.y) * amount
+            x: this.lastPaintPoint.x + (point.x - this.lastPaintPoint.x) * amount,
+            y: this.lastPaintPoint.y + (point.y - this.lastPaintPoint.y) * amount
           })
         );
       }
@@ -276,7 +280,8 @@ export class MaskBrushTool {
 
   private paintMaskCircle(layer: Layer, mask: LayerMask, point: MaskPaintPoint) {
     const radii = this.getBrushRadiiInMaskSpace(layer, mask);
-    const selectionPredicate = this.createSelectionPixelPredicate(layer, mask);
+    const selectionPredicate =
+      this.strokeSelectionPredicate ?? this.createSelectionPixelPredicate(layer, mask);
 
     return paintMaskEllipse(mask, point, radii, this.brushOptions, selectionPredicate);
   }
@@ -292,14 +297,16 @@ export class MaskBrushTool {
     }
 
     if (layer instanceof TextLayer) {
-      return createTextSelectionPixelPredicate(layer, mask, selection);
+      return createCachedMaskPredicate(
+        mask,
+        createTextSelectionPixelPredicate(layer, mask, selection)
+      );
     }
 
-    if (layer.rotation === 0) {
-      return createUnrotatedSelectionPixelPredicate(layer, mask, selection);
-    }
-
-    return createRotatedSelectionPixelPredicate(layer, mask, selection);
+    return createCachedMaskPredicate(
+      mask,
+      createRotatedSelectionPixelPredicate(layer, mask, selection)
+    );
   }
 }
 
@@ -329,51 +336,7 @@ function createTextSelectionPixelPredicate(
       localY / Math.max(1e-6, layer.height)
     );
 
-    return containsSelectionWorldPoint(selection, worldPoint.x, worldPoint.y);
-  };
-}
-
-function createUnrotatedSelectionPixelPredicate(
-  layer: Layer,
-  mask: LayerMask,
-  selection: MaskSelection
-): MaskBrushPixelPredicate {
-  const layerWidth = layer.width * layer.scaleX;
-  const layerHeight = layer.height * layer.scaleY;
-  const selectionMinX =
-    ((selection.bounds.x - layer.x) / Math.max(1e-6, layerWidth)) * mask.width;
-  const selectionMaxX =
-    ((selection.bounds.x + selection.bounds.width - layer.x) / Math.max(1e-6, layerWidth)) *
-    mask.width;
-  const selectionTopY =
-    (1 - (selection.bounds.y + selection.bounds.height - layer.y) / Math.max(1e-6, layerHeight)) *
-    mask.height;
-  const selectionBottomY =
-    (1 - (selection.bounds.y - layer.y) / Math.max(1e-6, layerHeight)) * mask.height;
-  const minX = Math.min(selectionMinX, selectionMaxX);
-  const maxX = Math.max(selectionMinX, selectionMaxX);
-  const minY = Math.min(selectionTopY, selectionBottomY);
-  const maxY = Math.max(selectionTopY, selectionBottomY);
-  const centerX = (minX + maxX) / 2;
-  const centerY = (minY + maxY) / 2;
-  const radiusX = Math.max(1e-6, Math.abs(maxX - minX) / 2);
-  const radiusY = Math.max(1e-6, Math.abs(maxY - minY) / 2);
-
-  return (x, y) => {
-    const pixelX = x + 0.5;
-    const pixelY = y + 0.5;
-    const insideBounds =
-      pixelX >= minX && pixelX <= maxX && pixelY >= minY && pixelY <= maxY;
-    let isInside = insideBounds;
-
-    if (insideBounds && selection.shape === "ellipse") {
-      const normalizedX = (pixelX - centerX) / radiusX;
-      const normalizedY = (pixelY - centerY) / radiusY;
-
-      isInside = normalizedX * normalizedX + normalizedY * normalizedY <= 1;
-    }
-
-    return selection.inverted ? !isInside : isInside;
+    return containsSelectionPoint(selection, worldPoint.x, worldPoint.y);
   };
 }
 
@@ -396,31 +359,51 @@ function createRotatedSelectionPixelPredicate(
     const worldX = baseWorldX + x * matrixXFromMaskX + y * matrixXFromMaskY;
     const worldY = baseWorldY + x * matrixYFromMaskX + y * matrixYFromMaskY;
 
-    return containsSelectionWorldPoint(selection, worldX, worldY);
+    return containsSelectionPoint(selection, worldX, worldY);
   };
 }
 
-function containsSelectionWorldPoint(selection: MaskSelection, x: number, y: number) {
-  const bounds = selection.bounds;
-  const insideBounds =
-    x >= bounds.x &&
-    x <= bounds.x + bounds.width &&
-    y >= bounds.y &&
-    y <= bounds.y + bounds.height;
-  let isInside = insideBounds;
+function createCachedMaskPredicate(
+  mask: LayerMask,
+  predicate: MaskBrushPixelPredicate
+): MaskBrushPixelPredicate {
+  const tileSize = 64;
+  const tiles = new Map<number, { data: Uint8Array; width: number }>();
+  const tilesPerRow = Math.ceil(mask.width / tileSize);
 
-  if (insideBounds && selection.shape === "ellipse") {
-    const radiusX = bounds.width / 2;
-    const radiusY = bounds.height / 2;
-    const centerX = bounds.x + radiusX;
-    const centerY = bounds.y + radiusY;
-    const normalizedX = radiusX > 0 ? (x - centerX) / radiusX : 0;
-    const normalizedY = radiusY > 0 ? (y - centerY) / radiusY : 0;
+  return (x, y) => {
+    const tileX = Math.floor(x / tileSize);
+    const tileY = Math.floor(y / tileSize);
+    const tileKey = tileY * tilesPerRow + tileX;
+    const tileLeft = tileX * tileSize;
+    const tileTop = tileY * tileSize;
+    const tileWidth = Math.min(tileSize, mask.width - tileLeft);
+    const tileHeight = Math.min(tileSize, mask.height - tileTop);
+    const localX = x - tileLeft;
+    const localY = y - tileTop;
+    let tile = tiles.get(tileKey);
 
-    isInside = normalizedX * normalizedX + normalizedY * normalizedY <= 1;
-  }
+    if (!tile) {
+      tile = {
+        data: new Uint8Array(tileWidth * tileHeight),
+        width: tileWidth
+      };
+      tiles.set(tileKey, tile);
+    }
 
-  return selection.inverted ? !isInside : isInside;
+    const index = localY * tile.width + localX;
+    const cached = tile.data[index];
+
+    if (cached !== 0) {
+      return cached === 2;
+    }
+
+    const result = predicate(x, y);
+
+    tile.data[index] = result ? 2 : 1;
+
+    return result;
+  };
 }
 
 function isInsideUnitRectWithMargin(point: Point, margin: Point) {

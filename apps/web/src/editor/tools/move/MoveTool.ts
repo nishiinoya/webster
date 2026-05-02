@@ -14,9 +14,11 @@ import { Layer } from "../../layers/Layer";
 import { TextLayer } from "../../layers/TextLayer";
 
 export type ToolPointerEvent = {
+  altKey?: boolean;
   button: number;
   clientX: number;
   clientY: number;
+  shiftKey?: boolean;
 };
 
 export type ToolCursor =

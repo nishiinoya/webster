@@ -5,6 +5,7 @@ import type {
   SelectionCommand
 } from "../EditorApp";
 import { Scene } from "../../scene/Scene";
+import type { Selection } from "../../selection/SelectionManager";
 
 /**
  * Applies a layer command to the scene and returns the command result.
@@ -78,6 +79,35 @@ export async function applyImageLayerCommandToScene(
  * Applies a selection command and returns whether it changed selection state.
  */
 export function applySelectionCommandToScene(scene: Scene, command: SelectionCommand) {
+  if (typeof command !== "string") {
+    if (command.type === "feather") {
+      return scene.selection.feather(command.radius);
+    }
+
+    if (command.type === "grow") {
+      return scene.selection.grow(command.amount);
+    }
+
+    if (command.type === "shrink") {
+      return scene.selection.grow(-command.amount);
+    }
+
+    if (command.type === "save") {
+      return saveSelection(command.name, scene.selection.current);
+    }
+
+    if (command.type === "load") {
+      const selection = loadSelection(command.name);
+
+      if (!selection) {
+        return false;
+      }
+
+      scene.selection.restoreSelection(selection, command.mode ?? "replace");
+      return true;
+    }
+  }
+
   if (command === "clear") {
     scene.selection.clear();
     return true;
@@ -94,4 +124,98 @@ export function applySelectionCommandToScene(scene: Scene, command: SelectionCom
   }
 
   return false;
+}
+
+const savedSelectionsStorageKey = "webster.savedSelections";
+
+type StoredSelection = Omit<Selection, "mask" | "points"> & {
+  mask?: {
+    data: number[];
+    height: number;
+    width: number;
+  };
+  points?: Array<{ x: number; y: number }>;
+};
+
+function saveSelection(name: string, selection: Selection | null) {
+  if (!selection) {
+    return false;
+  }
+
+  const trimmedName = name.trim();
+
+  if (!trimmedName) {
+    return false;
+  }
+
+  const selections = readSavedSelections();
+
+  selections[trimmedName] = serializeSelection(selection);
+  window.localStorage.setItem(savedSelectionsStorageKey, JSON.stringify(selections));
+
+  return true;
+}
+
+function loadSelection(name: string) {
+  const storedSelection = readSavedSelections()[name.trim()];
+
+  return storedSelection ? deserializeSelection(storedSelection) : null;
+}
+
+function readSavedSelections() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(savedSelectionsStorageKey) ?? "{}");
+
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, StoredSelection>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function serializeSelection(selection: Selection): StoredSelection {
+  return {
+    bounds: { ...selection.bounds },
+    featherRadius: selection.featherRadius,
+    inverted: selection.inverted,
+    mask: selection.mask
+      ? {
+          data: Array.from(selection.mask.data),
+          height: selection.mask.height,
+          width: selection.mask.width
+        }
+      : undefined,
+    points: selection.points?.map((point) => ({ ...point })),
+    shape: selection.shape
+  };
+}
+
+function deserializeSelection(selection: StoredSelection): Selection | null {
+  if (!selection?.bounds || typeof selection.shape !== "string") {
+    return null;
+  }
+
+  return {
+    bounds: {
+      height: Number(selection.bounds.height) || 1,
+      width: Number(selection.bounds.width) || 1,
+      x: Number(selection.bounds.x) || 0,
+      y: Number(selection.bounds.y) || 0
+    },
+    featherRadius: selection.featherRadius,
+    inverted: Boolean(selection.inverted),
+    mask: selection.mask
+      ? {
+          data: new Uint8Array(selection.mask.data),
+          height: selection.mask.height,
+          width: selection.mask.width
+        }
+      : undefined,
+    points: selection.points?.map((point) => ({
+      x: Number(point.x) || 0,
+      y: Number(point.y) || 0
+    })),
+    shape: selection.shape
+  };
 }

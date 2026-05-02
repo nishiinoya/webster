@@ -284,8 +284,16 @@ function cloneSelectionClip(selection: StrokeSelectionClip | null): StrokeSelect
           x: selection.bounds.x,
           y: selection.bounds.y
         },
+        coordinateSpace: selection.coordinateSpace,
         inverted: selection.inverted,
-        shape: selection.shape
+        points:
+          selection.shape === "lasso"
+            ? selection.points?.map((point) => ({ ...point }))
+            : undefined,
+        shape:
+          selection.shape === "ellipse" || selection.shape === "lasso"
+            ? selection.shape
+            : "rectangle"
       }
     : null;
 }

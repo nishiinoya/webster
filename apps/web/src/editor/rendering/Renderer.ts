@@ -265,6 +265,7 @@ export class Renderer {
     this.textGeometryIndexBuffer = textGeometryIndexBuffer;
     this.supportsUint32Indices = Boolean(gl.getExtension("OES_element_index_uint"));
     this.selectionOverlayRenderer = new SelectionOverlayRenderer(
+      this.gl,
       this.solidColorShaderProgram,
       this.quad
     );
@@ -506,6 +507,7 @@ export class Renderer {
    */
   dispose() {
     this.quad.dispose();
+    this.selectionOverlayRenderer.dispose();
     this.textureManager.dispose();
     this.texturedShaderProgram.dispose();
     this.postProcessShaderProgram.dispose();

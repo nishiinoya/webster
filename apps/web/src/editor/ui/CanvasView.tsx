@@ -28,6 +28,7 @@ import type { EditorDocumentTab } from "./editorDocuments";
 import type { MaskBrushOptions } from "../tools/mask-brush/MaskBrushTypes";
 import type { ShapeKind } from "../layers/ShapeLayer";
 import type { StrokeStyle } from "../layers/StrokeLayer";
+import type { SelectionMode } from "../selection/SelectionManager";
 import { cn } from "./classNames";
 
 type CanvasViewProps = {
@@ -50,6 +51,7 @@ type CanvasViewProps = {
   imageLayerCommandRequest: { command: ImageLayerCommand; id: number } | null;
   layerCommandRequest: { command: LayerCommand; id: number } | null;
   maskBrushOptions: MaskBrushOptions;
+  magicSelectionTolerance: number;
   onHistoryChange: (history: HistoryStateSnapshot) => void;
   onClipboardCommandRequestHandled: (requestId: number) => void;
   onHistoryCommandRequestHandled: (requestId: number) => void;
@@ -86,6 +88,7 @@ type CanvasViewProps = {
   selectionCommandRequest: { command: SelectionCommand; id: number } | null;
   selectedTool: string;
   selectedShape: ShapeKind;
+  selectedSelectionMode: SelectionMode;
   selectedStrokeColor: [number, number, number, number];
   selectedStrokeMode: "draw" | "erase";
   selectedStrokeStyle: StrokeStyle;
@@ -107,6 +110,7 @@ export function CanvasView({
   imageLayerCommandRequest,
   layerCommandRequest,
   maskBrushOptions,
+  magicSelectionTolerance,
   onHistoryChange,
   onClipboardCommandRequestHandled,
   onHistoryCommandRequestHandled,
@@ -137,6 +141,7 @@ export function CanvasView({
   selectLayerRequest,
   selectionCommandRequest,
   selectedShape,
+  selectedSelectionMode,
   selectedStrokeColor,
   selectedStrokeMode,
   selectedStrokeStyle,
@@ -158,7 +163,9 @@ export function CanvasView({
     onLayersChange,
     onStrokeLayerCreated,
     onZoomChange,
+    magicSelectionTolerance,
     selectedShape,
+    selectedSelectionMode,
     showCanvasBorder,
     selectedStrokeColor,
     selectedStrokeMode,
@@ -615,12 +622,14 @@ export function CanvasView({
 
     if (didApply) {
       onLayersChange(editorAppRef.current.getLayerSummaries());
+      rememberActiveScene();
     }
 
     onSelectionCommandRequestHandled(selectionCommandRequest.id);
   }, [
     editorAppRef,
     onLayersChange,
+    rememberActiveScene,
     onSelectionCommandRequestHandled,
     selectionCommandRequest
   ]);

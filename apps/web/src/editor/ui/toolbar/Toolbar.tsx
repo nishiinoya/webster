@@ -10,6 +10,7 @@ import type { MaskBrushOptions } from "../../tools/mask-brush/MaskBrushTypes";
 import type { LayerSummary } from "../../app/EditorApp";
 import type { StrokeStyle } from "../../layers/StrokeLayer";
 import type { SelectionCommand } from "../../app/EditorApp";
+import type { SelectionMode } from "../../selection/SelectionManager";
 import { cn } from "../classNames";
 
 type ToolbarProps = {
@@ -44,7 +45,10 @@ type ToolbarProps = {
   onUndo: () => void;
   onUploadImage: (file: File) => void;
   maskBrushOptions: MaskBrushOptions;
+  magicSelectionTolerance: number;
+  onMagicSelectionToleranceChange: (tolerance: number) => void;
   onMaskBrushOptionsChange: (options: Partial<MaskBrushOptions>) => void;
+  onSelectionModeChange: (mode: SelectionMode) => void;
   onStrokeColorChange: (color: [number, number, number, number]) => void;
   onStrokeModeChange: (mode: "draw" | "erase") => void;
   onStrokeStyleChange: (style: StrokeStyle) => void;
@@ -52,6 +56,7 @@ type ToolbarProps = {
   onStrokeWidthChange: (width: number) => void;
   saveStatus: SaveStatus;
   selectedLayer: LayerSummary | null;
+  selectedSelectionMode: SelectionMode;
   selectedStrokeColor: [number, number, number, number];
   selectedStrokeMode: "draw" | "erase";
   selectedStrokeStyle: StrokeStyle;
@@ -82,7 +87,9 @@ const shortcutMenuGroups = [
       ["D", "Draw"],
       ["S", "Shape"],
       ["R", "Rectangle"],
-      ["E", "Ellipse"]
+      ["E", "Ellipse"],
+      ["L", "Lasso"],
+      ["W", "Magic"]
     ]
   },
   {
@@ -100,7 +107,12 @@ const shortcutMenuGroups = [
   },
   {
     label: "Selection",
-    shortcuts: [["Ctrl/Cmd+D", "Clear"]]
+    shortcuts: [
+      ["Shift", "Add mode"],
+      ["Alt", "Subtract mode"],
+      ["Shift+Alt", "Intersect mode"],
+      ["Ctrl/Cmd+D", "Clear"]
+    ]
   },
   {
     label: "History",
@@ -144,7 +156,10 @@ export function Toolbar({
   onUndo,
   onUploadImage,
   maskBrushOptions,
+  magicSelectionTolerance,
+  onMagicSelectionToleranceChange,
   onMaskBrushOptionsChange,
+  onSelectionModeChange,
   onStrokeColorChange,
   onStrokeModeChange,
   onStrokeStyleChange,
@@ -152,6 +167,7 @@ export function Toolbar({
   onStrokeWidthChange,
   saveStatus,
   selectedLayer,
+  selectedSelectionMode,
   selectedStrokeColor,
   selectedStrokeMode,
   selectedStrokeStyle,
@@ -639,6 +655,83 @@ export function Toolbar({
             >
               Convert to mask
             </button>
+            <MenuSeparator />
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!canEditDocument}
+              onClick={(event) => {
+                closeMenu(event);
+                const radius = promptPositiveNumber("Feather radius", 8);
+
+                if (radius !== null) {
+                  onSelectionCommand({ radius, type: "feather" });
+                }
+              }}
+              type="button"
+            >
+              Feather selection...
+            </button>
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!canEditDocument}
+              onClick={(event) => {
+                closeMenu(event);
+                const amount = promptPositiveNumber("Grow by pixels", 8);
+
+                if (amount !== null) {
+                  onSelectionCommand({ amount, type: "grow" });
+                }
+              }}
+              type="button"
+            >
+              Grow selection...
+            </button>
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!canEditDocument}
+              onClick={(event) => {
+                closeMenu(event);
+                const amount = promptPositiveNumber("Shrink by pixels", 8);
+
+                if (amount !== null) {
+                  onSelectionCommand({ amount, type: "shrink" });
+                }
+              }}
+              type="button"
+            >
+              Shrink selection...
+            </button>
+            <MenuSeparator />
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!canEditDocument}
+              onClick={(event) => {
+                closeMenu(event);
+                const name = window.prompt("Selection name", "Selection");
+
+                if (name) {
+                  onSelectionCommand({ name, type: "save" });
+                }
+              }}
+              type="button"
+            >
+              Save selection...
+            </button>
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!canEditDocument}
+              onClick={(event) => {
+                closeMenu(event);
+                const name = window.prompt("Selection name to load", "Selection");
+
+                if (name) {
+                  onSelectionCommand({ name, mode: selectedSelectionMode, type: "load" });
+                }
+              }}
+              type="button"
+            >
+              Load selection...
+            </button>
           </div>
         </details>
         {selectedTool === "Mask Brush" ? (
@@ -748,6 +841,38 @@ export function Toolbar({
             >
               {selectedStrokeMode === "erase" ? "Draw" : "Eraser"}
             </button>
+          </div>
+        ) : null}
+        {isSelectionToolSelected(selectedTool) ? (
+          <div className="flex items-center gap-2 pl-1.5" aria-label="Selection options">
+            <label className="flex items-center gap-[5px] text-xs font-bold text-[#c9cdd2]">
+              Mode
+              <select
+                className={cn(maskBrushInputClass, "w-[118px]")}
+                onChange={(event) => onSelectionModeChange(toSelectionMode(event.target.value))}
+                value={selectedSelectionMode}
+              >
+                <option value="replace">Replace</option>
+                <option value="add">Add</option>
+                <option value="subtract">Subtract</option>
+                <option value="intersect">Intersect</option>
+              </select>
+            </label>
+            {selectedTool === "Magic Select" ? (
+              <label className="flex items-center gap-[5px] text-xs font-bold text-[#c9cdd2]">
+                Similarity
+                <input
+                  className={maskBrushInputClass}
+                  min="0"
+                  max="100"
+                  onChange={(event) =>
+                    onMagicSelectionToleranceChange(Number(event.target.value))
+                  }
+                  type="number"
+                  value={magicSelectionTolerance}
+                />
+              </label>
+            ) : null}
           </div>
         ) : null}
         <input
@@ -917,6 +1042,35 @@ function hexToColor(hex: string, alpha = 1): [number, number, number, number] {
     Number.isFinite(blue) ? blue / 255 : 0,
     alpha
   ];
+}
+
+function isSelectionToolSelected(tool: string) {
+  return (
+    tool === "Rectangle Select" ||
+    tool === "Ellipse Select" ||
+    tool === "Lasso Select" ||
+    tool === "Magic Select"
+  );
+}
+
+function toSelectionMode(value: string): SelectionMode {
+  if (value === "add" || value === "subtract" || value === "intersect") {
+    return value;
+  }
+
+  return "replace";
+}
+
+function promptPositiveNumber(label: string, fallback: number) {
+  const value = window.prompt(label, String(fallback));
+
+  if (value === null) {
+    return null;
+  }
+
+  const parsedValue = Number(value);
+
+  return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : null;
 }
 
 function MenuSeparator() {

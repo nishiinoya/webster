@@ -86,13 +86,26 @@ export function getPolygonShapePoints(layer: ShapeLayer) {
 /**
  * Converts a world-space stroke selection clip back into the layer's local space.
  */
-export function getLayerSelectionClip(layer: StrokeLayer, clip: StrokeSelectionClip | null) {
+export function getLayerSelectionClip(
+  layer: StrokeLayer,
+  clip: StrokeSelectionClip | null
+): {
+  bounds: { height: number; width: number; x: number; y: number };
+  inverted: boolean;
+  points?: Array<{ x: number; y: number }>;
+  shape: "ellipse" | "lasso" | "rectangle";
+} | null {
   if (!clip) {
     return null;
   }
 
   if (clip.coordinateSpace === "layer") {
-    return clip;
+    return {
+      bounds: clip.bounds,
+      inverted: clip.inverted,
+      points: clip.shape === "lasso" ? clip.points?.map((point) => ({ ...point })) : undefined,
+      shape: getShaderSelectionShape(clip)
+    };
   }
 
   const inverseModel = invert3x3(getModelMatrix(layer));
@@ -102,6 +115,7 @@ export function getLayerSelectionClip(layer: StrokeLayer, clip: StrokeSelectionC
   }
 
   const bounds = clip.bounds;
+  const points = clip.points?.map((point) => transformPoint3x3(inverseModel, point.x, point.y));
   const corners = [
     transformPoint3x3(inverseModel, bounds.x, bounds.y),
     transformPoint3x3(inverseModel, bounds.x + bounds.width, bounds.y),
@@ -121,6 +135,15 @@ export function getLayerSelectionClip(layer: StrokeLayer, clip: StrokeSelectionC
       y: minY
     },
     inverted: clip.inverted,
-    shape: clip.shape
+    points: clip.shape === "lasso" ? points : undefined,
+    shape: getShaderSelectionShape(clip)
   };
+}
+
+function getShaderSelectionShape(clip: StrokeSelectionClip) {
+  if (clip.shape === "ellipse" || clip.shape === "lasso") {
+    return clip.shape;
+  }
+
+  return "rectangle";
 }

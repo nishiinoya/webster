@@ -294,6 +294,7 @@ function cloneSelectionClip(selection: StrokeSelectionClip | null) {
         },
         coordinateSpace: selection.coordinateSpace,
         inverted: selection.inverted,
+        points: selection.points?.map((point) => ({ ...point })),
         shape: selection.shape
       }
     : null;
@@ -314,6 +315,11 @@ function worldSelectionClipToLayer(
     return cloneSelectionClip(selection);
   }
 
+  const points = selection.points?.map((point) => ({
+    x: (point.x - minX) / Math.max(1e-6, width),
+    y: (point.y - minY) / Math.max(1e-6, height)
+  }));
+
   return {
     bounds: {
       height: selection.bounds.height / Math.max(1e-6, height),
@@ -323,6 +329,7 @@ function worldSelectionClipToLayer(
     },
     coordinateSpace: "layer",
     inverted: selection.inverted,
+    points,
     shape: selection.shape
   };
 }
@@ -340,6 +347,9 @@ function layerSelectionClipToWorld(
   }
 
   const bounds = selection.bounds;
+  const points = selection.points?.map((point) =>
+    transformPoint3x3(modelMatrix, point.x, point.y)
+  );
   const corners = [
     transformPoint3x3(modelMatrix, bounds.x, bounds.y),
     transformPoint3x3(modelMatrix, bounds.x + bounds.width, bounds.y),
@@ -360,6 +370,7 @@ function layerSelectionClipToWorld(
     },
     coordinateSpace: "world",
     inverted: selection.inverted,
+    points,
     shape: selection.shape
   };
 }

@@ -21,7 +21,8 @@ import { ImageLayer } from "../layers/ImageLayer";
 import { TextLayer } from "../layers/TextLayer";
 import type { ShapeKind } from "../layers/ShapeLayer";
 import type { Layer } from "../layers/Layer";
-import { containsSelectionPoint } from "../selection/SelectionManager";
+import type { SelectionMode } from "../selection/SelectionManager";
+import { getSelectionAlpha } from "../selection/SelectionManager";
 import type { Selection, SelectionBounds } from "../selection/SelectionManager";
 import {
   createBlankDocumentScene,
@@ -123,7 +124,15 @@ export type LayerCommand =
   | { type: "select"; layerId: string }
   | { type: "update"; layerId: string; updates: LayerUpdate };
 
-export type SelectionCommand = "clear" | "convert-to-mask" | "invert";
+export type SelectionCommand =
+  | "clear"
+  | "convert-to-mask"
+  | "invert"
+  | { amount: number; type: "grow" }
+  | { amount: number; type: "shrink" }
+  | { name: string; type: "load"; mode?: SelectionMode }
+  | { name: string; type: "save" }
+  | { radius: number; type: "feather" };
 
 export type EditorClipboardCommand = "copy" | "cut" | "paste";
 
@@ -553,6 +562,14 @@ export class EditorApp {
 
   setShapeToolKind(shape: ShapeKind) {
     this.inputController.setShape(shape);
+  }
+
+  setSelectionMode(mode: SelectionMode) {
+    this.inputController.setSelectionMode(mode);
+  }
+
+  setMagicSelectionTolerance(tolerance: number) {
+    this.inputController.setMagicSelectionTolerance(tolerance);
   }
 
   selectLayer(layerId: string | null) {
@@ -1518,7 +1535,13 @@ function getGestureHistoryConfig(tool: string) {
     };
   }
 
-  if (tool === "Rectangle Select" || tool === "Ellipse Select" || tool === "Marquee") {
+  if (
+    tool === "Rectangle Select" ||
+    tool === "Ellipse Select" ||
+    tool === "Lasso Select" ||
+    tool === "Magic Select" ||
+    tool === "Marquee"
+  ) {
     return {
       compareMode: "scene" as const,
       label: "Update selection"
@@ -1571,6 +1594,26 @@ function getImageLayerCommandLabel(scene: Scene, command: ImageLayerCommand) {
 }
 
 function getSelectionCommandLabel(command: SelectionCommand) {
+  if (typeof command !== "string") {
+    if (command.type === "feather") {
+      return "Feather selection";
+    }
+
+    if (command.type === "grow") {
+      return "Grow selection";
+    }
+
+    if (command.type === "shrink") {
+      return "Shrink selection";
+    }
+
+    if (command.type === "load") {
+      return "Load selection";
+    }
+
+    return "Save selection";
+  }
+
   if (command === "clear") {
     return "Clear selection";
   }
@@ -1694,7 +1737,9 @@ async function copySelectedImageLayerPixels(
     for (let x = 0; x < width; x += 1) {
       const worldX = bounds.x + ((x + 0.5) / width) * bounds.width;
 
-      if (!containsSelectionPoint(selection, worldX, worldY)) {
+      const selectionAlpha = getSelectionAlpha(selection, worldX, worldY);
+
+      if (selectionAlpha <= 0) {
         continue;
       }
 
@@ -1723,7 +1768,9 @@ async function copySelectedImageLayerPixels(
       outputImageData.data[outputIndex] = sourceImageData.data[sourceIndex];
       outputImageData.data[outputIndex + 1] = sourceImageData.data[sourceIndex + 1];
       outputImageData.data[outputIndex + 2] = sourceImageData.data[sourceIndex + 2];
-      outputImageData.data[outputIndex + 3] = sourceImageData.data[sourceIndex + 3];
+      outputImageData.data[outputIndex + 3] = Math.round(
+        sourceImageData.data[sourceIndex + 3] * (selectionAlpha / 255)
+      );
       copiedPixels += 1;
     }
   }
@@ -1756,14 +1803,18 @@ async function clearSelectedImageLayerPixels(layer: ImageLayer, selection: Selec
       const localY = source.height <= 1 ? 0 : 1 - (y + 0.5) / source.height;
       const worldPoint = transformPoint3x3(modelMatrix, localX, localY);
 
-      if (!containsSelectionPoint(selection, worldPoint.x, worldPoint.y)) {
+      const selectionAlpha = getSelectionAlpha(selection, worldPoint.x, worldPoint.y);
+
+      if (selectionAlpha <= 0) {
         continue;
       }
 
       const alphaIndex = (y * source.width + x) * 4 + 3;
 
       if (imageData.data[alphaIndex] !== 0) {
-        imageData.data[alphaIndex] = 0;
+        imageData.data[alphaIndex] = Math.round(
+          imageData.data[alphaIndex] * (1 - selectionAlpha / 255)
+        );
         didClear = true;
       }
     }
@@ -1913,10 +1964,14 @@ function applySelectionAlphaMask(
       const worldX = bounds.x + ((x + 0.5) / canvas.width) * bounds.width;
       const alphaIndex = (y * canvas.width + x) * 4 + 3;
 
-      if (!containsSelectionPoint(selection, worldX, worldY)) {
+      const selectionAlpha = getSelectionAlpha(selection, worldX, worldY);
+
+      if (selectionAlpha <= 0) {
         imageData.data[alphaIndex] = 0;
         continue;
       }
+
+      imageData.data[alphaIndex] = Math.round(imageData.data[alphaIndex] * (selectionAlpha / 255));
 
       if (imageData.data[alphaIndex] > 0) {
         hasVisiblePixels = true;

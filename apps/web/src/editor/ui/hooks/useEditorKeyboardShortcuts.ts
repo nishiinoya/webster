@@ -374,6 +374,8 @@ function getToolForShortcutKey(key: string) {
       return "Ellipse Select";
     case "h":
       return "Pan";
+    case "l":
+      return "Lasso Select";
     case "r":
       return "Rectangle Select";
     case "s":
@@ -382,6 +384,8 @@ function getToolForShortcutKey(key: string) {
       return "Text";
     case "v":
       return "Move";
+    case "w":
+      return "Magic Select";
     default:
       return null;
   }

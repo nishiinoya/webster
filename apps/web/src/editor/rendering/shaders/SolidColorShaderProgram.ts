@@ -26,6 +26,7 @@ export class SolidColorShaderProgram extends ShaderProgram {
   private readonly adjustmentInverseMatrixUniformLocations: WebGLUniformLocation[];
   private readonly adjustmentSizeUniformLocations: WebGLUniformLocation[];
   private readonly maskEnabledUniformLocation: WebGLUniformLocation;
+  private readonly maskInvertedUniformLocation: WebGLUniformLocation;
   private readonly maskUniformLocation: WebGLUniformLocation;
 
   constructor(gl: WebGLRenderingContext, vertexShaderSource: string, fragmentShaderSource: string) {
@@ -64,6 +65,7 @@ export class SolidColorShaderProgram extends ShaderProgram {
       maxAdjustmentFilters
     );
     this.maskEnabledUniformLocation = this.getUniformLocation("u_maskEnabled");
+    this.maskInvertedUniformLocation = this.getUniformLocation("u_maskInverted");
     this.maskUniformLocation = this.getUniformLocation("u_mask");
 
     if (this.texCoordAttributeLocation < 0) {
@@ -136,10 +138,15 @@ export class SolidColorShaderProgram extends ShaderProgram {
 
   setMaskEnabled(enabled: boolean) {
     this.gl.uniform1i(this.maskEnabledUniformLocation, enabled ? 1 : 0);
+    this.gl.uniform1i(this.maskInvertedUniformLocation, 0);
   }
 
   setMaskTextureUnit(textureUnit: number) {
     this.gl.uniform1i(this.maskUniformLocation, textureUnit);
+  }
+
+  setMaskInverted(inverted: boolean) {
+    this.gl.uniform1i(this.maskInvertedUniformLocation, inverted ? 1 : 0);
   }
 
   private getUniformArrayLocations(name: string, count: number) {

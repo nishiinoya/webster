@@ -10,6 +10,7 @@ import type { ToolCursor, ToolPointerEvent } from "../move/MoveTool";
 import { SelectionTool } from "../selection/SelectionTool";
 import { ShapeTool } from "../shape/ShapeTool";
 import type { ShapeKind } from "../../layers/ShapeLayer";
+import type { SelectionMode } from "../../selection/SelectionManager";
 
 export class InputController {
   private readonly drawingTool: DrawingTool;
@@ -48,6 +49,16 @@ export class InputController {
       return;
     }
 
+    if (tool === "Lasso Select") {
+      this.selectionTool.setShape("lasso");
+      return;
+    }
+
+    if (tool === "Magic Select") {
+      this.selectionTool.setShape("mask");
+      return;
+    }
+
     if (tool === "Marquee" || tool === "Rectangle Select") {
       this.selectionTool.setShape("rectangle");
     }
@@ -55,6 +66,14 @@ export class InputController {
 
   setShape(shape: ShapeKind) {
     this.shapeTool.setShape(shape);
+  }
+
+  setSelectionMode(mode: SelectionMode) {
+    this.selectionTool.setMode(mode);
+  }
+
+  setMagicSelectionTolerance(tolerance: number) {
+    this.selectionTool.setMagicTolerance(tolerance);
   }
 
   setMaskBrushOptions(options: Partial<MaskBrushOptions>) {
@@ -175,7 +194,13 @@ export class InputController {
 }
 
 function isSelectionTool(tool: string) {
-  return tool === "Marquee" || tool === "Rectangle Select" || tool === "Ellipse Select";
+  return (
+    tool === "Marquee" ||
+    tool === "Rectangle Select" ||
+    tool === "Ellipse Select" ||
+    tool === "Lasso Select" ||
+    tool === "Magic Select"
+  );
 }
 
 function isShapeTool(tool: string) {

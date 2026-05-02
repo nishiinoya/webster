@@ -3,6 +3,7 @@ precision mediump float;
 uniform vec4 u_color;
 uniform sampler2D u_mask;
 uniform bool u_maskEnabled;
+uniform bool u_maskInverted;
 uniform float u_filterBrightness;
 uniform float u_filterBlur;
 uniform float u_filterContrast;
@@ -111,5 +112,10 @@ vec3 applyFilters(vec3 color) {
 
 void main() {
   float maskValue = u_maskEnabled ? texture2D(u_mask, v_texCoord).r : 1.0;
+
+  if (u_maskEnabled && u_maskInverted) {
+    maskValue = 1.0 - maskValue;
+  }
+
   gl_FragColor = vec4(applyFilters(u_color.rgb), u_color.a * maskValue * softGeometryAlpha());
 }

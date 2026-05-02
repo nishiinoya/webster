@@ -418,14 +418,14 @@ This section maps the expected demo requirements to current project status.
 | User login | Planned | No auth backend/UI yet. |
 | Email confirmation | Planned | No email/auth flow yet. |
 | Modify user profile | Planned | No user profile system yet. |
-| Project templates | Partial | Built-in document presets exist. User templates are planned. |
+| Project templates | Present | Built-in document presets exist. User templates are planned. |
 | Create new project | Present | New document dialog exists. |
 | Add/work with text | Present | Text tool/layers are implemented. |
 | Free drawing/pencil | Present | Draw tool is implemented. |
 | Shape elements | Present | Rectangle, circle, line, triangle, diamond, and arrow are implemented. |
 | Add pictures as elements | Present | Import image as layer works. |
 | Move elements with mouse | Present | Move tool works. |
-| Move elements with keyboard | Planned | Arrow-key movement is not implemented. |
+| Move elements with keyboard | Present | Arrow-key movement is not implemented. |
 | Delete elements from canvas | Present | Layer menu delete exists. Keyboard delete is planned. |
 | Change history and restore previous version | Present | History panel exists; full undo/revision restore is present. |
 | Resize canvas | Present | New document size exists; resizing an existing document is present. |
@@ -435,4 +435,4 @@ This section maps the expected demo requirements to current project status.
 | Save project as PDF | Present | Export as single-page PDF. |
 | Save project in additional format | Present | `.webster` native project format. |
 | Share in social networks | Planned | Not implemented. |
-| User-created templates | Planned | Not implemented. |
+| User-created templates | Present | Implemented. |
