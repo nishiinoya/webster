@@ -148,15 +148,18 @@ type ImageClipboardSnapshot = {
 
 type EditorClipboardData =
   | {
+      marker: string;
       kind: "image";
       image: ImageClipboardSnapshot;
     }
   | {
+      marker: string;
       kind: "layers";
       layers: LayerClipboardSnapshot;
     };
 
 let editorClipboardData: EditorClipboardData | null = null;
+const websterClipboardMarkerPrefix = "webster-clipboard:";
 
 type HistoryComparisonMode = "full" | "scene" | "scene-ignore-selection";
 
@@ -628,16 +631,24 @@ export class EditorApp {
       return { didChangeScene: false, didHandle: false };
     }
 
+    const hasSelection = Boolean(this.scene.selection.current);
     const imageClipboard = await this.createSelectedPixelClipboardSnapshot();
 
     if (imageClipboard) {
+      const marker = createClipboardMarker("image");
+
       editorClipboardData = {
         image: imageClipboard,
-        kind: "image"
+        kind: "image",
+        marker
       };
-      await writeImageBlobToSystemClipboard(imageClipboard.blob);
+      await writeImageBlobToSystemClipboard(imageClipboard.blob, marker);
 
       return { didChangeScene: false, didHandle: true };
+    }
+
+    if (hasSelection) {
+      return { didChangeScene: false, didHandle: false };
     }
 
     const layerClipboard = this.scene.createLayerClipboardSnapshot();
@@ -646,11 +657,14 @@ export class EditorApp {
       return { didChangeScene: false, didHandle: false };
     }
 
+    const marker = createClipboardMarker("layers");
+
     editorClipboardData = {
       kind: "layers",
-      layers: layerClipboard
+      layers: layerClipboard,
+      marker
     };
-    await writeClipboardTextMarker("Webster layer clipboard");
+    await writeClipboardTextMarker(marker);
 
     return { didChangeScene: false, didHandle: true };
   }
@@ -663,7 +677,7 @@ export class EditorApp {
     const selectedImageLayer = this.getSelectedImageLayer();
 
     if (this.scene.selection.current && selectedImageLayer && !selectedImageLayer.locked) {
-      const imageClipboard = await this.createSelectedPixelClipboardSnapshot(selectedImageLayer);
+      const imageClipboard = await this.createSelectedPixelClipboardSnapshot();
 
       if (!imageClipboard) {
         return { didChangeScene: false, didHandle: false };
@@ -679,11 +693,14 @@ export class EditorApp {
         return { didChangeScene: false, didHandle: false };
       }
 
+      const marker = createClipboardMarker("image");
+
       editorClipboardData = {
         image: imageClipboard,
-        kind: "image"
+        kind: "image",
+        marker
       };
-      await writeImageBlobToSystemClipboard(imageClipboard.blob);
+      await writeImageBlobToSystemClipboard(imageClipboard.blob, marker);
       this.recordHistoryAction(
         this.createHistoryAction({
           kind: "scene",
@@ -713,11 +730,14 @@ export class EditorApp {
       return { didChangeScene: false, didHandle: false };
     }
 
+    const marker = createClipboardMarker("layers");
+
     editorClipboardData = {
       kind: "layers",
-      layers: layerClipboard
+      layers: layerClipboard,
+      marker
     };
-    await writeClipboardTextMarker("Webster layer clipboard");
+    await writeClipboardTextMarker(marker);
     this.recordHistoryAction(
       this.createHistoryAction({
         kind: "scene",
@@ -739,7 +759,13 @@ export class EditorApp {
       return { didChangeScene: false, didHandle: false };
     }
 
-    if (editorClipboardData?.kind === "image") {
+    const systemClipboard = await readSystemClipboard();
+    const systemClipboardStillMatchesInternal =
+      Boolean(editorClipboardData) &&
+      systemClipboard.canInspect &&
+      systemClipboard.marker === editorClipboardData?.marker;
+
+    if (editorClipboardData?.kind === "image" && systemClipboardStillMatchesInternal) {
       return {
         didChangeScene: await this.pasteImageClipboardSnapshot(
           editorClipboardData.image,
@@ -749,17 +775,32 @@ export class EditorApp {
       };
     }
 
-    const systemImage = await readSystemClipboardImage();
-
-    if (systemImage) {
+    if (systemClipboard.image) {
       return {
-        didChangeScene: await this.pasteImageClipboardSnapshot(systemImage, "Paste clipboard image"),
+        didChangeScene: await this.pasteImageClipboardSnapshot(
+          systemClipboard.image,
+          "Paste clipboard image"
+        ),
         didHandle: true
       };
     }
 
     if (!editorClipboardData) {
       return { didChangeScene: false, didHandle: false };
+    }
+
+    if (systemClipboard.canInspect && !systemClipboardStillMatchesInternal) {
+      return { didChangeScene: false, didHandle: false };
+    }
+
+    if (editorClipboardData.kind === "image") {
+      return {
+        didChangeScene: await this.pasteImageClipboardSnapshot(
+          editorClipboardData.image,
+          "Paste pixels"
+        ),
+        didHandle: true
+      };
     }
 
     const before = this.captureAppSnapshot();
@@ -1165,14 +1206,18 @@ export class EditorApp {
     return layer instanceof ImageLayer ? layer : null;
   }
 
-  private async createSelectedPixelClipboardSnapshot(layer = this.getSelectedImageLayer()) {
+  private async createSelectedPixelClipboardSnapshot(layer?: ImageLayer | null) {
     const selection = this.scene.selection.current;
 
-    if (!selection || !layer) {
+    if (!selection) {
       return null;
     }
 
-    return copySelectedImageLayerPixels(layer, selection);
+    if (layer) {
+      return copySelectedImageLayerPixels(layer, selection);
+    }
+
+    return copySelectedScenePixels(this.scene, selection);
   }
 
   private async pasteImageClipboardSnapshot(
@@ -1562,6 +1607,58 @@ function getLayerName(scene: Scene, layerId: string) {
   return scene.getLayer(layerId)?.name ?? "Layer";
 }
 
+async function copySelectedScenePixels(
+  scene: Scene,
+  selection: Selection
+): Promise<ImageClipboardSnapshot | null> {
+  const bounds = getSelectedSceneCopyBounds(scene, selection);
+  const size = getClipboardCanvasSize(bounds);
+  const canvas = document.createElement("canvas");
+  const renderer = await Renderer.create(canvas, {
+    alpha: true,
+    premultipliedAlpha: false,
+    preserveDrawingBuffer: true
+  });
+  const camera = new Camera2D();
+
+  camera.setBounds(null);
+  camera.x = bounds.x + bounds.width / 2;
+  camera.y = bounds.y + bounds.height / 2;
+  camera.zoom = Math.min(size.width / bounds.width, size.height / bounds.height);
+
+  try {
+    await renderer.prepareSceneFonts(scene);
+    renderer.renderToSize(
+      scene,
+      camera,
+      {
+        ...imageExportRenderOptions,
+        documentBackground: "transparent"
+      },
+      size.width,
+      size.height
+    );
+
+    const maskedCanvas = copyCanvasTo2dCanvas(canvas);
+
+    if (!applySelectionAlphaMask(maskedCanvas, bounds, selection)) {
+      return null;
+    }
+
+    return {
+      blob: await canvasToBlob(maskedCanvas, "image/png"),
+      height: bounds.height,
+      name: "Selection pixels.png",
+      width: bounds.width,
+      x: bounds.x,
+      y: bounds.y
+    };
+  } finally {
+    renderer.dispose();
+    camera.dispose();
+  }
+}
+
 async function copySelectedImageLayerPixels(
   layer: ImageLayer,
   selection: Selection
@@ -1725,6 +1822,24 @@ function getSelectedPixelCopyBounds(layer: Layer, selection: Selection): Selecti
   return getLayerWorldBounds(layer);
 }
 
+function getSelectedSceneCopyBounds(scene: Scene, selection: Selection): SelectionBounds {
+  if (!selection.inverted) {
+    return {
+      height: Math.max(1, selection.bounds.height),
+      width: Math.max(1, selection.bounds.width),
+      x: selection.bounds.x,
+      y: selection.bounds.y
+    };
+  }
+
+  return {
+    height: Math.max(1, scene.document.height),
+    width: Math.max(1, scene.document.width),
+    x: scene.document.x,
+    y: scene.document.y
+  };
+}
+
 function getLayerWorldBounds(layer: Layer): SelectionBounds {
   const corners = getLayerCorners(layer);
   const points = [corners.topLeft, corners.topRight, corners.bottomRight, corners.bottomLeft];
@@ -1747,28 +1862,102 @@ function clampClipboardCanvasDimension(value: number) {
 
 function getClipboardCanvasSize(bounds: SelectionBounds) {
   const maxPixelArea = 16_000_000;
-  let width = clampClipboardCanvasDimension(bounds.width);
-  let height = clampClipboardCanvasDimension(bounds.height);
-  const area = width * height;
+  const safeWidth = Math.max(bounds.width, 1);
+  const safeHeight = Math.max(bounds.height, 1);
+  const scale = Math.min(
+    1,
+    12000 / safeWidth,
+    12000 / safeHeight,
+    Math.sqrt(maxPixelArea / (safeWidth * safeHeight))
+  );
 
-  if (area > maxPixelArea) {
-    const scale = Math.sqrt(maxPixelArea / area);
-
-    width = Math.max(1, Math.round(width * scale));
-    height = Math.max(1, Math.round(height * scale));
-  }
-
-  return { height, width };
+  return {
+    height: clampClipboardCanvasDimension(safeHeight * scale),
+    width: clampClipboardCanvasDimension(safeWidth * scale)
+  };
 }
 
-async function readSystemClipboardImage(): Promise<ImageClipboardSnapshot | null> {
-  if (!navigator.clipboard || typeof navigator.clipboard.read !== "function") {
-    return null;
+function copyCanvasTo2dCanvas(source: HTMLCanvasElement) {
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+
+  if (!context) {
+    throw new Error("Unable to mask selected pixels.");
   }
 
-  try {
-    const clipboardItems = await navigator.clipboard.read();
+  canvas.width = source.width;
+  canvas.height = source.height;
+  context.drawImage(source, 0, 0);
 
+  return canvas;
+}
+
+function applySelectionAlphaMask(
+  canvas: HTMLCanvasElement,
+  bounds: SelectionBounds,
+  selection: Selection
+) {
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+
+  if (!context) {
+    throw new Error("Unable to mask selected pixels.");
+  }
+
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  let hasVisiblePixels = false;
+
+  for (let y = 0; y < canvas.height; y += 1) {
+    const worldY = bounds.y + ((y + 0.5) / canvas.height) * bounds.height;
+
+    for (let x = 0; x < canvas.width; x += 1) {
+      const worldX = bounds.x + ((x + 0.5) / canvas.width) * bounds.width;
+      const alphaIndex = (y * canvas.width + x) * 4 + 3;
+
+      if (!containsSelectionPoint(selection, worldX, worldY)) {
+        imageData.data[alphaIndex] = 0;
+        continue;
+      }
+
+      if (imageData.data[alphaIndex] > 0) {
+        hasVisiblePixels = true;
+      }
+    }
+  }
+
+  context.putImageData(imageData, 0, 0);
+
+  return hasVisiblePixels;
+}
+
+type SystemClipboardSnapshot = {
+  canInspect: boolean;
+  image: ImageClipboardSnapshot | null;
+  marker: string | null;
+};
+
+async function readSystemClipboard(): Promise<SystemClipboardSnapshot> {
+  if (!navigator.clipboard) {
+    return {
+      canInspect: false,
+      image: null,
+      marker: null
+    };
+  }
+
+  let marker: string | null = null;
+
+  try {
+    marker = await readSystemClipboardMarker();
+
+    if (typeof navigator.clipboard.read !== "function") {
+      return {
+        canInspect: true,
+        image: null,
+        marker
+      };
+    }
+
+    const clipboardItems = await navigator.clipboard.read();
     for (const item of clipboardItems) {
       const imageType = item.types.find((type) => type.startsWith("image/"));
 
@@ -1779,22 +1968,44 @@ async function readSystemClipboardImage(): Promise<ImageClipboardSnapshot | null
       const blob = await item.getType(imageType);
 
       return {
-        blob,
-        height: 0,
-        name: getClipboardImageName(imageType),
-        width: 0,
-        x: null,
-        y: null
+        canInspect: true,
+        image: {
+          blob,
+          height: 0,
+          name: getClipboardImageName(imageType),
+          width: 0,
+          x: null,
+          y: null
+        },
+        marker
       };
     }
   } catch {
-    return null;
+    return {
+      canInspect: false,
+      image: null,
+      marker: null
+    };
   }
 
-  return null;
+  return {
+    canInspect: true,
+    image: null,
+    marker
+  };
 }
 
-async function writeImageBlobToSystemClipboard(blob: Blob) {
+async function readSystemClipboardMarker() {
+  try {
+    const text = await navigator.clipboard?.readText();
+
+    return text?.startsWith(websterClipboardMarkerPrefix) ? text : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeImageBlobToSystemClipboard(blob: Blob, marker: string) {
   if (
     !navigator.clipboard ||
     typeof navigator.clipboard.write !== "function" ||
@@ -1808,11 +2019,22 @@ async function writeImageBlobToSystemClipboard(blob: Blob) {
 
     await navigator.clipboard.write([
       new ClipboardItem({
-        [mimeType]: blob
+        [mimeType]: blob,
+        "text/plain": new Blob([marker], { type: "text/plain" })
       })
     ]);
   } catch {
-    // Clipboard image writes may be blocked by browser permissions.
+    try {
+      const mimeType = blob.type || "image/png";
+
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          [mimeType]: blob
+        })
+      ]);
+    } catch {
+      // Clipboard image writes may be blocked by browser permissions.
+    }
   }
 }
 
@@ -1834,4 +2056,8 @@ function getClipboardImageName(mimeType: string) {
   }
 
   return "Clipboard image.png";
+}
+
+function createClipboardMarker(kind: "image" | "layers") {
+  return `${websterClipboardMarkerPrefix}${kind}:${Date.now()}:${crypto.randomUUID()}`;
 }
