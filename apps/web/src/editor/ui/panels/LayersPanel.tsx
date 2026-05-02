@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type {
   CSSProperties,
   ChangeEvent,
+  DragEvent as ReactDragEvent,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent
 } from "react";
@@ -18,6 +19,13 @@ type LayersPanelProps = {
   onToggleCollapsed: () => void;
 };
 
+type LayerDropPlacement = "above" | "below" | "inside";
+
+type LayerDropTarget = {
+  layerId: string;
+  placement: LayerDropPlacement;
+};
+
 export function LayersPanel({
   canGroupSelectedLayers,
   isCollapsed,
@@ -32,6 +40,9 @@ export function LayersPanel({
     left: number;
     top: number;
   } | null>(null);
+  const [draggingLayerIds, setDraggingLayerIds] = useState<string[]>([]);
+  const [dropTarget, setDropTarget] = useState<LayerDropTarget | null>(null);
+  const selectedLayerIds = layers.filter((layer) => layer.isSelected).map((layer) => layer.id);
 
   useEffect(() => {
     if (!openMenu) {
@@ -74,8 +85,6 @@ export function LayersPanel({
     event: MouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>,
     layerId: string
   ) {
-    const selectedLayerIds = layers.filter((layer) => layer.isSelected).map((layer) => layer.id);
-
     if (event.shiftKey && selectedLayerIds.length > 0) {
       const anchorLayerId =
         layers.find((layer) => layer.isPrimarySelected)?.id ?? selectedLayerIds.at(-1) ?? layerId;
@@ -104,6 +113,61 @@ export function LayersPanel({
     }
 
     onSelectLayers([layerId]);
+  }
+
+  function startLayerDrag(event: ReactDragEvent<HTMLElement>, layerId: string) {
+    if (isLayerControlTarget(event.target)) {
+      event.preventDefault();
+      return;
+    }
+
+    const layerIds = selectedLayerIds.includes(layerId) ? selectedLayerIds : [layerId];
+
+    setDraggingLayerIds(layerIds);
+    setDropTarget(null);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", layerIds.join(","));
+  }
+
+  function updateLayerDropTarget(event: ReactDragEvent<HTMLElement>, layer: LayerSummary) {
+    const layerIds = draggingLayerIds.length > 0 ? draggingLayerIds : getDraggedLayerIds(event);
+    const placement = getDropPlacement(event, layer);
+
+    if (!canDropLayerIds(layerIds, layer, placement, layers)) {
+      event.dataTransfer.dropEffect = "none";
+      setDropTarget((currentTarget) =>
+        currentTarget?.layerId === layer.id ? null : currentTarget
+      );
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDropTarget({ layerId: layer.id, placement });
+  }
+
+  function dropLayers(event: ReactDragEvent<HTMLElement>, layer: LayerSummary) {
+    const layerIds = draggingLayerIds.length > 0 ? draggingLayerIds : getDraggedLayerIds(event);
+    const placement = dropTarget?.layerId === layer.id ? dropTarget.placement : getDropPlacement(event, layer);
+
+    if (!canDropLayerIds(layerIds, layer, placement, layers)) {
+      clearLayerDrag();
+      return;
+    }
+
+    event.preventDefault();
+    onLayerCommand({
+      layerIds,
+      placement,
+      targetLayerId: layer.id,
+      type: "move-to-position"
+    });
+    clearLayerDrag();
+  }
+
+  function clearLayerDrag() {
+    setDraggingLayerIds([]);
+    setDropTarget(null);
   }
 
   function toggleLayerMenu(event: MouseEvent<HTMLButtonElement>, layerId: string) {
@@ -162,6 +226,9 @@ export function LayersPanel({
       <div className="grid gap-2">
         {layers.map((layer) => {
           const indent = Math.min(layer.depth, 10) * 18;
+          const rowDropPlacement =
+            dropTarget?.layerId === layer.id ? dropTarget.placement : null;
+          const isDraggingLayer = draggingLayerIds.includes(layer.id);
 
           return (
         <div
@@ -170,10 +237,24 @@ export function LayersPanel({
             "relative grid min-h-[82px] w-full grid-cols-[28px_38px_minmax(0,1fr)_30px] items-start gap-[9px] rounded-lg border border-[#292e35] bg-[#171a1f] p-[9px] text-left hover:border-[#4c535c] hover:bg-[#252930] min-[1400px]:min-h-[88px] min-[1400px]:grid-cols-[30px_42px_minmax(0,1fr)_32px]",
             layer.depth > 0 && "border-[#242a31]",
             layer.type === "group" && "min-h-[74px] border-[#3b4652] bg-[#1d232b]",
+            rowDropPlacement === "inside" && "border-[#79dac7] bg-[#203731]",
+            isDraggingLayer && "opacity-45",
             layer.isSelected && "border-[#4aa391] bg-[#172722] shadow-[inset_3px_0_0_#4aa391]"
           )}
+            draggable
             key={layer.id}
             onClick={(event) => selectLayerFromPanel(event, layer.id)}
+            onDragEnd={clearLayerDrag}
+            onDragLeave={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                setDropTarget((currentTarget) =>
+                  currentTarget?.layerId === layer.id ? null : currentTarget
+                );
+              }
+            }}
+            onDragOver={(event) => updateLayerDropTarget(event, layer)}
+            onDragStart={(event) => startLayerDrag(event, layer.id)}
+            onDrop={(event) => dropLayers(event, layer)}
             onKeyDown={(event) => {
               if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
@@ -187,6 +268,8 @@ export function LayersPanel({
           }}
           tabIndex={0}
         >
+            {rowDropPlacement === "above" ? <LayerDropLine placement="above" /> : null}
+            {rowDropPlacement === "below" ? <LayerDropLine placement="below" /> : null}
             {layer.depth > 0 ? <LayerTreeGuides depth={layer.depth} /> : null}
             <div className="grid gap-1.5" onClick={stopPanelControl}>
               <button
@@ -315,13 +398,27 @@ export function LayersPanel({
       {openMenu && !isCollapsed ? (
         <LayerMenu
           layer={layers.find((layer) => layer.id === openMenu.layerId) ?? null}
+          layers={layers}
           onCommand={runLayerMenuCommand}
           onPointerDown={(event) => event.stopPropagation()}
+          selectedLayerIds={selectedLayerIds}
           style={{ left: openMenu.left, top: openMenu.top }}
         />
       ) : null}
       </div>
     </section>
+  );
+}
+
+function LayerDropLine({ placement }: { placement: "above" | "below" }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "pointer-events-none absolute left-0 right-0 z-20 h-0.5 rounded-full bg-[#79dac7] shadow-[0_0_0_2px_rgba(121,218,199,0.18)]",
+        placement === "above" ? "top-[-5px]" : "bottom-[-5px]"
+      )}
+    />
   );
 }
 
@@ -393,18 +490,34 @@ function PanelToggleButton({
 
 function LayerMenu({
   layer,
+  layers,
   onCommand,
   onPointerDown,
+  selectedLayerIds,
   style
 }: {
   layer: LayerSummary | null;
+  layers: LayerSummary[];
   onCommand: (command: LayerCommand) => void;
   onPointerDown: (event: MouseEvent<HTMLDivElement>) => void;
+  selectedLayerIds: string[];
   style: CSSProperties;
 }) {
   if (!layer) {
     return null;
   }
+
+  const commandLayerIds =
+    layer.isSelected && selectedLayerIds.length > 0 ? selectedLayerIds : [layer.id];
+  const addableLayerIds =
+    layer.type === "group"
+      ? commandLayerIds.filter((layerId) =>
+          canDropLayerIds([layerId], layer, "inside", layers)
+        )
+      : [];
+  const removableLayerIds = commandLayerIds.filter((layerId) =>
+    Boolean(layers.find((candidate) => candidate.id === layerId)?.groupId)
+  );
 
   return (
     <div
@@ -432,6 +545,34 @@ function LayerMenu({
         type="button"
       >
         Duplicate
+      </button>
+      <button
+        className={layerMenuButtonClass}
+        disabled={addableLayerIds.length === 0}
+        onClick={() =>
+          onCommand({
+            layerIds: addableLayerIds,
+            placement: "inside",
+            targetLayerId: layer.id,
+            type: "move-to-position"
+          })
+        }
+        type="button"
+      >
+        Add selected to group
+      </button>
+      <button
+        className={layerMenuButtonClass}
+        disabled={removableLayerIds.length === 0}
+        onClick={() =>
+          onCommand({
+            layerIds: removableLayerIds,
+            type: "remove-from-group"
+          })
+        }
+        type="button"
+      >
+        Remove from group
       </button>
       <button
         className={cn(
@@ -512,6 +653,79 @@ const layerToggleSvgClass =
 
 const layerMenuButtonClass =
   "min-h-[30px] rounded-md border border-transparent bg-transparent px-2 py-1.5 text-left text-xs font-bold text-[#e7e9ec] hover:border-[#4c535c] hover:bg-[#252930] focus-visible:border-[#4c535c] focus-visible:bg-[#252930] disabled:cursor-not-allowed disabled:text-[#6f7680] disabled:hover:border-transparent disabled:hover:bg-transparent min-[1400px]:text-[13px]";
+
+function isLayerControlTarget(target: EventTarget | null) {
+  return target instanceof Element && Boolean(target.closest("button, input, label, select, textarea"));
+}
+
+function getDraggedLayerIds(event: ReactDragEvent<HTMLElement>) {
+  return event.dataTransfer
+    .getData("text/plain")
+    .split(",")
+    .map((layerId) => layerId.trim())
+    .filter(Boolean);
+}
+
+function getDropPlacement(
+  event: ReactDragEvent<HTMLElement>,
+  layer: LayerSummary
+): LayerDropPlacement {
+  const bounds = event.currentTarget.getBoundingClientRect();
+  const offsetY = event.clientY - bounds.top;
+
+  if (layer.type === "group") {
+    if (offsetY < bounds.height * 0.28) {
+      return "above";
+    }
+
+    if (offsetY > bounds.height * 0.72) {
+      return "below";
+    }
+
+    return "inside";
+  }
+
+  return offsetY < bounds.height / 2 ? "above" : "below";
+}
+
+function canDropLayerIds(
+  layerIds: string[],
+  targetLayer: LayerSummary,
+  placement: LayerDropPlacement,
+  layers: LayerSummary[]
+) {
+  if (layerIds.length === 0 || (placement === "inside" && targetLayer.type !== "group")) {
+    return false;
+  }
+
+  const movingLayerIds = new Set(layerIds);
+
+  if (movingLayerIds.has(targetLayer.id) || hasAncestorInSet(targetLayer, layers, movingLayerIds)) {
+    return false;
+  }
+
+  return layerIds.some((layerId) => layers.some((layer) => layer.id === layerId));
+}
+
+function hasAncestorInSet(
+  layer: LayerSummary,
+  layers: LayerSummary[],
+  ancestorLayerIds: Set<string>
+) {
+  const visitedGroupIds = new Set<string>();
+  let groupId = layer.groupId;
+
+  while (groupId && !visitedGroupIds.has(groupId)) {
+    if (ancestorLayerIds.has(groupId)) {
+      return true;
+    }
+
+    visitedGroupIds.add(groupId);
+    groupId = layers.find((candidate) => candidate.id === groupId)?.groupId ?? null;
+  }
+
+  return false;
+}
 
 function EyeIcon() {
   return (

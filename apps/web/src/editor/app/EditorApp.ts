@@ -12,7 +12,7 @@ import {
   cloneSceneSnapshot,
   restoreSceneSnapshot
 } from "../scene/sceneSnapshots";
-import type { DocumentResizeAnchor, LayerMaskAction } from "../scene/Scene";
+import type { DocumentResizeAnchor, LayerMaskAction, LayerStackPlacement } from "../scene/Scene";
 import { exportScenePackage, importScenePackage } from "../projects/ProjectPackage";
 import { TextLayer } from "../layers/TextLayer";
 import type { ShapeKind } from "../layers/ShapeLayer";
@@ -103,8 +103,15 @@ export type LayerCommand =
   | { type: "duplicate"; layerId: string }
   | { type: "group"; layerIds: string[]; name?: string }
   | { type: "mask"; action: LayerMaskAction; layerId: string }
+  | {
+      type: "move-to-position";
+      layerIds: string[];
+      targetLayerId: string;
+      placement: LayerStackPlacement;
+    }
   | { type: "move-down"; layerId: string }
   | { type: "move-up"; layerId: string }
+  | { type: "remove-from-group"; layerIds: string[] }
   | { type: "select"; layerId: string }
   | { type: "update"; layerId: string; updates: LayerUpdate };
 
@@ -1210,9 +1217,13 @@ function getLayerCommandLabel(scene: Scene, command: LayerCommand) {
       return "Group layers";
     case "mask":
       return getMaskActionLabel(layerName, command.action);
+    case "move-to-position":
+      return "Move layers";
     case "move-down":
     case "move-up":
       return `Reorder ${layerName}`;
+    case "remove-from-group":
+      return "Remove from group";
     case "select":
       return `Select ${layerName}`;
     case "update":

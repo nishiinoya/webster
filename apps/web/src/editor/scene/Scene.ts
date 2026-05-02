@@ -32,6 +32,8 @@ export type DocumentBounds = {
   color: [number, number, number, number];
 };
 
+export type LayerStackPlacement = "above" | "below" | "inside";
+
 export type SerializedScene = {
   app: "webster";
   canvas: {
@@ -412,6 +414,118 @@ export class Scene {
     return group;
   }
 
+  moveLayersToPosition(
+    layerIds: string[],
+    targetLayerId: string,
+    placement: LayerStackPlacement
+  ) {
+    const targetLayer = this.getLayer(targetLayerId);
+
+    if (!targetLayer || (placement === "inside" && !(targetLayer instanceof GroupLayer))) {
+      return null;
+    }
+
+    const movingLayers = this.getMovableRootLayers(layerIds);
+
+    if (movingLayers.length === 0 || movingLayers.some((layer) => layer.id === targetLayer.id)) {
+      return null;
+    }
+
+    const movingBlock = this.getLayerBlocks(movingLayers);
+    const movingLayerSet = new Set(movingBlock);
+
+    if (movingLayerSet.has(targetLayer)) {
+      return null;
+    }
+
+    const previousGroupIds = [
+      ...new Set(movingLayers.map((layer) => layer.groupId).filter(Boolean) as string[])
+    ];
+    const nextGroupId = placement === "inside" ? targetLayer.id : targetLayer.groupId;
+
+    if (placement === "inside" && targetLayer instanceof GroupLayer) {
+      targetLayer.collapsed = false;
+    }
+
+    for (const layer of movingLayers) {
+      layer.groupId = nextGroupId;
+    }
+
+    const remainingLayers = this.layers.filter((layer) => !movingLayerSet.has(layer));
+    const targetIndex = remainingLayers.findIndex((layer) => layer.id === targetLayer.id);
+
+    if (targetIndex < 0) {
+      return null;
+    }
+
+    const targetBlock =
+      targetLayer instanceof GroupLayer
+        ? this.getGroupSubtreeFromLayers(targetLayer.id, remainingLayers)
+        : [targetLayer];
+    const targetIndexes = targetBlock
+      .map((layer) => remainingLayers.findIndex((candidate) => candidate.id === layer.id))
+      .filter((index) => index >= 0);
+
+    if (targetIndexes.length === 0) {
+      return null;
+    }
+
+    const insertIndex =
+      placement === "inside"
+        ? targetIndex
+        : placement === "above"
+          ? Math.max(...targetIndexes) + 1
+          : Math.min(...targetIndexes);
+
+    this.layers.splice(0, this.layers.length, ...remainingLayers);
+    this.layers.splice(insertIndex, 0, ...movingBlock);
+    this.setSelectedLayerIds(movingLayers.map((layer) => layer.id));
+
+    for (const groupId of previousGroupIds) {
+      this.updateParentGroupBounds(groupId);
+    }
+
+    this.updateParentGroupBounds(nextGroupId);
+
+    return movingLayers;
+  }
+
+  removeLayersFromGroup(layerIds: string[]) {
+    const movingLayers = this.getMovableRootLayers(layerIds).filter((layer) => layer.groupId);
+
+    if (movingLayers.length === 0) {
+      return null;
+    }
+
+    const previousGroupIds = [
+      ...new Set(movingLayers.map((layer) => layer.groupId).filter(Boolean) as string[])
+    ];
+    const nextGroupIds = new Set<string>();
+
+    for (const layer of movingLayers) {
+      const parentGroup = layer.groupId ? this.getLayer(layer.groupId) : null;
+      const nextGroupId = parentGroup?.groupId ?? null;
+
+      layer.groupId = nextGroupId;
+
+      if (nextGroupId) {
+        nextGroupIds.add(nextGroupId);
+      }
+    }
+
+    this.setSelectedLayerIds(movingLayers.map((layer) => layer.id));
+
+    for (const groupId of previousGroupIds) {
+      this.updateParentGroupBounds(groupId);
+    }
+
+    for (const groupId of nextGroupIds) {
+      this.updateParentGroupBounds(groupId);
+    }
+
+    return movingLayers;
+  }
+
   /**
    * Moves a layer to a clamped index within the current layer stack.
    */
@@ -596,6 +710,10 @@ export class Scene {
     return this.layers.filter((layer) => layer.groupId === groupId);
   }
 
+  private getGroupChildrenFromLayers(groupId: string, layers: Layer[]) {
+    return layers.filter((layer) => layer.groupId === groupId);
+  }
+
   private getGroupDescendants(groupId: string) {
     const descendants: Layer[] = [];
     const visitedGroupIds = new Set<string>();
@@ -625,6 +743,63 @@ export class Scene {
     const subtreeIds = new Set([groupId, ...this.getGroupDescendants(groupId).map((layer) => layer.id)]);
 
     return this.layers.filter((layer) => subtreeIds.has(layer.id));
+  }
+
+  private getGroupSubtreeFromLayers(groupId: string, layers: Layer[]) {
+    const subtreeIds = new Set([groupId]);
+    const visitedGroupIds = new Set<string>();
+
+    const collect = (currentGroupId: string) => {
+      if (visitedGroupIds.has(currentGroupId)) {
+        return;
+      }
+
+      visitedGroupIds.add(currentGroupId);
+
+      for (const child of this.getGroupChildrenFromLayers(currentGroupId, layers)) {
+        subtreeIds.add(child.id);
+
+        if (child instanceof GroupLayer) {
+          collect(child.id);
+        }
+      }
+    };
+
+    collect(groupId);
+
+    return layers.filter((layer) => subtreeIds.has(layer.id));
+  }
+
+  private getMovableRootLayers(layerIds: string[]) {
+    const requestedLayers = [
+      ...new Set(layerIds.map((layerId) => this.getLayer(layerId)).filter((layer): layer is Layer => Boolean(layer)))
+    ];
+
+    return requestedLayers.filter(
+      (layer) =>
+        !requestedLayers.some(
+          (candidate) =>
+            candidate instanceof GroupLayer &&
+            candidate.id !== layer.id &&
+            this.isLayerInGroup(layer, candidate.id)
+        )
+    );
+  }
+
+  private getLayerBlocks(rootLayers: Layer[]) {
+    const blockIds = new Set<string>();
+
+    for (const layer of rootLayers) {
+      blockIds.add(layer.id);
+
+      if (layer instanceof GroupLayer) {
+        for (const descendant of this.getGroupDescendants(layer.id)) {
+          blockIds.add(descendant.id);
+        }
+      }
+    }
+
+    return this.layers.filter((layer) => blockIds.has(layer.id));
   }
 
   private getLayerAncestorIds(layer: Layer) {

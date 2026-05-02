@@ -21,10 +21,18 @@ export function applyLayerCommandToScene(scene: Scene, command: LayerCommand) {
       return scene.groupLayers(command.layerIds, command.name);
     case "mask":
       return scene.updateLayerMask(command.layerId, command.action);
+    case "move-to-position":
+      return scene.moveLayersToPosition(
+        command.layerIds,
+        command.targetLayerId,
+        command.placement
+      );
     case "move-down":
       return scene.moveLayerBackward(command.layerId);
     case "move-up":
       return scene.moveLayerForward(command.layerId);
+    case "remove-from-group":
+      return scene.removeLayersFromGroup(command.layerIds);
     case "select":
       return scene.selectLayer(command.layerId);
     case "update":
