@@ -7,6 +7,7 @@ import {
   midpoint
 } from "../../geometry/TransformGeometry";
 import { defaultLayerFilters, Layer } from "../../layers/Layer";
+import { GroupLayer } from "../../layers/GroupLayer";
 import { Scene } from "../../scene/Scene";
 import { Quad } from "../geometry/Quad";
 import { SelectionOverlayRenderer } from "../selection/SelectionOverlayRenderer";
@@ -45,7 +46,10 @@ export function renderEditorOverlays(
   camera: Camera2D,
   options: RenderOptions
 ) {
-  const selectedLayer = scene.selectedLayerId ? scene.getLayer(scene.selectedLayerId) : null;
+  const selectedLayer =
+    scene.selectedLayerIds.length === 1 && scene.selectedLayerId
+      ? scene.getLayer(scene.selectedLayerId)
+      : null;
 
   if (options.showCanvasBorder) {
     drawCanvasBorder(context, scene, camera);
@@ -120,7 +124,7 @@ function drawSelectionOutline(
   context.drawWorldLine(corners.topRight, corners.topLeft, outlineWidth);
   context.drawWorldLine(corners.topLeft, corners.bottomLeft, outlineWidth);
 
-  if (!layer.locked) {
+  if (!layer.locked && !(layer instanceof GroupLayer)) {
     drawTransformHandles(context, layer, camera);
   }
 }

@@ -12,6 +12,15 @@ export type SerializedSceneData = {
   };
   layers: SerializedLayer[];
   selectedLayerId?: string | null;
+  selectedLayerIds?: string[];
+  template?: SerializedProjectTemplateMetadata;
+  version: 1;
+};
+
+export type SerializedProjectTemplateMetadata = {
+  isTemplate: true;
+  name: string;
+  savedAt: string;
   version: 1;
 };
 
@@ -28,6 +37,17 @@ export async function loadSceneFromJSON(
 
   const layers = await Promise.all(data.layers.map((layerData) => Layer.fromJSON(layerData, assets)));
 
+  const selectedLayerIds =
+    Array.isArray(data.selectedLayerIds) && data.selectedLayerIds.length > 0
+      ? data.selectedLayerIds.filter((layerId) => layers.some((layer) => layer.id === layerId))
+      : data.selectedLayerId === undefined
+        ? layers.at(-1)?.id
+          ? [layers.at(-1)!.id]
+          : []
+        : data.selectedLayerId && layers.some((layer) => layer.id === data.selectedLayerId)
+          ? [data.selectedLayerId]
+          : [];
+
   return {
     document: {
       x: data.canvas.x ?? -data.canvas.width / 2,
@@ -37,12 +57,8 @@ export async function loadSceneFromJSON(
       color: data.canvas.background
     },
     layers,
-    selectedLayerId:
-      data.selectedLayerId === undefined
-        ? layers.at(-1)?.id ?? null
-        : data.selectedLayerId
-          ? (layers.find((layer) => layer.id === data.selectedLayerId)?.id ?? layers.at(-1)?.id ?? null)
-          : null
+    selectedLayerId: selectedLayerIds.at(-1) ?? null,
+    selectedLayerIds
   };
 }
 
@@ -59,6 +75,7 @@ export async function serializeSceneToJSON(input: {
   };
   layers: Layer[];
   selectedLayerId: string | null;
+  selectedLayerIds?: string[];
 }): Promise<SerializedSceneData> {
   return {
     app: "webster",
@@ -71,6 +88,7 @@ export async function serializeSceneToJSON(input: {
     },
     layers: await Promise.all(input.layers.map((layer) => layer.toJSON())),
     selectedLayerId: input.selectedLayerId,
+    selectedLayerIds: input.selectedLayerIds,
     version: 1
   };
 }

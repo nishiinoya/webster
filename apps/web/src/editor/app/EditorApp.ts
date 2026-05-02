@@ -14,7 +14,6 @@ import {
 } from "../scene/sceneSnapshots";
 import type { DocumentResizeAnchor, LayerMaskAction } from "../scene/Scene";
 import { exportScenePackage, importScenePackage } from "../projects/ProjectPackage";
-import { ImageLayer } from "../layers/ImageLayer";
 import { TextLayer } from "../layers/TextLayer";
 import type { ShapeKind } from "../layers/ShapeLayer";
 import {
@@ -30,10 +29,6 @@ import {
   getExportRenderBackground
 } from "./export/exportFileUtils";
 import type { ImageExportBackground, ImageExportFormat } from "./export/exportFileUtils";
-import {
-  clampImagePixels,
-  loadImageElement
-} from "./image/imageFileUtils";
 import {
   addImageFileToScene,
   createImageDocumentFromFile,
@@ -106,6 +101,7 @@ export type LayerCommand =
   | { type: "add-adjustment" }
   | { type: "delete"; layerId: string }
   | { type: "duplicate"; layerId: string }
+  | { type: "group"; layerIds: string[]; name?: string }
   | { type: "mask"; action: LayerMaskAction; layerId: string }
   | { type: "move-down"; layerId: string }
   | { type: "move-up"; layerId: string }
@@ -386,6 +382,15 @@ export class EditorApp {
     return exportScenePackage(this.scene);
   }
 
+  async exportProjectTemplateFile(templateName: string) {
+    return exportScenePackage(this.scene, {
+      isTemplate: true,
+      name: templateName.trim() || "Untitled template",
+      savedAt: new Date().toISOString(),
+      version: 1
+    });
+  }
+
   /**
    * Renders the current scene into an exported image or PDF blob using an offscreen renderer.
    */
@@ -444,6 +449,27 @@ export class EditorApp {
     return this.scene;
   }
 
+  async importTemplateAsGroup(file: File, templateName: string) {
+    const before = this.captureAppSnapshot();
+    const templateScene = await importScenePackage(file);
+    const group = this.scene.insertSceneAsGroup(templateScene, templateName);
+
+    this.recordHistoryAction(
+      this.createHistoryAction({
+        kind: "scene",
+        label: `Insert ${group.name}`,
+        operation: "insert-template-group",
+        payload: {
+          templateName: group.name
+        }
+      }),
+      before,
+      "scene"
+    );
+
+    return group;
+  }
+
   setSelectedTool(tool: string) {
     this.selectedTool = tool;
     this.inputController.setSelectedTool(tool);
@@ -473,8 +499,16 @@ export class EditorApp {
     return this.scene.selectLayer(layerId);
   }
 
+  selectLayers(layerIds: string[]) {
+    return this.scene.selectLayers(layerIds);
+  }
+
   getSelectedLayerId() {
-    return this.scene.selectedLayerId;
+    return this.scene.selectedLayerIds.length > 1 ? null : this.scene.selectedLayerId;
+  }
+
+  getSelectedLayerIds() {
+    return [...this.scene.selectedLayerIds];
   }
 
   hasActiveTextEdit() {
@@ -485,6 +519,10 @@ export class EditorApp {
 
   nudgeSelectedLayer(dx: number, dy: number) {
     if (dx === 0 && dy === 0) {
+      return false;
+    }
+
+    if (this.scene.selectedLayerIds.length > 1) {
       return false;
     }
 
@@ -1168,6 +1206,8 @@ function getLayerCommandLabel(scene: Scene, command: LayerCommand) {
       return `Delete ${layerName}`;
     case "duplicate":
       return `Duplicate ${layerName}`;
+    case "group":
+      return "Group layers";
     case "mask":
       return getMaskActionLabel(layerName, command.action);
     case "move-down":
@@ -1191,9 +1231,7 @@ function getLayerCommandMergeKey(command: LayerCommand) {
 function getImageLayerCommandLabel(scene: Scene, command: ImageLayerCommand) {
   const layerName = getLayerName(scene, command.layerId);
 
-  return command.type === "resample"
-    ? `Resample ${layerName}`
-    : `Restore ${layerName}`;
+  return command.type === "resample" ? `Resample ${layerName}` : `Restore ${layerName}`;
 }
 
 function getSelectionCommandLabel(command: SelectionCommand) {

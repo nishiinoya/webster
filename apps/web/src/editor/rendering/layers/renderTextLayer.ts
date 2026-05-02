@@ -117,7 +117,9 @@ export function renderTextLayer(
   context.solidColorShaderProgram.setFilters(filters.filters);
   context.solidColorShaderProgram.setAdjustmentFilters(filters.adjustments);
   context.bindMask(layer, context.solidColorShaderProgram);
-  context.solidColorShaderProgram.setColor(context.getRenderColor(layer.color, layer.opacity));
+  context.solidColorShaderProgram.setColor(
+    context.getRenderColor(layer.color, layer.opacity * filters.opacity)
+  );
 
   for (const glyph of layout.glyphs) {
     context.drawLayerLocalRectangle(layer, glyph, layout.maskFrame);
@@ -167,7 +169,9 @@ function drawCompiledTextGeometry(
   context.solidColorShaderProgram.setAdjustmentFilters(filters.adjustments);
   context.solidColorShaderProgram.setModel(context.getLayerModelMatrix(layer));
   context.bindMask(layer, context.solidColorShaderProgram);
-  context.solidColorShaderProgram.setColor(context.getRenderColor(layer.color, layer.opacity));
+  context.solidColorShaderProgram.setColor(
+    context.getRenderColor(layer.color, layer.opacity * filters.opacity)
+  );
 
   context.gl.bindBuffer(context.gl.ARRAY_BUFFER, context.textGeometryPositionBuffer);
   context.gl.bufferData(context.gl.ARRAY_BUFFER, normalizedVertices, context.gl.DYNAMIC_DRAW);

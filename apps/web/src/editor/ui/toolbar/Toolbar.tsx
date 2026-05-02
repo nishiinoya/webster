@@ -14,12 +14,14 @@ import { cn } from "../classNames";
 
 type ToolbarProps = {
   canEditDocument: boolean;
+  canGroupSelectedLayers: boolean;
   canRedo: boolean;
   canUndo: boolean;
   canvasSize: { height: number; width: number } | null;
   documentTitle: string;
   onDeleteSelectedLayer: () => void;
   onDuplicateSelectedLayer: () => void;
+  onGroupSelectedLayers: () => void;
   onNewDocument: () => void;
   onOpenCanvasResize: () => void;
   onOpenImageDocument: (file: File) => void;
@@ -28,8 +30,10 @@ type ToolbarProps = {
   onOpenProject: (file: File, handle?: WebsterFileHandle | null) => void;
   onRedo: () => void;
   onRestoreImageOriginal: () => void;
+  onExportTemplate: () => void;
   onSaveAsProject: () => void;
   onSaveProject: () => void;
+  onSaveTemplate: () => void;
   onAddAdjustmentLayer: () => void;
   onSelectionCommand: (command: SelectionCommand) => void;
   onSelectTool: (tool: string) => void;
@@ -84,7 +88,8 @@ const shortcutMenuGroups = [
       ["Arrows", "Nudge"],
       ["Shift+Arrows", "10 px"],
       ["Del", "Delete"],
-      ["Ctrl/Cmd+J", "Duplicate"]
+      ["Ctrl/Cmd+J", "Duplicate"],
+      ["Ctrl/Cmd+G", "Group"]
     ]
   },
   {
@@ -103,12 +108,14 @@ const shortcutMenuGroups = [
 
 export function Toolbar({
   canEditDocument,
+  canGroupSelectedLayers,
   canRedo,
   canUndo,
   canvasSize,
   documentTitle,
   onDeleteSelectedLayer,
   onDuplicateSelectedLayer,
+  onGroupSelectedLayers,
   onNewDocument,
   onOpenCanvasResize,
   onOpenImageDocument,
@@ -117,8 +124,10 @@ export function Toolbar({
   onOpenProject,
   onRedo,
   onRestoreImageOriginal,
+  onExportTemplate,
   onSaveAsProject,
   onSaveProject,
+  onSaveTemplate,
   onAddAdjustmentLayer,
   onSelectionCommand,
   onSelectTool,
@@ -316,6 +325,28 @@ export function Toolbar({
               disabled={!canEditDocument}
               onClick={() => {
                 fileMenuRef.current?.removeAttribute("open");
+                onSaveTemplate();
+              }}
+              type="button"
+            >
+              Save as template...
+            </button>
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!canEditDocument}
+              onClick={() => {
+                fileMenuRef.current?.removeAttribute("open");
+                onExportTemplate();
+              }}
+              type="button"
+            >
+              Export template...
+            </button>
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!canEditDocument}
+              onClick={() => {
+                fileMenuRef.current?.removeAttribute("open");
                 onOpenExportDialog();
               }}
               type="button"
@@ -375,6 +406,18 @@ export function Toolbar({
             >
               <span>Delete layer</span>
               <span className={toolbarMenuHintClass}>Del / Backspace</span>
+            </button>
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!canGroupSelectedLayers}
+              onClick={(event) => {
+                closeMenu(event);
+                onGroupSelectedLayers();
+              }}
+              type="button"
+            >
+              <span>Group selected</span>
+              <span className={toolbarMenuHintClass}>Ctrl/Cmd+G</span>
             </button>
             <MenuSeparator />
             <button className={toolbarMenuItemClass} disabled type="button">

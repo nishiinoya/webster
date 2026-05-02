@@ -11,6 +11,7 @@ import { ImageLayer } from "../layers/ImageLayer";
 import { AdjustmentLayer } from "../layers/AdjustmentLayer";
 import { defaultLayerFilters, Layer } from "../layers/Layer";
 import type { LayerFilterSettings } from "../layers/Layer";
+import { GroupLayer } from "../layers/GroupLayer";
 import { ShapeLayer } from "../layers/ShapeLayer";
 import { StrokeLayer } from "../layers/StrokeLayer";
 import { TextLayer } from "../layers/TextLayer";
@@ -355,7 +356,11 @@ export class Renderer {
     for (let layerIndex = 0; layerIndex < scene.layers.length; layerIndex += 1) {
       const layer = scene.layers[layerIndex];
 
-      if (!layer.visible || layer.opacity <= 0) {
+      if (!effectiveFilters[layerIndex].visible || !layer.visible || layer.opacity <= 0) {
+        continue;
+      }
+
+      if (layer instanceof GroupLayer) {
         continue;
       }
 
@@ -363,7 +368,12 @@ export class Renderer {
         continue;
       }
 
-      this.drawLayerDropShadow(layer, camera, effectiveFilters[layerIndex].filters);
+      this.drawLayerDropShadow(
+        layer,
+        camera,
+        effectiveFilters[layerIndex].filters,
+        effectiveFilters[layerIndex].opacity
+      );
       this.drawLayerContent(layer, camera, options.textEdit, effectiveFilters[layerIndex]);
     }
   }
@@ -418,7 +428,11 @@ export class Renderer {
     for (let layerIndex = 0; layerIndex <= topmostBlurAdjustmentIndex; layerIndex += 1) {
       const layer = scene.layers[layerIndex];
 
-      if (!layer.visible || layer.opacity <= 0) {
+      if (!effectiveFilters[layerIndex].visible || !layer.visible || layer.opacity <= 0) {
+        continue;
+      }
+
+      if (layer instanceof GroupLayer) {
         continue;
       }
 
@@ -443,7 +457,12 @@ export class Renderer {
         continue;
       }
 
-      this.drawLayerDropShadow(layer, camera, effectiveFilters[layerIndex].filters);
+      this.drawLayerDropShadow(
+        layer,
+        camera,
+        effectiveFilters[layerIndex].filters,
+        effectiveFilters[layerIndex].opacity
+      );
       this.drawLayerContent(layer, camera, options.textEdit, effectiveFilters[layerIndex]);
     }
 
@@ -462,11 +481,22 @@ export class Renderer {
     ) {
       const layer = scene.layers[layerIndex];
 
-      if (!layer.visible || layer.opacity <= 0 || layer instanceof AdjustmentLayer) {
+      if (
+        !effectiveFilters[layerIndex].visible ||
+        !layer.visible ||
+        layer.opacity <= 0 ||
+        layer instanceof AdjustmentLayer ||
+        layer instanceof GroupLayer
+      ) {
         continue;
       }
 
-      this.drawLayerDropShadow(layer, camera, effectiveFilters[layerIndex].filters);
+      this.drawLayerDropShadow(
+        layer,
+        camera,
+        effectiveFilters[layerIndex].filters,
+        effectiveFilters[layerIndex].opacity
+      );
       this.drawLayerContent(layer, camera, options.textEdit, effectiveFilters[layerIndex]);
     }
   }
@@ -799,7 +829,9 @@ export class Renderer {
       filters: {
         ...filters.filters,
         blur: 0
-      }
+      },
+      opacity: filters.opacity,
+      visible: filters.visible
     });
     this.bindRenderTarget(renderTargets.blur);
     this.clearTransparent();
@@ -898,7 +930,12 @@ export class Renderer {
     }
   }
 
-  private drawLayerDropShadow(layer: Layer, camera: Camera2D, filters: LayerFilterSettings) {
+  private drawLayerDropShadow(
+    layer: Layer,
+    camera: Camera2D,
+    filters: LayerFilterSettings,
+    opacityMultiplier = 1
+  ) {
     if (filters.dropShadowOpacity <= 0) {
       return;
     }
@@ -912,7 +949,12 @@ export class Renderer {
 
     try {
       for (const pass of passes) {
-        this.renderColorOverride = [0, 0, 0, filters.dropShadowOpacity * pass.opacity];
+        this.renderColorOverride = [
+          0,
+          0,
+          0,
+          filters.dropShadowOpacity * pass.opacity * opacityMultiplier
+        ];
         this.withLayerRenderOffset(
           {
             x: filters.dropShadowOffsetX + pass.x,
@@ -920,7 +962,9 @@ export class Renderer {
           },
           () => this.drawLayerContent(layer, camera, null, {
             adjustments: [],
-            filters: shadowFilters
+            filters: shadowFilters,
+            opacity: opacityMultiplier,
+            visible: true
           })
         );
       }

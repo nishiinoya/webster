@@ -1,10 +1,19 @@
 /** Import/export helpers for the native `.webster` project package format. */
 import { ImageLayer } from "../layers/ImageLayer";
 import { Scene, SerializedScene } from "../scene/Scene";
+import type { SerializedProjectTemplateMetadata } from "../scene/sceneSerialization";
 import { blobEntry, createZip, readZip, readZipText, textEntry } from "./ZipStore";
 
-export async function exportScenePackage(scene: Scene) {
+export async function exportScenePackage(
+  scene: Scene,
+  templateMetadata?: SerializedProjectTemplateMetadata
+) {
   const manifest = await scene.toJSON();
+
+  if (templateMetadata) {
+    manifest.template = templateMetadata;
+  }
+
   const entries = [textEntry("manifest.json", JSON.stringify(manifest, null, 2))];
   const addedAssets = new Set<string>();
 
@@ -29,6 +38,12 @@ export async function exportScenePackage(scene: Scene) {
   }
 
   return createZip(entries);
+}
+
+export async function readScenePackageManifest(file: Blob) {
+  const entries = await readZip(file);
+
+  return JSON.parse(await readZipText(entries, "manifest.json")) as SerializedScene;
 }
 
 export async function importScenePackage(file: Blob) {

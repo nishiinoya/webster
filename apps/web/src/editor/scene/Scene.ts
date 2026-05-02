@@ -1,4 +1,6 @@
 import { AdjustmentLayer } from "../layers/AdjustmentLayer";
+import { getLayerCorners } from "../geometry/TransformGeometry";
+import { GroupLayer } from "../layers/GroupLayer";
 import { Layer } from "../layers/Layer";
 import type { LayerFilterSettings, SerializedLayer } from "../layers/Layer";
 import { ShapeLayer } from "../layers/ShapeLayer";
@@ -15,6 +17,7 @@ import {
 } from "./sceneResize";
 import type { DocumentResizeAnchor } from "./sceneResize";
 import { loadSceneFromJSON, serializeSceneToJSON } from "./sceneSerialization";
+import type { SerializedProjectTemplateMetadata } from "./sceneSerialization";
 import { getLayerSummary } from "./sceneSummaries";
 
 export type { LayerMaskAction } from "./sceneMaskActions";
@@ -40,6 +43,8 @@ export type SerializedScene = {
   };
   layers: SerializedLayer[];
   selectedLayerId?: string | null;
+  selectedLayerIds?: string[];
+  template?: SerializedProjectTemplateMetadata;
   version: 1;
 };
 
@@ -52,6 +57,7 @@ export class Scene {
 
   readonly layers: Layer[] = [];
   selectedLayerId: string | null = null;
+  selectedLayerIds: string[] = [];
 
   constructor(
     options: {
@@ -102,7 +108,7 @@ export class Scene {
     scene.document.height = loaded.document.height;
     scene.document.color = loaded.document.color;
     scene.layers.push(...loaded.layers);
-    scene.selectedLayerId = loaded.selectedLayerId;
+    scene.selectLayers(loaded.selectedLayerIds);
 
     return scene;
   }
@@ -112,7 +118,7 @@ export class Scene {
    */
   addLayer(layer: Layer) {
     this.layers.push(layer);
-    this.selectedLayerId = layer.id;
+    this.setSelectedLayerIds([layer.id]);
 
     return layer;
   }
@@ -163,15 +169,33 @@ export class Scene {
       return null;
     }
 
-    const [removedLayer] = this.layers.splice(layerIndex, 1);
+    const layer = this.layers[layerIndex];
+    const removedLayers = layer instanceof GroupLayer ? this.getGroupSubtree(layer.id) : [layer];
+    const affectedGroupIds = [
+      ...new Set(removedLayers.map((removedLayer) => removedLayer.groupId).filter(Boolean) as string[])
+    ];
 
-    disposeLayer(removedLayer);
+    this.layers.splice(
+      0,
+      this.layers.length,
+      ...this.layers.filter((candidate) => !removedLayers.includes(candidate))
+    );
 
-    if (this.selectedLayerId === layerId) {
-      this.selectedLayerId = this.layers.at(-1)?.id ?? null;
+    for (const removedLayer of removedLayers) {
+      disposeLayer(removedLayer);
     }
 
-    return removedLayer;
+    if (removedLayers.some((removedLayer) => removedLayer.id === this.selectedLayerId)) {
+      this.setSelectedLayerIds(this.layers.at(-1)?.id ? [this.layers.at(-1)!.id] : []);
+    } else {
+      this.setSelectedLayerIds(this.selectedLayerIds);
+    }
+
+    for (const groupId of affectedGroupIds) {
+      this.updateParentGroupBounds(groupId);
+    }
+
+    return layer;
   }
 
   /**
@@ -186,7 +210,7 @@ export class Scene {
    */
   selectLayer(layerId: string | null) {
     if (layerId === null) {
-      this.selectedLayerId = null;
+      this.setSelectedLayerIds([]);
       return null;
     }
 
@@ -196,9 +220,15 @@ export class Scene {
       return null;
     }
 
-    this.selectedLayerId = layer.id;
+    this.setSelectedLayerIds([layer.id]);
 
     return layer;
+  }
+
+  selectLayers(layerIds: string[]) {
+    this.setSelectedLayerIds(layerIds);
+
+    return this.selectedLayerIds.map((layerId) => this.getLayer(layerId)).filter(Boolean);
   }
 
   /**
@@ -218,8 +248,13 @@ export class Scene {
       return null;
     }
 
+    if (layer instanceof GroupLayer) {
+      return this.moveGroupLayer(layer, x, y);
+    }
+
     layer.x = x;
     layer.y = y;
+    this.updateParentGroupBounds(layer.groupId);
 
     return layer;
   }
@@ -233,7 +268,28 @@ export class Scene {
     if (!layer) {
       return null;
     }
-    return applySceneLayerUpdates(layer, updates);
+
+    const beforeX = layer.x;
+    const beforeY = layer.y;
+    const updatedLayer = applySceneLayerUpdates(layer, updates);
+
+    if (updatedLayer instanceof GroupLayer) {
+      const deltaX = updatedLayer.x - beforeX;
+      const deltaY = updatedLayer.y - beforeY;
+
+      if (deltaX !== 0 || deltaY !== 0) {
+        for (const child of this.getGroupDescendants(updatedLayer.id)) {
+          child.x += deltaX;
+          child.y += deltaY;
+        }
+      }
+
+      this.updateParentGroupBounds(updatedLayer.groupId);
+    } else {
+      this.updateParentGroupBounds(updatedLayer.groupId);
+    }
+
+    return updatedLayer;
   }
 
   /**
@@ -259,13 +315,101 @@ export class Scene {
       return null;
     }
 
+    if (layer instanceof GroupLayer) {
+      const groupSubtree = this.getGroupSubtree(layer.id);
+      const groupIdMap = new Map(
+        groupSubtree
+          .filter((candidate): candidate is GroupLayer => candidate instanceof GroupLayer)
+          .map((group) => [group.id, crypto.randomUUID()])
+      );
+      const copies = groupSubtree.map((candidate) =>
+        cloneLayer(candidate, {
+          groupId: candidate.id === layer.id
+            ? layer.groupId
+            : candidate.groupId
+              ? groupIdMap.get(candidate.groupId) ?? candidate.groupId
+              : null,
+          id: candidate instanceof GroupLayer ? groupIdMap.get(candidate.id) : undefined,
+          locked: candidate.locked,
+          name: candidate.id === layer.id ? `${candidate.name} copy` : candidate.name,
+          xOffset: 24,
+          yOffset: -24
+        })
+      );
+      const groupCopy = copies.find((copy) => copy.id === groupIdMap.get(layer.id)) ?? null;
+      const layerIndex = this.layers.findIndex((candidate) => candidate.id === layerId);
+
+      this.layers.splice(layerIndex + 1, 0, ...copies);
+      this.updateParentGroupBounds(layer.groupId);
+      this.setSelectedLayerIds(groupCopy ? [groupCopy.id] : []);
+
+      return groupCopy;
+    }
+
     const copy = cloneLayer(layer);
     const layerIndex = this.layers.findIndex((candidate) => candidate.id === layerId);
 
     this.layers.splice(layerIndex + 1, 0, copy);
-    this.selectedLayerId = copy.id;
+    this.updateParentGroupBounds(copy.groupId);
+    this.setSelectedLayerIds([copy.id]);
 
     return copy;
+  }
+
+  groupLayers(layerIds: string[], name = "Group") {
+    const requestedLayers = [
+      ...new Set(layerIds.map((layerId) => this.getLayer(layerId)).filter((layer): layer is Layer => Boolean(layer)))
+    ];
+    const selectedLayers = requestedLayers.filter(
+      (layer) =>
+        !requestedLayers.some(
+          (candidate) => candidate instanceof GroupLayer && candidate.id !== layer.id && this.isLayerInGroup(layer, candidate.id)
+        )
+    );
+
+    if (selectedLayers.length < 2) {
+      return null;
+    }
+
+    const groupId = crypto.randomUUID();
+    const commonParentGroupId = getCommonGroupId(selectedLayers);
+    const previousGroupIds = [
+      ...new Set(selectedLayers.map((layer) => layer.groupId).filter(Boolean) as string[])
+    ];
+    const bounds = getLayerUnionBounds(selectedLayers);
+
+    if (!bounds) {
+      return null;
+    }
+
+    for (const layer of selectedLayers) {
+      layer.groupId = groupId;
+    }
+
+    const group = new GroupLayer({
+      collapsed: false,
+      groupId: commonParentGroupId,
+      height: bounds.height,
+      id: groupId,
+      name: name.trim() || "Group",
+      width: bounds.width,
+      x: bounds.x,
+      y: bounds.y
+    });
+    const insertIndex =
+      Math.max(...selectedLayers.map((layer) => this.layers.findIndex((candidate) => candidate.id === layer.id))) +
+      1;
+
+    this.layers.splice(insertIndex, 0, group);
+    this.setSelectedLayerIds([group.id]);
+
+    for (const previousGroupId of previousGroupIds) {
+      this.updateParentGroupBounds(previousGroupId);
+    }
+
+    this.updateParentGroupBounds(commonParentGroupId);
+
+    return group;
   }
 
   /**
@@ -278,11 +422,17 @@ export class Scene {
       return null;
     }
 
-    const nextIndex = Math.min(Math.max(targetIndex, 0), this.layers.length - 1);
-    const [layer] = this.layers.splice(currentIndex, 1);
-    this.layers.splice(nextIndex, 0, layer);
+    const layer = this.layers[currentIndex];
 
-    return layer;
+    if (layer instanceof GroupLayer) {
+      return this.reorderGroupLayer(layer, targetIndex);
+    }
+
+    const nextIndex = Math.min(Math.max(targetIndex, 0), this.layers.length - 1);
+    const [movedLayer] = this.layers.splice(currentIndex, 1);
+    this.layers.splice(nextIndex, 0, movedLayer);
+
+    return movedLayer;
   }
 
   moveLayerForward(layerId: string) {
@@ -317,7 +467,108 @@ export class Scene {
    * Returns UI-facing layer summaries in top-to-bottom display order.
    */
   getLayerSummaries() {
-    return this.layers.map((layer) => getLayerSummary(layer, this.selectedLayerId)).reverse();
+    const collapsedGroupIds = new Set<string>();
+    const summaries = [];
+
+    for (const layer of [...this.layers].reverse()) {
+      if (this.getLayerAncestorIds(layer).some((groupId) => collapsedGroupIds.has(groupId))) {
+        continue;
+      }
+
+      const summary = getLayerSummary(layer, this.selectedLayerId, {
+        childCount: layer instanceof GroupLayer ? this.getGroupDescendants(layer.id).length : 0,
+        depth: this.getLayerDepth(layer),
+        selectedLayerIds: this.selectedLayerIds
+      });
+
+      summaries.push(summary);
+
+      if (layer instanceof GroupLayer && layer.collapsed) {
+        collapsedGroupIds.add(layer.id);
+      }
+    }
+
+    return summaries;
+  }
+
+  insertSceneAsGroup(templateScene: Scene, name: string) {
+    const groupId = crypto.randomUUID();
+    const groupName = name.trim() || "Template group";
+    const templateCenter = {
+      x: templateScene.document.x + templateScene.document.width / 2,
+      y: templateScene.document.y + templateScene.document.height / 2
+    };
+    const documentCenter = {
+      x: this.document.x + this.document.width / 2,
+      y: this.document.y + this.document.height / 2
+    };
+    const xOffset = documentCenter.x - templateCenter.x;
+    const yOffset = documentCenter.y - templateCenter.y;
+    const layersToInsert: Layer[] = [];
+
+    if (templateScene.document.color[3] > 0) {
+      layersToInsert.push(
+        new ShapeLayer({
+          fillColor: [...templateScene.document.color],
+          groupId,
+          height: templateScene.document.height,
+          id: crypto.randomUUID(),
+          locked: true,
+          name: "Template background",
+          shape: "rectangle",
+          strokeColor: [0, 0, 0, 0],
+          strokeWidth: 0,
+          width: templateScene.document.width,
+          x: templateScene.document.x + xOffset,
+          y: templateScene.document.y + yOffset
+        })
+      );
+    }
+
+    const templateGroupIdMap = new Map(
+      templateScene.layers
+        .filter((layer): layer is GroupLayer => layer instanceof GroupLayer)
+        .map((group) => [group.id, crypto.randomUUID()])
+    );
+
+    for (const layer of templateScene.layers) {
+      const mappedLayerId = layer instanceof GroupLayer ? templateGroupIdMap.get(layer.id) : undefined;
+      const mappedGroupId = layer.groupId
+        ? templateGroupIdMap.get(layer.groupId) ?? groupId
+        : groupId;
+
+      layersToInsert.push(
+        cloneLayer(layer, {
+          groupId: mappedGroupId,
+          id: mappedLayerId,
+          locked: layer.locked,
+          name: layer.name,
+          xOffset,
+          yOffset
+        })
+      );
+    }
+
+    const bounds = getLayerUnionBounds(layersToInsert) ?? {
+      height: templateScene.document.height,
+      width: templateScene.document.width,
+      x: templateScene.document.x + xOffset,
+      y: templateScene.document.y + yOffset
+    };
+    const group = new GroupLayer({
+      collapsed: false,
+      height: bounds.height,
+      id: groupId,
+      name: groupName,
+      width: bounds.width,
+      x: bounds.x,
+      y: bounds.y
+    });
+
+    this.layers.push(...layersToInsert, group);
+    this.setSelectedLayerIds([group.id]);
+
+    return group;
   }
 
   /**
@@ -327,7 +578,8 @@ export class Scene {
     return serializeSceneToJSON({
       document: this.document,
       layers: this.layers,
-      selectedLayerId: this.selectedLayerId
+      selectedLayerId: this.selectedLayerId,
+      selectedLayerIds: this.selectedLayerIds
     });
   }
 
@@ -339,4 +591,160 @@ export class Scene {
       disposeLayer(layer);
     }
   }
+
+  private getGroupChildren(groupId: string) {
+    return this.layers.filter((layer) => layer.groupId === groupId);
+  }
+
+  private getGroupDescendants(groupId: string) {
+    const descendants: Layer[] = [];
+    const visitedGroupIds = new Set<string>();
+
+    const collect = (currentGroupId: string) => {
+      if (visitedGroupIds.has(currentGroupId)) {
+        return;
+      }
+
+      visitedGroupIds.add(currentGroupId);
+
+      for (const child of this.getGroupChildren(currentGroupId)) {
+        descendants.push(child);
+
+        if (child instanceof GroupLayer) {
+          collect(child.id);
+        }
+      }
+    };
+
+    collect(groupId);
+
+    return descendants;
+  }
+
+  private getGroupSubtree(groupId: string) {
+    const subtreeIds = new Set([groupId, ...this.getGroupDescendants(groupId).map((layer) => layer.id)]);
+
+    return this.layers.filter((layer) => subtreeIds.has(layer.id));
+  }
+
+  private getLayerAncestorIds(layer: Layer) {
+    const ancestorIds: string[] = [];
+    const visitedGroupIds = new Set<string>();
+    let groupId = layer.groupId;
+
+    while (groupId && !visitedGroupIds.has(groupId)) {
+      visitedGroupIds.add(groupId);
+      ancestorIds.push(groupId);
+
+      const group = this.getLayer(groupId);
+
+      groupId = group?.groupId ?? null;
+    }
+
+    return ancestorIds;
+  }
+
+  private getLayerDepth(layer: Layer) {
+    return this.getLayerAncestorIds(layer).length;
+  }
+
+  private isLayerInGroup(layer: Layer, groupId: string) {
+    return this.getLayerAncestorIds(layer).includes(groupId);
+  }
+
+  private setSelectedLayerIds(layerIds: string[]) {
+    const validLayerIds = [
+      ...new Set(layerIds.filter((layerId) => this.layers.some((layer) => layer.id === layerId)))
+    ];
+
+    this.selectedLayerIds = validLayerIds;
+    this.selectedLayerId = validLayerIds.at(-1) ?? null;
+  }
+
+  private moveGroupLayer(group: GroupLayer, x: number, y: number) {
+    const deltaX = x - group.x;
+    const deltaY = y - group.y;
+
+    group.x = x;
+    group.y = y;
+
+    for (const child of this.getGroupDescendants(group.id)) {
+      child.x += deltaX;
+      child.y += deltaY;
+    }
+
+    this.updateParentGroupBounds(group.groupId);
+
+    return group;
+  }
+
+  private updateParentGroupBounds(groupId: string | null) {
+    if (!groupId) {
+      return;
+    }
+
+    const group = this.getLayer(groupId);
+
+    if (!(group instanceof GroupLayer)) {
+      return;
+    }
+
+    const bounds = getLayerUnionBounds(this.getGroupChildren(group.id));
+
+    if (!bounds) {
+      return;
+    }
+
+    group.x = bounds.x;
+    group.y = bounds.y;
+    group.width = bounds.width;
+    group.height = bounds.height;
+    group.scaleX = 1;
+    group.scaleY = 1;
+    this.updateParentGroupBounds(group.groupId);
+  }
+
+  private reorderGroupLayer(group: GroupLayer, targetIndex: number) {
+    const block = this.getGroupSubtree(group.id);
+    const blockSet = new Set(block);
+    const remainingLayers = this.layers.filter((layer) => !blockSet.has(layer));
+    const currentIndex = this.layers.findIndex((layer) => layer.id === group.id);
+    const adjustedTargetIndex =
+      targetIndex > currentIndex ? targetIndex - block.length + 1 : targetIndex;
+    const nextIndex = Math.min(Math.max(adjustedTargetIndex, 0), remainingLayers.length);
+
+    this.layers.splice(0, this.layers.length, ...remainingLayers);
+    this.layers.splice(nextIndex, 0, ...block);
+
+    return group;
+  }
+}
+
+function getCommonGroupId(layers: Layer[]) {
+  const firstGroupId = layers[0]?.groupId ?? null;
+
+  return layers.every((layer) => (layer.groupId ?? null) === firstGroupId) ? firstGroupId : null;
+}
+
+function getLayerUnionBounds(layers: Layer[]) {
+  if (layers.length === 0) {
+    return null;
+  }
+
+  const points = layers.flatMap((layer) => {
+    const corners = getLayerCorners(layer);
+
+    return [corners.topLeft, corners.topRight, corners.bottomRight, corners.bottomLeft];
+  });
+  const minX = Math.min(...points.map((point) => point.x));
+  const minY = Math.min(...points.map((point) => point.y));
+  const maxX = Math.max(...points.map((point) => point.x));
+  const maxY = Math.max(...points.map((point) => point.y));
+
+  return {
+    height: Math.max(1, maxY - minY),
+    width: Math.max(1, maxX - minX),
+    x: minX,
+    y: minY
+  };
 }

@@ -37,7 +37,7 @@ export function renderImageLayer(
   context.texturedShaderProgram.setModel(context.getLayerModelMatrix(layer));
   context.texturedShaderProgram.setTextureUnit(0);
   context.texturedShaderProgram.setMaskTextureUnit(1);
-  context.texturedShaderProgram.setOpacity(layer.opacity);
+  context.texturedShaderProgram.setOpacity(layer.opacity * filters.opacity);
   context.texturedShaderProgram.setFilters(filters.filters);
   context.texturedShaderProgram.setAdjustmentFilters(filters.adjustments);
   context.texturedShaderProgram.setTextureSize(layer.image.naturalWidth, layer.image.naturalHeight);

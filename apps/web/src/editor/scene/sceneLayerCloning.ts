@@ -1,4 +1,5 @@
 import { AdjustmentLayer } from "../layers/AdjustmentLayer";
+import { GroupLayer } from "../layers/GroupLayer";
 import { ImageLayer } from "../layers/ImageLayer";
 import { Layer } from "../layers/Layer";
 import { ShapeLayer } from "../layers/ShapeLayer";
@@ -17,13 +18,24 @@ export function disposeLayer(layer: Layer) {
 /**
  * Creates a detached duplicate of a layer with a new id and a small positional offset.
  */
-export function cloneLayer(layer: Layer) {
+export function cloneLayer(
+  layer: Layer,
+  optionsOverride: {
+    groupId?: string | null;
+    id?: string;
+    locked?: boolean;
+    name?: string;
+    xOffset?: number;
+    yOffset?: number;
+  } = {}
+) {
   const options = {
+    groupId: optionsOverride.groupId ?? layer.groupId,
     height: layer.height,
-    id: crypto.randomUUID(),
-    locked: false,
+    id: optionsOverride.id ?? crypto.randomUUID(),
+    locked: optionsOverride.locked ?? false,
     mask: layer.mask?.clone() ?? null,
-    name: `${layer.name} copy`,
+    name: optionsOverride.name ?? `${layer.name} copy`,
     opacity: layer.opacity,
     filters: layer.filters,
     rotation: layer.rotation,
@@ -31,8 +43,8 @@ export function cloneLayer(layer: Layer) {
     scaleY: layer.scaleY,
     visible: layer.visible,
     width: layer.width,
-    x: layer.x + 24,
-    y: layer.y - 24
+    x: layer.x + (optionsOverride.xOffset ?? 24),
+    y: layer.y + (optionsOverride.yOffset ?? -24)
   };
 
   if (layer instanceof ShapeLayer) {
@@ -56,6 +68,13 @@ export function cloneLayer(layer: Layer) {
       originalImage: layer.originalImage,
       originalMimeType: layer.originalMimeType,
       originalObjectUrl: ""
+    });
+  }
+
+  if (layer instanceof GroupLayer) {
+    return new GroupLayer({
+      ...options,
+      collapsed: layer.collapsed
     });
   }
 

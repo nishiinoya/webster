@@ -17,7 +17,7 @@ type UseEditorSceneRequestsOptions = {
   onSceneChange: () => void;
   onSelectLayerRequestHandled: (requestId: number) => void;
   onUploadRequestHandled: (requestId: number) => void;
-  selectLayerRequest: { layerId: string; id: number } | null;
+  selectLayerRequest: { layerIds: string[]; id: number } | null;
   setWebglError: (error: string | null) => void;
   uploadRequest: { file: File; id: number } | null;
 };
@@ -114,7 +114,9 @@ export function useEditorSceneRequests({
     const requestId = imageLayerCommandRequest.id;
     let didCancel = false;
 
-    onImageLayerCommandPendingChange?.(getImageLayerCommandPendingState(imageLayerCommandRequest.command));
+    onImageLayerCommandPendingChange?.(
+      getImageLayerCommandPendingState(imageLayerCommandRequest.command)
+    );
 
     const runImageLayerCommand = async () => {
       const startedAt = performance.now();
@@ -213,7 +215,7 @@ export function useEditorSceneRequests({
     handledSelectLayerRequestIdRef.current = selectLayerRequest.id;
     onSelectLayerRequestHandled(selectLayerRequest.id);
 
-    editorAppRef.current.selectLayer(selectLayerRequest.layerId);
+    editorAppRef.current.selectLayers(selectLayerRequest.layerIds);
     onLayersChange(editorAppRef.current.getLayerSummaries());
   }, [editorAppRef, onLayersChange, onSelectLayerRequestHandled, selectLayerRequest]);
 

@@ -1,5 +1,6 @@
 import { ImageLayer } from "../layers/ImageLayer";
 import { Layer } from "../layers/Layer";
+import { GroupLayer } from "../layers/GroupLayer";
 import { ShapeLayer } from "../layers/ShapeLayer";
 import { StrokeLayer } from "../layers/StrokeLayer";
 import { TextLayer } from "../layers/TextLayer";
@@ -7,11 +8,21 @@ import { TextLayer } from "../layers/TextLayer";
 /**
  * Builds the UI-facing summary object used by layer panels and properties views.
  */
-export function getLayerSummary(layer: Layer, selectedLayerId: string | null) {
+export function getLayerSummary(
+  layer: Layer,
+  selectedLayerId: string | null,
+  options: { childCount?: number; depth?: number; selectedLayerIds?: string[] } = {}
+) {
+  const selectedLayerIds = options.selectedLayerIds ?? (selectedLayerId ? [selectedLayerId] : []);
   const baseSummary = {
+    childCount: options.childCount ?? 0,
+    collapsed: false,
+    depth: options.depth ?? 0,
+    groupId: layer.groupId,
     hasMask: Boolean(layer.mask),
     id: layer.id,
-    isSelected: layer.id === selectedLayerId,
+    isPrimarySelected: layer.id === selectedLayerId,
+    isSelected: selectedLayerIds.includes(layer.id),
     isVisible: layer.visible,
     locked: layer.locked,
     maskEnabled: layer.mask?.enabled ?? false,
@@ -55,6 +66,13 @@ export function getLayerSummary(layer: Layer, selectedLayerId: string | null) {
       color: layer.color,
       strokeStyle: layer.strokeStyle,
       strokeWidth: layer.strokeWidth
+    };
+  }
+
+  if (layer instanceof GroupLayer) {
+    return {
+      ...baseSummary,
+      collapsed: layer.collapsed
     };
   }
 

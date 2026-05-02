@@ -3,11 +3,14 @@ import { getLayerCorners, getModelMatrix } from "../../geometry/TransformGeometr
 import { AdjustmentLayer } from "../../layers/AdjustmentLayer";
 import { defaultLayerFilters, Layer } from "../../layers/Layer";
 import type { LayerFilterAdjustment, LayerFilterSettings } from "../../layers/Layer";
+import { GroupLayer } from "../../layers/GroupLayer";
 import type { BlurRegion } from "../shaders/PostProcessShaderProgram";
 
 export type EffectiveLayerFilters = {
   adjustments: LayerFilterAdjustment[];
   filters: LayerFilterSettings;
+  opacity: number;
+  visible: boolean;
 };
 
 /**
@@ -15,17 +18,23 @@ export type EffectiveLayerFilters = {
  */
 export function getEffectiveLayerFilters(layers: Layer[]) {
   const effectiveFilters = new Map<Layer, EffectiveLayerFilters>();
+  const groupsById = new Map(
+    layers
+      .filter((layer): layer is GroupLayer => layer instanceof GroupLayer)
+      .map((group) => [group.id, group])
+  );
   let adjustmentFiltersAbove: LayerFilterAdjustment[] = [];
 
   for (let index = layers.length - 1; index >= 0; index -= 1) {
     const layer = layers[index];
+    const groupState = getLayerGroupState(layer, groupsById);
 
     if (layer instanceof AdjustmentLayer) {
-      if (layer.visible && layer.opacity > 0) {
+      if (groupState.visible && layer.visible && layer.opacity > 0) {
         adjustmentFiltersAbove = [
           {
             bounds: getLayerWorldBounds(layer),
-            filters: scaleLayerFilters(layer.filters, layer.opacity),
+            filters: scaleLayerFilters(layer.filters, layer.opacity * groupState.opacity),
             inverseMatrix: getLayerInverseMatrix(layer),
             size: [1, 1]
           },
@@ -35,14 +44,28 @@ export function getEffectiveLayerFilters(layers: Layer[]) {
 
       effectiveFilters.set(layer, {
         adjustments: [],
-        filters: defaultLayerFilters
+        filters: defaultLayerFilters,
+        opacity: groupState.opacity,
+        visible: groupState.visible
+      });
+      continue;
+    }
+
+    if (layer instanceof GroupLayer) {
+      effectiveFilters.set(layer, {
+        adjustments: [],
+        filters: defaultLayerFilters,
+        opacity: 1,
+        visible: layer.visible && layer.opacity > 0
       });
       continue;
     }
 
     effectiveFilters.set(layer, {
       adjustments: adjustmentFiltersAbove,
-      filters: layer.filters
+      filters: combineLayerFilters(groupState.filters, layer.filters),
+      opacity: groupState.opacity,
+      visible: groupState.visible
     });
   }
 
@@ -50,7 +73,9 @@ export function getEffectiveLayerFilters(layers: Layer[]) {
     (layer): EffectiveLayerFilters =>
       effectiveFilters.get(layer) ?? {
         adjustments: [],
-        filters: layer.filters
+        filters: layer.filters,
+        opacity: 1,
+        visible: true
       }
   );
 }
@@ -88,9 +113,12 @@ export function combineLayerFilters(base: LayerFilterSettings, overlay: LayerFil
  * Returns whether any visible adjustment layer currently requires a blur pass.
  */
 export function hasAdjustmentBlur(layers: Layer[]) {
+  const groupsById = getGroupsById(layers);
+
   return layers.some(
     (layer) =>
       layer instanceof AdjustmentLayer &&
+      getLayerGroupState(layer, groupsById).visible &&
       layer.visible &&
       layer.opacity > 0 &&
       layer.filters.blur * layer.opacity > 0.5
@@ -101,11 +129,14 @@ export function hasAdjustmentBlur(layers: Layer[]) {
  * Finds the last layer index that still participates in the adjustment blur stack.
  */
 export function getTopmostAdjustmentBlurIndex(layers: Layer[]) {
+  const groupsById = getGroupsById(layers);
+
   for (let index = layers.length - 1; index >= 0; index -= 1) {
     const layer = layers[index];
 
     if (
       layer instanceof AdjustmentLayer &&
+      getLayerGroupState(layer, groupsById).visible &&
       layer.visible &&
       layer.opacity > 0 &&
       layer.filters.blur * layer.opacity > 0.5
@@ -125,6 +156,36 @@ export function toClipOnlyBlurRegions(regions: BlurRegion[]): BlurRegion[] {
     ...region,
     radius: 0
   }));
+}
+
+function getGroupsById(layers: Layer[]) {
+  return new Map(
+    layers
+      .filter((layer): layer is GroupLayer => layer instanceof GroupLayer)
+      .map((group) => [group.id, group])
+  );
+}
+
+function getLayerGroupState(layer: Layer, groupsById: Map<string, GroupLayer>) {
+  let groupId = layer.groupId;
+  let filters = defaultLayerFilters;
+  let opacity = 1;
+  let visible = true;
+
+  while (groupId) {
+    const group = groupsById.get(groupId);
+
+    if (!group) {
+      break;
+    }
+
+    visible = visible && group.visible && group.opacity > 0;
+    opacity *= group.opacity;
+    filters = combineLayerFilters(group.filters, filters);
+    groupId = group.groupId;
+  }
+
+  return { filters, opacity, visible };
 }
 
 function scaleLayerFilters(filters: LayerFilterSettings, amount: number) {

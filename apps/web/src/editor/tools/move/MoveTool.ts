@@ -9,6 +9,7 @@ import {
   TransformHandleId
 } from "../../geometry/TransformGeometry";
 import { AdjustmentLayer } from "../../layers/AdjustmentLayer";
+import { GroupLayer } from "../../layers/GroupLayer";
 import { Layer } from "../../layers/Layer";
 import { TextLayer } from "../../layers/TextLayer";
 
@@ -80,11 +81,12 @@ export class MoveTool {
     }
 
     const worldPoint = this.clientToWorld(event.clientX, event.clientY);
-    const selectedLayer = this.scene.selectedLayerId
-      ? this.scene.getLayer(this.scene.selectedLayerId)
-      : null;
+    const selectedLayer =
+      this.scene.selectedLayerIds.length === 1 && this.scene.selectedLayerId
+        ? this.scene.getLayer(this.scene.selectedLayerId)
+        : null;
     const handleId =
-      selectedLayer && !selectedLayer.locked
+      selectedLayer && !selectedLayer.locked && !(selectedLayer instanceof GroupLayer)
         ? this.hitTestHandle(selectedLayer, event.clientX, event.clientY)
         : null;
 
@@ -200,11 +202,12 @@ export class MoveTool {
       return getHandleCursor(this.resizeState.handleId, this.resizeState.layer.rotation);
     }
 
-    const selectedLayer = this.scene.selectedLayerId
-      ? this.scene.getLayer(this.scene.selectedLayerId)
-      : null;
+    const selectedLayer =
+      this.scene.selectedLayerIds.length === 1 && this.scene.selectedLayerId
+        ? this.scene.getLayer(this.scene.selectedLayerId)
+        : null;
     const handleId =
-      selectedLayer && !selectedLayer.locked
+      selectedLayer && !selectedLayer.locked && !(selectedLayer instanceof GroupLayer)
         ? this.hitTestHandle(selectedLayer, clientX, clientY)
         : null;
 

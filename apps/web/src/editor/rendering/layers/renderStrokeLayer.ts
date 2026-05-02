@@ -48,7 +48,9 @@ export function renderStrokeLayer(
   context.bindMask(layer, context.brushShaderProgram);
 
   for (const path of cachedGeometry.paths) {
-    context.brushShaderProgram.setColor(context.getRenderColor(path.color, layer.opacity));
+    context.brushShaderProgram.setColor(
+      context.getRenderColor(path.color, layer.opacity * filters.opacity)
+    );
     context.brushShaderProgram.setBrushStyle(path.brushStyle);
     context.brushShaderProgram.setBrushSize(path.brushSize);
     context.brushShaderProgram.setSelectionClip(getLayerSelectionClip(layer, path.selectionClip ?? null));

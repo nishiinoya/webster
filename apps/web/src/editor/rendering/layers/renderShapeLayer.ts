@@ -52,24 +52,28 @@ export function renderShapeLayer(
   context.solidColorShaderProgram.setAdjustmentFilters(filters.adjustments);
 
   if (layer.shape === "rectangle") {
-    drawRectangleShape(context, layer);
+    drawRectangleShape(context, layer, filters.opacity);
     return;
   }
 
   if (layer.shape === "circle") {
-    drawEllipseShape(context, layer);
+    drawEllipseShape(context, layer, filters.opacity);
     return;
   }
 
   if (layer.shape === "line") {
-    drawLineShape(context, layer);
+    drawLineShape(context, layer, filters.opacity);
     return;
   }
 
-  drawPolygonShape(context, layer);
+  drawPolygonShape(context, layer, filters.opacity);
 }
 
-function drawPolygonShape(context: ShapeLayerRendererContext, layer: ShapeLayer) {
+function drawPolygonShape(
+  context: ShapeLayerRendererContext,
+  layer: ShapeLayer,
+  opacityMultiplier: number
+) {
   const points = getPolygonShapePoints(layer);
 
   if (points.length < 3) {
@@ -77,7 +81,9 @@ function drawPolygonShape(context: ShapeLayerRendererContext, layer: ShapeLayer)
   }
 
   if (layer.fillColor[3] > 0) {
-    context.solidColorShaderProgram.setColor(context.getRenderColor(layer.fillColor, layer.opacity));
+    context.solidColorShaderProgram.setColor(
+      context.getRenderColor(layer.fillColor, layer.opacity * opacityMultiplier)
+    );
     context.bindMask(layer, context.solidColorShaderProgram);
     context.drawLayerLocalPolygon(layer, points);
   }
@@ -86,7 +92,9 @@ function drawPolygonShape(context: ShapeLayerRendererContext, layer: ShapeLayer)
     return;
   }
 
-  context.solidColorShaderProgram.setColor(context.getRenderColor(layer.strokeColor, layer.opacity));
+  context.solidColorShaderProgram.setColor(
+    context.getRenderColor(layer.strokeColor, layer.opacity * opacityMultiplier)
+  );
   context.bindMask(layer, context.solidColorShaderProgram);
 
   const strokeWidth =
@@ -100,9 +108,15 @@ function drawPolygonShape(context: ShapeLayerRendererContext, layer: ShapeLayer)
   }
 }
 
-function drawRectangleShape(context: ShapeLayerRendererContext, layer: ShapeLayer) {
+function drawRectangleShape(
+  context: ShapeLayerRendererContext,
+  layer: ShapeLayer,
+  opacityMultiplier: number
+) {
   if (layer.fillColor[3] > 0) {
-    context.solidColorShaderProgram.setColor(context.getRenderColor(layer.fillColor, layer.opacity));
+    context.solidColorShaderProgram.setColor(
+      context.getRenderColor(layer.fillColor, layer.opacity * opacityMultiplier)
+    );
     context.solidColorShaderProgram.setModel(context.getLayerModelMatrix(layer));
     context.bindMask(layer, context.solidColorShaderProgram);
     context.quad.drawTextured(context.solidColorShaderProgram);
@@ -112,7 +126,9 @@ function drawRectangleShape(context: ShapeLayerRendererContext, layer: ShapeLaye
     return;
   }
 
-  context.solidColorShaderProgram.setColor(context.getRenderColor(layer.strokeColor, layer.opacity));
+  context.solidColorShaderProgram.setColor(
+    context.getRenderColor(layer.strokeColor, layer.opacity * opacityMultiplier)
+  );
   context.bindMask(layer, context.solidColorShaderProgram);
 
   const strokeWidthX = Math.min(
@@ -153,7 +169,11 @@ function drawRectangleShape(context: ShapeLayerRendererContext, layer: ShapeLaye
   });
 }
 
-function drawLineShape(context: ShapeLayerRendererContext, layer: ShapeLayer) {
+function drawLineShape(
+  context: ShapeLayerRendererContext,
+  layer: ShapeLayer,
+  opacityMultiplier: number
+) {
   if (layer.strokeWidth <= 0 || layer.strokeColor[3] <= 0) {
     return;
   }
@@ -163,7 +183,9 @@ function drawLineShape(context: ShapeLayerRendererContext, layer: ShapeLayer) {
     layer.height
   );
 
-  context.solidColorShaderProgram.setColor(context.getRenderColor(layer.strokeColor, layer.opacity));
+  context.solidColorShaderProgram.setColor(
+    context.getRenderColor(layer.strokeColor, layer.opacity * opacityMultiplier)
+  );
   context.bindMask(layer, context.solidColorShaderProgram);
 
   context.drawLayerLocalRectangle(layer, {
@@ -174,9 +196,15 @@ function drawLineShape(context: ShapeLayerRendererContext, layer: ShapeLayer) {
   });
 }
 
-function drawEllipseShape(context: ShapeLayerRendererContext, layer: ShapeLayer) {
+function drawEllipseShape(
+  context: ShapeLayerRendererContext,
+  layer: ShapeLayer,
+  opacityMultiplier: number
+) {
   if (layer.fillColor[3] > 0) {
-    context.solidColorShaderProgram.setColor(context.getRenderColor(layer.fillColor, layer.opacity));
+    context.solidColorShaderProgram.setColor(
+      context.getRenderColor(layer.fillColor, layer.opacity * opacityMultiplier)
+    );
     context.solidColorShaderProgram.setModel(context.getLayerModelMatrix(layer));
     context.bindMask(layer, context.solidColorShaderProgram);
     context.ellipseMesh.drawFill(context.solidColorShaderProgram);
@@ -186,7 +214,9 @@ function drawEllipseShape(context: ShapeLayerRendererContext, layer: ShapeLayer)
     return;
   }
 
-  context.solidColorShaderProgram.setColor(context.getRenderColor(layer.strokeColor, layer.opacity));
+  context.solidColorShaderProgram.setColor(
+    context.getRenderColor(layer.strokeColor, layer.opacity * opacityMultiplier)
+  );
   context.solidColorShaderProgram.setModel(context.getLayerModelMatrix(layer));
   context.bindMask(layer, context.solidColorShaderProgram);
   context.ellipseMesh.drawStroke(

@@ -17,6 +17,8 @@ export function applyLayerCommandToScene(scene: Scene, command: LayerCommand) {
       return scene.removeLayer(command.layerId);
     case "duplicate":
       return scene.duplicateLayer(command.layerId);
+    case "group":
+      return scene.groupLayers(command.layerIds, command.name);
     case "mask":
       return scene.updateLayerMask(command.layerId, command.action);
     case "move-down":

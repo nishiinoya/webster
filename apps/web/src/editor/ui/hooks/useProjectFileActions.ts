@@ -163,6 +163,23 @@ export function useProjectFileActions({
         setWebglError(null);
       }
     },
+    onGroupSelectedLayers: () => {
+      if (!editorAppRef.current) {
+        return;
+      }
+
+      const layerIds = editorAppRef.current.getSelectedLayerIds();
+
+      if (layerIds.length < 2) {
+        return;
+      }
+
+      if (editorAppRef.current.applyLayerCommand({ layerIds, name: "Group", type: "group" })) {
+        onLayersChange(editorAppRef.current.getLayerSummaries());
+        onSceneChange();
+        setWebglError(null);
+      }
+    },
     onNudgeSelectedLayer: (dx, dy) => {
       if (!editorAppRef.current) {
         return;

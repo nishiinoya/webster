@@ -1,5 +1,6 @@
 import { normalizeLayerFilters } from "../layers/Layer";
 import type { LayerFilterSettings } from "../layers/Layer";
+import { GroupLayer } from "../layers/GroupLayer";
 import { Layer } from "../layers/Layer";
 import { ShapeLayer } from "../layers/ShapeLayer";
 import { StrokeLayer } from "../layers/StrokeLayer";
@@ -10,6 +11,7 @@ export type SceneLayerUpdates = Partial<{
   align: "left" | "center" | "right";
   bold: boolean;
   color: [number, number, number, number];
+  collapsed: boolean;
   fillColor: [number, number, number, number];
   filters: Partial<LayerFilterSettings>;
   fontFamily: string;
@@ -66,17 +68,33 @@ export function applySceneLayerUpdates(layer: Layer, updates: SceneLayerUpdates)
       layer.y = updates.y;
     }
 
-    if (updates.rotation !== undefined) {
+    if (updates.rotation !== undefined && !(layer instanceof GroupLayer)) {
       layer.rotation = normalizeRotation(updates.rotation);
     }
 
-    if (updates.width !== undefined && !(layer instanceof TextLayer)) {
+    if (
+      updates.width !== undefined &&
+      !(layer instanceof TextLayer) &&
+      !(layer instanceof GroupLayer)
+    ) {
       layer.scaleX = Math.max(1, updates.width) / layer.width;
     }
 
-    if (updates.height !== undefined && !(layer instanceof TextLayer)) {
+    if (
+      updates.height !== undefined &&
+      !(layer instanceof TextLayer) &&
+      !(layer instanceof GroupLayer)
+    ) {
       layer.scaleY = Math.max(1, updates.height) / layer.height;
     }
+  }
+
+  if (layer instanceof GroupLayer) {
+    if (updates.collapsed !== undefined) {
+      layer.collapsed = updates.collapsed;
+    }
+
+    return layer;
   }
 
   if (layer instanceof ShapeLayer && !layer.locked) {

@@ -25,6 +25,15 @@ import {
   readRememberedProjectFileHandle
 } from "../projects/projectFileHandleStore";
 import type { RecentProjectHandle } from "../projects/projectFileHandleStore";
+import {
+  builtInProjectTemplates,
+  deleteUserProjectTemplate,
+  getUserProjectTemplate,
+  importUserProjectTemplate,
+  listUserProjectTemplates,
+  renameUserProjectTemplate
+} from "../projects/projectTemplates";
+import type { UserProjectTemplateSummary } from "../projects/projectTemplates";
 import type { SaveStatus } from "./hooks/useProjectFileActions";
 import { CanvasView } from "./CanvasView";
 import { cn } from "./classNames";
@@ -110,11 +119,12 @@ const editorTools: ToolDefinition[] = [
 ];
 
 const initialLayers: LayerSummary[] = [];
-const documentPresets: Array<NewDocumentSize & { label: string }> = [
-  { height: 800, label: "Canvas 1200 x 800", width: 1200 },
-  { height: 1080, label: "HD 1920 x 1080", width: 1920 },
-  { height: 1080, label: "Square 1080 x 1080", width: 1080 }
-];
+const documentPresets: Array<NewDocumentSize & { label: string }> =
+  builtInProjectTemplates.map((template) => ({
+    height: template.height,
+    label: `${template.name} ${template.width} x ${template.height}`,
+    width: template.width
+  }));
 const layersPanelMinHeight = 170;
 const propertiesPanelMinHeight = 260;
 const historyPanelMinHeight = 72;
@@ -178,6 +188,7 @@ export function EditorPage() {
     useState<ImageLayerCommandPendingState | null>(null);
   const [recentProjects, setRecentProjects] = useState<RecentProjectHandle[]>([]);
   const [recentProjectError, setRecentProjectError] = useState<string | null>(null);
+  const [userTemplates, setUserTemplates] = useState<UserProjectTemplateSummary[]>([]);
   const [historyState, setHistoryState] = useState<HistoryStateSnapshot>(emptyHistoryState);
   const [layers, setLayers] = useState<LayerSummary[]>(initialLayers);
   const [uploadRequest, setUploadRequest] = useState<{ file: File; id: number } | null>(null);
@@ -188,7 +199,7 @@ export function EditorPage() {
   } | null>(null);
   const [selectLayerRequest, setSelectLayerRequest] = useState<{
     id: number;
-    layerId: string;
+    layerIds: string[];
   } | null>(null);
   const [layerCommandRequest, setLayerCommandRequest] = useState<{
     command: LayerCommand;
@@ -211,6 +222,19 @@ export function EditorPage() {
   const [projectSaveRequest, setProjectSaveRequest] = useState<{
     id: number;
     mode: "save" | "save-as";
+  } | null>(null);
+  const [templateSaveRequest, setTemplateSaveRequest] = useState<{
+    id: number;
+    name: string;
+  } | null>(null);
+  const [templateExportRequest, setTemplateExportRequest] = useState<{
+    id: number;
+    name: string;
+  } | null>(null);
+  const [templateInsertRequest, setTemplateInsertRequest] = useState<{
+    file: File;
+    id: number;
+    name: string;
   } | null>(null);
   const [imageExportRequest, setImageExportRequest] = useState<{
     background: ImageExportBackground;
@@ -246,7 +270,13 @@ export function EditorPage() {
     "--layers-panel-height": `${layersPanelHeight}px`,
     "--properties-panel-height": `${propertiesPanelHeight}px`
   };
-  const selectedLayer = layers.find((layer) => layer.isSelected) ?? null;
+  const selectedLayers = layers.filter((layer) => layer.isSelected);
+  const selectedLayer = selectedLayers.length === 1 ? selectedLayers[0] : null;
+  const selectedLayerIds = new Set(selectedLayers.map((layer) => layer.id));
+  const groupableSelectedLayerIds = selectedLayers
+    .filter((layer) => !hasSelectedAncestorLayer(layer, layers, selectedLayerIds))
+    .map((layer) => layer.id);
+  const canGroupSelectedLayers = groupableSelectedLayerIds.length > 1;
   const selectedImageLayer = isImageLayerSummary(selectedLayer) ? selectedLayer : null;
   const activeDocument = tabs.find((tab) => tab.isActive) ?? tabs[0] ?? null;
   const activeHistoryState = activeDocument ? historyState : emptyHistoryState;
@@ -273,10 +303,14 @@ export function EditorPage() {
     let didCancel = false;
 
     async function loadRecentProjects() {
-      const projects = await listRememberedProjectFiles().catch(() => []);
+      const [projects, templates] = await Promise.all([
+        listRememberedProjectFiles().catch(() => []),
+        listUserProjectTemplates().catch(() => [])
+      ]);
 
       if (!didCancel) {
         setRecentProjects(projects);
+        setUserTemplates(templates);
       }
     }
 
@@ -289,6 +323,22 @@ export function EditorPage() {
 
   function runLayerCommand(command: LayerCommand) {
     setLayerCommandRequest({ command, id: Date.now() });
+  }
+
+  function groupSelectedLayers() {
+    if (groupableSelectedLayerIds.length < 2) {
+      return;
+    }
+
+    runLayerCommand({
+      layerIds: groupableSelectedLayerIds,
+      name: "Group",
+      type: "group"
+    });
+  }
+
+  async function refreshUserTemplates() {
+    setUserTemplates(await listUserProjectTemplates().catch(() => []));
   }
 
   function activateTab(tabId: string) {
@@ -317,6 +367,123 @@ export function EditorPage() {
     ]);
     setImageDocumentRequest(null);
     setIsNewDocumentDialogOpen(false);
+  }
+
+  async function createDocumentFromUserTemplate(template: UserProjectTemplateSummary) {
+    const storedTemplate = await getUserProjectTemplate(template.id);
+
+    if (!storedTemplate) {
+      window.alert("Template is no longer available.");
+      await refreshUserTemplates();
+      return;
+    }
+
+    documentCounterRef.current += 1;
+
+    const title = storedTemplate.name || `Template ${documentCounterRef.current}`;
+    const tab: EditorDocumentTab = {
+      height: storedTemplate.height,
+      id: `document-${documentCounterRef.current}`,
+      isActive: true,
+      title,
+      width: storedTemplate.width
+    };
+
+    setTabs((currentTabs) => [
+      ...currentTabs.map((currentTab) => ({ ...currentTab, isActive: false })),
+      tab
+    ]);
+    setProjectFileRequest({
+      file: new File([storedTemplate.projectBlob], getProjectFilename(title), {
+        type: "application/vnd.webster.project"
+      }),
+      handle: null,
+      id: Date.now(),
+      tabId: tab.id
+    });
+    setRecentProjectError(null);
+    setIsNewDocumentDialogOpen(false);
+  }
+
+  async function renameUserTemplate(template: UserProjectTemplateSummary, name: string) {
+    await renameUserProjectTemplate(template.id, name).catch(() => null);
+    await refreshUserTemplates();
+  }
+
+  async function deleteUserTemplate(template: UserProjectTemplateSummary) {
+    await deleteUserProjectTemplate(template.id).catch(() => undefined);
+    await refreshUserTemplates();
+  }
+
+  async function importUserTemplateFile(file: File) {
+    try {
+      await importUserProjectTemplate(file);
+      await refreshUserTemplates();
+    } catch {
+      window.alert("Unable to import template. Please choose a valid .webster project file.");
+    }
+  }
+
+  async function exportUserTemplate(template: UserProjectTemplateSummary) {
+    const storedTemplate = await getUserProjectTemplate(template.id);
+
+    if (!storedTemplate) {
+      window.alert("Template is no longer available.");
+      await refreshUserTemplates();
+      return;
+    }
+
+    downloadBlob(storedTemplate.projectBlob, getProjectFilename(storedTemplate.name));
+  }
+
+  async function insertUserTemplate(template: UserProjectTemplateSummary) {
+    const storedTemplate = await getUserProjectTemplate(template.id);
+
+    if (!activeDocument) {
+      await createDocumentFromUserTemplate(template);
+      return;
+    }
+
+    if (!storedTemplate) {
+      window.alert("Template is no longer available.");
+      await refreshUserTemplates();
+      return;
+    }
+
+    setTemplateInsertRequest({
+      file: new File([storedTemplate.projectBlob], getProjectFilename(storedTemplate.name), {
+        type: "application/vnd.webster.project"
+      }),
+      id: Date.now(),
+      name: storedTemplate.name
+    });
+    setIsNewDocumentDialogOpen(false);
+  }
+
+  function saveCurrentProjectAsTemplate() {
+    const name = window.prompt("Template name", activeDocument?.title ?? "Template");
+
+    if (name === null) {
+      return;
+    }
+
+    setTemplateSaveRequest({
+      id: Date.now(),
+      name
+    });
+  }
+
+  function exportCurrentProjectAsTemplate() {
+    const name = window.prompt("Template name", activeDocument?.title ?? "Template");
+
+    if (name === null) {
+      return;
+    }
+
+    setTemplateExportRequest({
+      id: Date.now(),
+      name
+    });
   }
 
   function closeDocumentTab(tabId: string) {
@@ -591,6 +758,7 @@ export function EditorPage() {
     <main className="grid h-screen min-h-0 grid-rows-[64px_1fr] overflow-hidden bg-[#101113] text-[13px] text-[#e7e9ec] min-[1400px]:text-[14px] max-[760px]:h-[100svh] max-[760px]:grid-rows-[118px_1fr]">
       <Toolbar
         canEditDocument={Boolean(activeDocument)}
+        canGroupSelectedLayers={canGroupSelectedLayers}
         canRedo={activeHistoryState.canRedo}
         canUndo={activeHistoryState.canUndo}
         canvasSize={
@@ -612,6 +780,7 @@ export function EditorPage() {
             runLayerCommand({ layerId: selectedLayer.id, type: "duplicate" });
           }
         }}
+        onGroupSelectedLayers={groupSelectedLayers}
         onNewDocument={() => setIsNewDocumentDialogOpen(true)}
         onOpenCanvasResize={() => setIsResizeCanvasDialogOpen(true)}
         onOpenExportDialog={() => setIsExportImageDialogOpen(true)}
@@ -634,6 +803,8 @@ export function EditorPage() {
         }}
         onSaveAsProject={() => setProjectSaveRequest({ id: Date.now(), mode: "save-as" })}
         onSaveProject={() => setProjectSaveRequest({ id: Date.now(), mode: "save" })}
+        onExportTemplate={exportCurrentProjectAsTemplate}
+        onSaveTemplate={saveCurrentProjectAsTemplate}
         onAddAdjustmentLayer={() => runLayerCommand({ type: "add-adjustment" })}
         onSelectionCommand={(command) => setSelectionCommandRequest({ command, id: Date.now() })}
         onSelectTool={setSelectedTool}
@@ -753,6 +924,20 @@ export function EditorPage() {
               onProjectSaveRequestHandled={(requestId) =>
                 setProjectSaveRequest((request) => (request?.id === requestId ? null : request))
               }
+              onTemplateSaveRequestHandled={(requestId) => {
+                setTemplateSaveRequest((request) => (request?.id === requestId ? null : request));
+                void refreshUserTemplates();
+              }}
+              onTemplateExportRequestHandled={(requestId) =>
+                setTemplateExportRequest((request) =>
+                  request?.id === requestId ? null : request
+                )
+              }
+              onTemplateInsertRequestHandled={(requestId) =>
+                setTemplateInsertRequest((request) =>
+                  request?.id === requestId ? null : request
+                )
+              }
               onImageExportRequestHandled={(requestId) =>
                 setImageExportRequest((request) => (request?.id === requestId ? null : request))
               }
@@ -772,6 +957,9 @@ export function EditorPage() {
               onZoomChange={setZoomPercentage}
               projectFileRequest={projectFileRequest}
               projectSaveRequest={projectSaveRequest}
+              templateExportRequest={templateExportRequest}
+              templateInsertRequest={templateInsertRequest}
+              templateSaveRequest={templateSaveRequest}
               selectLayerRequest={selectLayerRequest}
               selectionCommandRequest={selectionCommandRequest}
               selectedShape={selectedShape}
@@ -919,10 +1107,12 @@ export function EditorPage() {
             )}
           >
             <LayersPanel
+              canGroupSelectedLayers={canGroupSelectedLayers}
               isCollapsed={collapsedSidePanels.layers}
               layers={layers}
+              onGroupSelectedLayers={groupSelectedLayers}
               onLayerCommand={runLayerCommand}
-              onSelectLayer={(layerId) => setSelectLayerRequest({ id: Date.now(), layerId })}
+              onSelectLayers={(layerIds) => setSelectLayerRequest({ id: Date.now(), layerIds })}
               onToggleCollapsed={() => toggleSidePanelCollapsed("layers")}
             />
           </div>
@@ -943,9 +1133,11 @@ export function EditorPage() {
           >
             <PropertiesPanel
               isCollapsed={collapsedSidePanels.properties}
+              onGroupSelectedLayers={groupSelectedLayers}
               onLayerCommand={runLayerCommand}
               onToggleCollapsed={() => toggleSidePanelCollapsed("properties")}
               selectedLayer={selectedLayer}
+              selectedLayers={selectedLayers}
               selectedTool={selectedTool}
             />
           </div>
@@ -974,6 +1166,14 @@ export function EditorPage() {
         <NewDocumentDialog
           onClose={() => setIsNewDocumentDialogOpen(false)}
           onCreate={createDocumentTab}
+          onCreateFromUserTemplate={(template) => void createDocumentFromUserTemplate(template)}
+          onDeleteUserTemplate={(template) => void deleteUserTemplate(template)}
+          onExportUserTemplate={(template) => void exportUserTemplate(template)}
+          onImportUserTemplate={(file) => void importUserTemplateFile(file)}
+          onInsertUserTemplate={(template) => void insertUserTemplate(template)}
+          onRenameUserTemplate={(template, name) => void renameUserTemplate(template, name)}
+          canInsertUserTemplate={Boolean(activeDocument)}
+          userTemplates={userTemplates}
         />
       ) : null}
       {isResizeCanvasDialogOpen && activeDocument ? (
@@ -1094,6 +1294,26 @@ function isImageLayerSummary(
   return Boolean(layer && layer.type === "image" && "imagePixelWidth" in layer);
 }
 
+function hasSelectedAncestorLayer(
+  layer: LayerSummary,
+  layers: LayerSummary[],
+  selectedLayerIds: Set<string>
+) {
+  const visitedGroupIds = new Set<string>();
+  let groupId = layer.groupId;
+
+  while (groupId && !visitedGroupIds.has(groupId)) {
+    if (selectedLayerIds.has(groupId)) {
+      return true;
+    }
+
+    visitedGroupIds.add(groupId);
+    groupId = layers.find((candidate) => candidate.id === groupId)?.groupId ?? null;
+  }
+
+  return false;
+}
+
 function formatRecentProjectDate(savedAt: string) {
   const date = new Date(savedAt);
 
@@ -1140,6 +1360,16 @@ function getProjectFilename(title: string) {
   const safeTitle = (title.trim() || "untitled").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-");
 
   return safeTitle.toLowerCase().endsWith(".webster") ? safeTitle : `${safeTitle}.webster`;
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 function getDefaultStrokeWidth(style: StrokeStyle) {

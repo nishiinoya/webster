@@ -1,21 +1,30 @@
 import { useEffect, useState } from "react";
-import type { CSSProperties, ChangeEvent, MouseEvent } from "react";
+import type {
+  CSSProperties,
+  ChangeEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent
+} from "react";
 import type { LayerCommand, LayerSummary } from "../../app/EditorApp";
 import { cn } from "../classNames";
 
 type LayersPanelProps = {
+  canGroupSelectedLayers: boolean;
   isCollapsed: boolean;
   layers: LayerSummary[];
+  onGroupSelectedLayers: () => void;
   onLayerCommand: (command: LayerCommand) => void;
-  onSelectLayer: (layerId: string) => void;
+  onSelectLayers: (layerIds: string[]) => void;
   onToggleCollapsed: () => void;
 };
 
 export function LayersPanel({
+  canGroupSelectedLayers,
   isCollapsed,
   layers,
+  onGroupSelectedLayers,
   onLayerCommand,
-  onSelectLayer,
+  onSelectLayers,
   onToggleCollapsed
 }: LayersPanelProps) {
   const [openMenu, setOpenMenu] = useState<{
@@ -61,6 +70,42 @@ export function LayersPanel({
     setOpenMenu(null);
   }
 
+  function selectLayerFromPanel(
+    event: MouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>,
+    layerId: string
+  ) {
+    const selectedLayerIds = layers.filter((layer) => layer.isSelected).map((layer) => layer.id);
+
+    if (event.shiftKey && selectedLayerIds.length > 0) {
+      const anchorLayerId =
+        layers.find((layer) => layer.isPrimarySelected)?.id ?? selectedLayerIds.at(-1) ?? layerId;
+      const anchorIndex = layers.findIndex((layer) => layer.id === anchorLayerId);
+      const layerIndex = layers.findIndex((layer) => layer.id === layerId);
+
+      if (anchorIndex < 0 || layerIndex < 0) {
+        onSelectLayers([layerId]);
+        return;
+      }
+
+      const startIndex = Math.min(anchorIndex, layerIndex);
+      const endIndex = Math.max(anchorIndex, layerIndex);
+
+      onSelectLayers(layers.slice(startIndex, endIndex + 1).map((layer) => layer.id));
+      return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && selectedLayerIds.length > 0) {
+      const nextLayerIds = selectedLayerIds.includes(layerId)
+        ? selectedLayerIds.filter((selectedLayerId) => selectedLayerId !== layerId)
+        : [...selectedLayerIds, layerId];
+
+      onSelectLayers(nextLayerIds.length > 0 ? nextLayerIds : [layerId]);
+      return;
+    }
+
+    onSelectLayers([layerId]);
+  }
+
   function toggleLayerMenu(event: MouseEvent<HTMLButtonElement>, layerId: string) {
     stopPanelControl(event);
 
@@ -96,6 +141,14 @@ export function LayersPanel({
         </div>
         <div className="flex items-center gap-2">
           <button
+            className="rounded-md border border-[#333941] bg-[#202329] px-2 py-1 text-[11px] font-bold text-[#dce1e6] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731] disabled:cursor-not-allowed disabled:text-[#747b85] disabled:opacity-70 disabled:hover:border-[#333941] disabled:hover:bg-[#202329]"
+            disabled={!canGroupSelectedLayers}
+            onClick={onGroupSelectedLayers}
+            type="button"
+          >
+            Group
+          </button>
+          <button
             className="rounded-md border border-[#333941] bg-[#202329] px-2 py-1 text-[11px] font-bold text-[#dce1e6] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]"
             onClick={() => onLayerCommand({ type: "add-adjustment" })}
             type="button"
@@ -107,24 +160,34 @@ export function LayersPanel({
       </div>
       <div className={cn("min-h-0 overflow-auto px-3 pb-3", isCollapsed && "hidden")}>
       <div className="grid gap-2">
-        {layers.map((layer) => (
+        {layers.map((layer) => {
+          const indent = Math.min(layer.depth, 10) * 18;
+
+          return (
         <div
           aria-selected={layer.isSelected}
           className={cn(
             "relative grid min-h-[82px] w-full grid-cols-[28px_38px_minmax(0,1fr)_30px] items-start gap-[9px] rounded-lg border border-[#292e35] bg-[#171a1f] p-[9px] text-left hover:border-[#4c535c] hover:bg-[#252930] min-[1400px]:min-h-[88px] min-[1400px]:grid-cols-[30px_42px_minmax(0,1fr)_32px]",
+            layer.depth > 0 && "border-[#242a31]",
+            layer.type === "group" && "min-h-[74px] border-[#3b4652] bg-[#1d232b]",
             layer.isSelected && "border-[#4aa391] bg-[#172722] shadow-[inset_3px_0_0_#4aa391]"
           )}
             key={layer.id}
-            onClick={() => onSelectLayer(layer.id)}
+            onClick={(event) => selectLayerFromPanel(event, layer.id)}
             onKeyDown={(event) => {
               if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
-                onSelectLayer(layer.id);
+                selectLayerFromPanel(event, layer.id);
               }
             }}
           role="button"
+          style={{
+            marginLeft: indent,
+            width: indent > 0 ? `calc(100% - ${indent}px)` : undefined
+          }}
           tabIndex={0}
         >
+            {layer.depth > 0 ? <LayerTreeGuides depth={layer.depth} /> : null}
             <div className="grid gap-1.5" onClick={stopPanelControl}>
               <button
                 aria-label={layer.isVisible ? `Hide ${layer.name}` : `Show ${layer.name}`}
@@ -152,22 +215,55 @@ export function LayersPanel({
                   "bg-[#252930] bg-[linear-gradient(135deg,rgba(74,163,145,0.65),rgba(118,137,255,0.55))]",
                 layer.type === "adjustment" &&
                   "bg-[#252930] bg-[radial-gradient(circle_at_35%_35%,rgba(255,255,255,0.8),rgba(74,163,145,0.45)_42%,rgba(32,35,41,0.95)_70%)]",
-                layer.type === "shape" && "bg-[#2f7d6f]"
+                layer.type === "shape" && "bg-[#2f7d6f]",
+                layer.type === "group" &&
+                  "border-[#5f7689] bg-[#252930] bg-[linear-gradient(180deg,#607489_0_38%,#222832_38%_100%)] shadow-[inset_0_0_0_1px_rgba(121,218,199,0.18)]"
               )}
               aria-hidden="true"
             />
             <div className="grid min-w-0 gap-1.5">
-              <input
-                aria-label={`Rename ${layer.name}`}
-                className="w-full min-w-0 truncate rounded-md border border-transparent bg-transparent py-0.5 text-[13px] font-extrabold text-[#eef1f4] focus:border-[#4aa391] focus:bg-[#101113] focus:px-[7px] focus:py-[5px] focus:outline-0 min-[1400px]:text-sm"
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  updateLayer(layer.id, { name: event.target.value })
-                }
-                onClick={stopPanelControl}
-                value={layer.name}
-              />
+              <div className="flex min-w-0 items-center gap-1.5">
+                {layer.type === "group" ? (
+                  <button
+                    aria-label={layer.collapsed ? `Expand ${layer.name}` : `Collapse ${layer.name}`}
+                    aria-expanded={!layer.collapsed}
+                    className="grid h-6 w-6 flex-none place-items-center rounded-md border border-[#30353d] bg-[#111317] text-xs font-black text-[#c9cdd2] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]"
+                    onClick={(event) => {
+                      stopPanelControl(event);
+                      updateLayer(layer.id, { collapsed: !layer.collapsed });
+                    }}
+                    type="button"
+                  >
+                    <span
+                      className={cn(
+                        "translate-y-[-1px] transition-transform duration-150",
+                        layer.collapsed && "-rotate-90"
+                      )}
+                      aria-hidden="true"
+                    >
+                      v
+                    </span>
+                  </button>
+                ) : null}
+                <input
+                  aria-label={`Rename ${layer.name}`}
+                  className="w-full min-w-0 truncate rounded-md border border-transparent bg-transparent py-0.5 text-[13px] font-extrabold text-[#eef1f4] focus:border-[#4aa391] focus:bg-[#101113] focus:px-[7px] focus:py-[5px] focus:outline-0 min-[1400px]:text-sm"
+                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                    updateLayer(layer.id, { name: event.target.value })
+                  }
+                  onClick={stopPanelControl}
+                  value={layer.name}
+                />
+              </div>
               <div className="flex min-w-0 items-center gap-1.5 text-[11px] font-bold capitalize text-[#8f98a3] min-[1400px]:text-xs">
-                <span>{layer.type}</span>
+                <span>
+                  {layer.type === "group" ? `${layer.childCount} items` : layer.type}
+                </span>
+                {layer.type === "group" ? (
+                  <span className="rounded border border-[#3b5f58] bg-[#10231f] px-1.5 py-[2px] text-[10px] font-extrabold uppercase text-[#79dac7]">
+                    Group
+                  </span>
+                ) : null}
                 {layer.hasMask ? (
                   <button
                     className="rounded-md border border-[#333941] bg-[#111317] px-1.5 py-[3px] text-[10px] font-extrabold text-[#c9cdd2] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731] min-[1400px]:text-[11px]"
@@ -213,7 +309,8 @@ export function LayersPanel({
               <span>{Math.round(layer.opacity * 100)}%</span>
             </label>
           </div>
-        ))}
+          );
+        })}
       </div>
       {openMenu && !isCollapsed ? (
         <LayerMenu
@@ -225,6 +322,42 @@ export function LayersPanel({
       ) : null}
       </div>
     </section>
+  );
+}
+
+function LayerTreeGuides({ depth }: { depth: number }) {
+  const guideCount = Math.min(depth, 10);
+  const guideWidth = guideCount * 18;
+  const elbowLeft = (guideCount - 1) * 18 + 9;
+
+  return (
+    <span
+      aria-hidden="true"
+      className="pointer-events-none absolute bottom-[-10px] top-[-10px] z-0"
+      style={{
+        left: -guideWidth,
+        width: guideWidth
+      }}
+    >
+      {Array.from({ length: guideCount }).map((_, index) => (
+        <span
+          className="absolute bottom-0 top-0 w-px bg-[#313a42]"
+          key={index}
+          style={{ left: index * 18 + 9 }}
+        />
+      ))}
+      <span
+        className="absolute top-[31px] h-px bg-[#4a5a65]"
+        style={{
+          left: elbowLeft,
+          width: 12
+        }}
+      />
+      <span
+        className="absolute top-[28px] h-1.5 w-1.5 rounded-full border border-[#4a5a65] bg-[#17191d]"
+        style={{ left: elbowLeft + 10 }}
+      />
+    </span>
   );
 }
 
@@ -313,6 +446,7 @@ function LayerMenu({
       <span className="mx-0.5 my-[5px] h-px bg-[#2a2d31]" />
       <button
         className={layerMenuButtonClass}
+        disabled={layer.type === "group"}
         onClick={() =>
           onCommand({
             action: layer.hasMask ? "delete" : "add",
@@ -326,7 +460,7 @@ function LayerMenu({
       </button>
       <button
         className={layerMenuButtonClass}
-        disabled={!layer.hasMask}
+        disabled={!layer.hasMask || layer.type === "group"}
         onClick={() =>
           onCommand({
             action: "toggle-enabled",
@@ -340,7 +474,7 @@ function LayerMenu({
       </button>
       <button
         className={layerMenuButtonClass}
-        disabled={!layer.hasMask}
+        disabled={!layer.hasMask || layer.type === "group"}
         onClick={() => onCommand({ action: "invert", layerId: layer.id, type: "mask" })}
         type="button"
       >
@@ -348,7 +482,7 @@ function LayerMenu({
       </button>
       <button
         className={layerMenuButtonClass}
-        disabled={!layer.hasMask}
+        disabled={!layer.hasMask || layer.type === "group"}
         onClick={() => onCommand({ action: "clear-white", layerId: layer.id, type: "mask" })}
         type="button"
       >
@@ -356,7 +490,7 @@ function LayerMenu({
       </button>
       <button
         className={layerMenuButtonClass}
-        disabled={!layer.hasMask}
+        disabled={!layer.hasMask || layer.type === "group"}
         onClick={() => onCommand({ action: "clear-black", layerId: layer.id, type: "mask" })}
         type="button"
       >

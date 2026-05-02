@@ -21,6 +21,7 @@ import { useEditorSceneRequests } from "./hooks/useEditorSceneRequests";
 import type { ImageLayerCommandPendingState } from "./hooks/useEditorSceneRequests";
 import { useProjectFileActions } from "./hooks/useProjectFileActions";
 import type { SaveStatus } from "./hooks/useProjectFileActions";
+import { saveUserProjectTemplate } from "../projects/projectTemplates";
 import type { WebsterFileHandle } from "../projects/projectFiles";
 import type { EditorDocumentTab } from "./editorDocuments";
 import type { MaskBrushOptions } from "../tools/mask-brush/MaskBrushTypes";
@@ -63,6 +64,9 @@ type CanvasViewProps = {
   onSelectionCommandRequestHandled: (requestId: number) => void;
   onSelectLayerRequestHandled: (requestId: number) => void;
   onSelectTool: (tool: string) => void;
+  onTemplateExportRequestHandled: (requestId: number) => void;
+  onTemplateInsertRequestHandled: (requestId: number) => void;
+  onTemplateSaveRequestHandled: (requestId: number) => void;
   onUploadRequestHandled: (requestId: number) => void;
   onZoomChange: (zoomPercentage: number) => void;
   projectFileRequest: {
@@ -72,7 +76,10 @@ type CanvasViewProps = {
     tabId: string;
   } | null;
   projectSaveRequest: { id: number; mode: "save" | "save-as" } | null;
-  selectLayerRequest: { layerId: string; id: number } | null;
+  templateExportRequest: { id: number; name: string } | null;
+  templateInsertRequest: { file: File; id: number; name: string } | null;
+  templateSaveRequest: { id: number; name: string } | null;
+  selectLayerRequest: { layerIds: string[]; id: number } | null;
   selectionCommandRequest: { command: SelectionCommand; id: number } | null;
   selectedTool: string;
   selectedShape: ShapeKind;
@@ -112,10 +119,16 @@ export function CanvasView({
   onSelectionCommandRequestHandled,
   onSelectLayerRequestHandled,
   onSelectTool,
+  onTemplateExportRequestHandled,
+  onTemplateInsertRequestHandled,
+  onTemplateSaveRequestHandled,
   onUploadRequestHandled,
   onZoomChange,
   projectFileRequest,
   projectSaveRequest,
+  templateExportRequest,
+  templateInsertRequest,
+  templateSaveRequest,
   selectLayerRequest,
   selectionCommandRequest,
   selectedShape,
@@ -197,6 +210,148 @@ export function CanvasView({
     projectSaveRequest,
     setWebglError
   });
+
+  useEffect(() => {
+    if (!templateSaveRequest || !editorAppRef.current) {
+      return;
+    }
+
+    let didCancel = false;
+    const request = templateSaveRequest;
+
+    async function saveTemplate() {
+      if (!editorAppRef.current) {
+        return;
+      }
+
+      onSaveStatusChange("saving");
+
+      try {
+        const documentSnapshot = editorAppRef.current.getDocumentSnapshot();
+        const projectBlob = await editorAppRef.current.exportProjectTemplateFile(request.name);
+
+        await saveUserProjectTemplate({
+          height: Math.round(documentSnapshot.height),
+          name: request.name,
+          projectBlob,
+          width: Math.round(documentSnapshot.width)
+        });
+
+        if (!didCancel) {
+          onSaveStatusChange("saved");
+        }
+      } catch (error) {
+        if (!didCancel) {
+          onSaveStatusChange("error");
+          setWebglError(error instanceof Error ? error.message : "Unable to save template.");
+        }
+      } finally {
+        if (!didCancel) {
+          onTemplateSaveRequestHandled(request.id);
+        }
+      }
+    }
+
+    void saveTemplate();
+
+    return () => {
+      didCancel = true;
+    };
+  }, [
+    editorAppRef,
+    onSaveStatusChange,
+    onTemplateSaveRequestHandled,
+    setWebglError,
+    templateSaveRequest
+  ]);
+
+  useEffect(() => {
+    if (!templateInsertRequest || !editorAppRef.current) {
+      return;
+    }
+
+    let didCancel = false;
+    const request = templateInsertRequest;
+
+    async function insertTemplate() {
+      try {
+        await editorAppRef.current?.importTemplateAsGroup(request.file, request.name);
+
+        if (!didCancel && editorAppRef.current) {
+          onLayersChange(editorAppRef.current.getLayerSummaries());
+          rememberActiveScene();
+        }
+      } catch (error) {
+        if (!didCancel) {
+          setWebglError(error instanceof Error ? error.message : "Unable to insert template.");
+        }
+      } finally {
+        if (!didCancel) {
+          onTemplateInsertRequestHandled(request.id);
+        }
+      }
+    }
+
+    void insertTemplate();
+
+    return () => {
+      didCancel = true;
+    };
+  }, [
+    editorAppRef,
+    onLayersChange,
+    onTemplateInsertRequestHandled,
+    rememberActiveScene,
+    setWebglError,
+    templateInsertRequest
+  ]);
+
+  useEffect(() => {
+    if (!templateExportRequest || !editorAppRef.current) {
+      return;
+    }
+
+    let didCancel = false;
+    const request = templateExportRequest;
+
+    async function exportTemplate() {
+      if (!editorAppRef.current) {
+        return;
+      }
+
+      onSaveStatusChange("saving");
+
+      try {
+        const projectBlob = await editorAppRef.current.exportProjectTemplateFile(request.name);
+
+        if (!didCancel) {
+          downloadBlob(projectBlob, getProjectExportFilename(request.name));
+          onSaveStatusChange("saved");
+        }
+      } catch (error) {
+        if (!didCancel) {
+          onSaveStatusChange("error");
+          setWebglError(error instanceof Error ? error.message : "Unable to export template.");
+        }
+      } finally {
+        if (!didCancel) {
+          onTemplateExportRequestHandled(request.id);
+        }
+      }
+    }
+
+    void exportTemplate();
+
+    return () => {
+      didCancel = true;
+    };
+  }, [
+    editorAppRef,
+    onSaveStatusChange,
+    onTemplateExportRequestHandled,
+    setWebglError,
+    templateExportRequest
+  ]);
 
   useEffect(() => {
     if (!historyCommandRequest || !editorAppRef.current) {
@@ -475,4 +630,10 @@ function getImageExportFilename(title: string, format: ImageExportFormat) {
   const withoutImageExtension = safeTitle.replace(/\.(pdf|png|jpe?g)$/i, "");
 
   return `${withoutImageExtension}.${extension}`;
+}
+
+function getProjectExportFilename(title: string) {
+  const safeTitle = (title.trim() || "template").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-");
+
+  return safeTitle.toLowerCase().endsWith(".webster") ? safeTitle : `${safeTitle}.webster`;
 }

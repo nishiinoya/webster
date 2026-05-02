@@ -6,6 +6,7 @@ type EditorKeyboardShortcutHandlers = {
   onClearSelection?: () => Promise<void> | void;
   onDeleteSelectedLayer?: () => Promise<void> | void;
   onDuplicateSelectedLayer?: () => Promise<void> | void;
+  onGroupSelectedLayers?: () => Promise<void> | void;
   onNudgeSelectedLayer?: (dx: number, dy: number) => Promise<void> | void;
   onRedo: () => Promise<void> | void;
   onSaveProject: () => Promise<void> | void;
@@ -18,6 +19,7 @@ export function useEditorKeyboardShortcuts({
   onClearSelection,
   onDeleteSelectedLayer,
   onDuplicateSelectedLayer,
+  onGroupSelectedLayers,
   onNudgeSelectedLayer,
   onRedo,
   onSaveProject,
@@ -29,6 +31,7 @@ export function useEditorKeyboardShortcuts({
     onClearSelection,
     onDeleteSelectedLayer,
     onDuplicateSelectedLayer,
+    onGroupSelectedLayers,
     onNudgeSelectedLayer,
     onRedo,
     onSaveProject,
@@ -45,6 +48,7 @@ export function useEditorKeyboardShortcuts({
       onClearSelection,
       onDeleteSelectedLayer,
       onDuplicateSelectedLayer,
+      onGroupSelectedLayers,
       onNudgeSelectedLayer,
       onRedo,
       onSaveProject,
@@ -56,6 +60,7 @@ export function useEditorKeyboardShortcuts({
     onClearSelection,
     onDeleteSelectedLayer,
     onDuplicateSelectedLayer,
+    onGroupSelectedLayers,
     onNudgeSelectedLayer,
     onRedo,
     onSaveProject,
@@ -108,6 +113,19 @@ export function useEditorKeyboardShortcuts({
 
       if (handlers.isTextEditingActive?.()) {
         clearPressedArrowKeys();
+        return;
+      }
+
+      if (
+        handlers.onGroupSelectedLayers &&
+        !event.repeat &&
+        hasModifier &&
+        !event.altKey &&
+        !event.shiftKey &&
+        key === "g"
+      ) {
+        event.preventDefault();
+        await handlers.onGroupSelectedLayers();
         return;
       }
 

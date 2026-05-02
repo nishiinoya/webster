@@ -1,4 +1,5 @@
 import { AdjustmentLayer } from "../layers/AdjustmentLayer";
+import { GroupLayer } from "../layers/GroupLayer";
 import { ImageLayer } from "../layers/ImageLayer";
 import { Layer } from "../layers/Layer";
 import { LayerMask } from "../masks/LayerMask";
@@ -20,6 +21,7 @@ export type SceneSnapshot = {
   };
   layers: Layer[];
   selectedLayerId: string | null;
+  selectedLayerIds: string[];
   selection: SelectionManagerState;
 };
 
@@ -34,6 +36,7 @@ export function captureSceneSnapshot(scene: Scene): SceneSnapshot {
     },
     layers: scene.layers.map(cloneLayerForSnapshot),
     selectedLayerId: scene.selectedLayerId,
+    selectedLayerIds: [...scene.selectedLayerIds],
     selection: cloneSelectionManagerState(scene.selection.getSnapshot())
   };
 }
@@ -49,6 +52,7 @@ export function cloneSceneSnapshot(snapshot: SceneSnapshot): SceneSnapshot {
     },
     layers: snapshot.layers.map(cloneLayerForSnapshot),
     selectedLayerId: snapshot.selectedLayerId,
+    selectedLayerIds: [...snapshot.selectedLayerIds],
     selection: cloneSelectionManagerState(snapshot.selection)
   };
 }
@@ -62,6 +66,7 @@ export function restoreSceneSnapshot(scene: Scene, snapshot: SceneSnapshot) {
 
   scene.layers.splice(0, scene.layers.length, ...nextSnapshot.layers);
   scene.selectedLayerId = nextSnapshot.selectedLayerId;
+  scene.selectedLayerIds = [...nextSnapshot.selectedLayerIds];
   scene.document.x = nextSnapshot.document.x;
   scene.document.y = nextSnapshot.document.y;
   scene.document.width = nextSnapshot.document.width;
@@ -101,7 +106,11 @@ export function areSceneSnapshotsEqual(
     }
   }
 
-  if (includeSelectedLayerId && left.selectedLayerId !== right.selectedLayerId) {
+  if (
+    includeSelectedLayerId &&
+    (left.selectedLayerId !== right.selectedLayerId ||
+      !areStringArraysEqual(left.selectedLayerIds, right.selectedLayerIds))
+  ) {
     return false;
   }
 
@@ -115,6 +124,7 @@ export function areSceneSnapshotsEqual(
 function cloneLayerForSnapshot(layer: Layer) {
   const baseOptions = {
     filters: { ...layer.filters },
+    groupId: layer.groupId,
     height: layer.height,
     id: layer.id,
     locked: layer.locked,
@@ -157,6 +167,13 @@ function cloneLayerForSnapshot(layer: Layer) {
     copy.revision = layer.revision;
 
     return copy;
+  }
+
+  if (layer instanceof GroupLayer) {
+    return new GroupLayer({
+      ...baseOptions,
+      collapsed: layer.collapsed
+    });
   }
 
   if (layer instanceof TextLayer) {
@@ -231,6 +248,7 @@ function areLayersEqual(left: Layer, right: Layer) {
   if (
     left.type !== right.type ||
     left.id !== right.id ||
+    left.groupId !== right.groupId ||
     left.name !== right.name ||
     left.visible !== right.visible ||
     left.locked !== right.locked ||
@@ -268,6 +286,10 @@ function areLayersEqual(left: Layer, right: Layer) {
       left.hasWorkingImageChanges === right.hasWorkingImageChanges &&
       left.revision === right.revision
     );
+  }
+
+  if (left instanceof GroupLayer && right instanceof GroupLayer) {
+    return left.collapsed === right.collapsed;
   }
 
   if (left instanceof TextLayer && right instanceof TextLayer) {
@@ -386,6 +408,14 @@ function areColorArraysEqual(
     left[2] === right[2] &&
     left[3] === right[3]
   );
+}
+
+function areStringArraysEqual(left: string[], right: string[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((value, index) => value === right[index]);
 }
 
 function areSelectionStatesEqual(left: SelectionManagerState, right: SelectionManagerState) {

@@ -7,9 +7,11 @@ import { cn } from "../classNames";
 
 type PropertiesPanelProps = {
   isCollapsed: boolean;
+  onGroupSelectedLayers: () => void;
   onLayerCommand: (command: LayerCommand) => void;
   onToggleCollapsed: () => void;
   selectedLayer: LayerSummary | null;
+  selectedLayers: LayerSummary[];
   selectedTool: string;
 };
 
@@ -35,9 +37,11 @@ type ShapeLayerSummary = LayerSummary & {
 
 export function PropertiesPanel({
   isCollapsed,
+  onGroupSelectedLayers,
   onLayerCommand,
   onToggleCollapsed,
   selectedLayer,
+  selectedLayers,
   selectedTool
 }: PropertiesPanelProps) {
   const [compiledFontFamilies, setCompiledFontFamilies] = useState<string[]>([]);
@@ -101,6 +105,8 @@ export function PropertiesPanel({
     });
   }
 
+  const hasMultipleSelectedLayers = selectedLayers.length > 1;
+
   return (
     <section
       className="grid h-full min-h-0 grid-rows-[42px_minmax(0,1fr)] overflow-hidden border-b border-[#2a2d31] last:border-b-0 max-[760px]:border-b-0 max-[760px]:border-r max-[760px]:border-[#2a2d31]"
@@ -124,6 +130,23 @@ export function PropertiesPanel({
           <span className={propertyLabelClass}>Tool</span>
           <strong className={propertyValueClass}>{selectedTool}</strong>
         </div>
+        {hasMultipleSelectedLayers ? (
+          <div className="grid gap-3 rounded-lg border border-[#3b4652] bg-[#1d232b] p-3">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className={propertySectionTitleClass}>Multiple layers</h3>
+              <strong className="rounded border border-[#3b5f58] bg-[#10231f] px-2 py-1 text-[11px] uppercase text-[#79dac7]">
+                {selectedLayers.length} selected
+              </strong>
+            </div>
+            <p className="m-0 text-[12px] font-bold text-[#9aa1ab]">
+              Create a group to edit these layers together.
+            </p>
+            <button className={propertyPrimaryButtonClass} onClick={onGroupSelectedLayers} type="button">
+              Create group
+            </button>
+          </div>
+        ) : (
+          <>
         <div className={propertySectionClass}>
           <h3 className={propertySectionTitleClass}>Layer</h3>
           <label className={propertyRowClass}>
@@ -508,6 +531,8 @@ export function PropertiesPanel({
             </strong>
           </div>
         </div>
+          </>
+        )}
       </div>
       </div>
     </section>
@@ -665,3 +690,6 @@ const propertyInputClass =
 
 const propertyToggleClass =
   "justify-self-end rounded-md border border-[#333941] bg-[#171a1f] px-[9px] py-1 text-[11px] font-bold text-[#dce1e6] hover:border-[#4aa391] hover:bg-[#203731] disabled:cursor-not-allowed disabled:text-[#747b85] disabled:opacity-70 disabled:hover:border-[#333941] disabled:hover:bg-[#171a1f]";
+
+const propertyPrimaryButtonClass =
+  "rounded-md border border-[#4aa391] bg-[#203731] px-3 py-2 text-[12px] font-extrabold text-[#eef1f4] hover:bg-[#25443c] focus-visible:bg-[#25443c]";

@@ -4,7 +4,7 @@ import type { SerializedLayerMask } from "../masks/LayerMask";
 
 import type { StrokePath, StrokePoint, StrokeStyle } from "./StrokeLayer";
 
-export type LayerType = "adjustment" | "shape" | "image" | "text" | "stroke";
+export type LayerType = "adjustment" | "shape" | "image" | "text" | "stroke" | "group";
 
 export type LayerFilterSettings = {
   brightness: number;
@@ -59,6 +59,7 @@ export type SerializedLayerBase = {
   width: number;
   x: number;
   y: number;
+  groupId?: string | null;
   mask?: SerializedLayerMask | null;
   filters?: Partial<LayerFilterSettings>;
 };
@@ -73,6 +74,11 @@ export type SerializedShapeLayer = SerializedLayerBase & {
 
 export type SerializedAdjustmentLayer = SerializedLayerBase & {
   type: "adjustment";
+};
+
+export type SerializedGroupLayer = SerializedLayerBase & {
+  collapsed?: boolean;
+  type: "group";
 };
 
 export type SerializedImageLayer = SerializedLayerBase & {
@@ -107,6 +113,7 @@ export type SerializedStrokeLayer = SerializedLayerBase & {
 
 export type SerializedLayer =
   | SerializedAdjustmentLayer
+  | SerializedGroupLayer
   | SerializedShapeLayer
   | SerializedImageLayer
   | SerializedTextLayer
@@ -123,6 +130,7 @@ export type LayerOptions = {
   y: number;
   width: number;
   height: number;
+  groupId?: string | null;
   rotation?: number;
   scaleX?: number;
   scaleY?: number;
@@ -144,6 +152,7 @@ export abstract class Layer {
   rotation: number;
   scaleX: number;
   scaleY: number;
+  groupId: string | null;
   mask: LayerMask | null;
   filters: LayerFilterSettings;
 
@@ -161,6 +170,7 @@ export abstract class Layer {
     this.rotation = options.rotation ?? 0;
     this.scaleX = options.scaleX ?? 1;
     this.scaleY = options.scaleY ?? 1;
+    this.groupId = options.groupId ?? null;
     this.mask = options.mask ?? null;
     this.filters = normalizeLayerFilters(options.filters);
   }
@@ -221,6 +231,15 @@ export abstract class Layer {
       });
     }
 
+    if (data.type === "group") {
+      const { GroupLayer } = await import("./GroupLayer");
+
+      return new GroupLayer({
+        ...getLayerOptions(data),
+        collapsed: data.collapsed ?? false
+      });
+    }
+
     if (data.type === "text") {
       const { TextLayer } = await import("./TextLayer");
       
@@ -269,6 +288,7 @@ export abstract class Layer {
       width: this.width,
       x: this.x,
       y: this.y,
+      groupId: this.groupId,
       filters: this.filters,
       mask: this.mask?.toJSON() ?? null
     };
@@ -330,6 +350,7 @@ function getLayerOptions(data: SerializedLayer): LayerOptions {
     width: data.width,
     x: data.x,
     y: data.y,
+    groupId: data.groupId ?? null,
     filters: data.filters,
     mask: data.mask ? LayerMask.fromJSON(data.mask) : null
   };
