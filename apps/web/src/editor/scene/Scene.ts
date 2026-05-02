@@ -34,6 +34,11 @@ export type DocumentBounds = {
 
 export type LayerStackPlacement = "above" | "below" | "inside";
 
+export type LayerClipboardSnapshot = {
+  layers: Layer[];
+  rootLayerIds: string[];
+};
+
 export type SerializedScene = {
   app: "webster";
   canvas: {
@@ -356,6 +361,93 @@ export class Scene {
     this.setSelectedLayerIds([copy.id]);
 
     return copy;
+  }
+
+  createLayerClipboardSnapshot(layerIds: string[] = this.selectedLayerIds): LayerClipboardSnapshot | null {
+    const rootLayers = this.getMovableRootLayers(layerIds);
+
+    if (rootLayers.length === 0) {
+      return null;
+    }
+
+    const layers = this.getLayerBlocks(rootLayers).map((layer) =>
+      cloneLayer(layer, {
+        groupId: layer.groupId,
+        id: layer.id,
+        locked: layer.locked,
+        name: layer.name,
+        xOffset: 0,
+        yOffset: 0
+      })
+    );
+
+    return {
+      layers,
+      rootLayerIds: rootLayers.map((layer) => layer.id)
+    };
+  }
+
+  pasteLayerClipboardSnapshot(snapshot: LayerClipboardSnapshot) {
+    if (snapshot.layers.length === 0 || snapshot.rootLayerIds.length === 0) {
+      return null;
+    }
+
+    const idMap = new Map(snapshot.layers.map((layer) => [layer.id, crypto.randomUUID()]));
+    const rootLayerIds = new Set(snapshot.rootLayerIds);
+    const copiedLayerIds = new Set(snapshot.layers.map((layer) => layer.id));
+    const pastedLayers = snapshot.layers.map((layer) =>
+      cloneLayer(layer, {
+        groupId:
+          layer.groupId && copiedLayerIds.has(layer.groupId) && !rootLayerIds.has(layer.id)
+            ? idMap.get(layer.groupId) ?? null
+            : null,
+        id: idMap.get(layer.id),
+        locked: layer.locked,
+        name: layer.name,
+        xOffset: 24,
+        yOffset: -24
+      })
+    );
+    const pastedRootLayerIds = snapshot.rootLayerIds
+      .map((layerId) => idMap.get(layerId))
+      .filter((layerId): layerId is string => Boolean(layerId));
+
+    this.layers.push(...pastedLayers);
+    this.setSelectedLayerIds(pastedRootLayerIds);
+
+    return pastedLayers;
+  }
+
+  removeLayersById(layerIds: string[]) {
+    const rootLayers = this.getMovableRootLayers(layerIds);
+
+    if (rootLayers.length === 0) {
+      return null;
+    }
+
+    const removedLayers = this.getLayerBlocks(rootLayers);
+    const removedLayerSet = new Set(removedLayers);
+    const affectedGroupIds = [
+      ...new Set(removedLayers.map((removedLayer) => removedLayer.groupId).filter(Boolean) as string[])
+    ];
+
+    this.layers.splice(
+      0,
+      this.layers.length,
+      ...this.layers.filter((candidate) => !removedLayerSet.has(candidate))
+    );
+
+    for (const removedLayer of removedLayers) {
+      disposeLayer(removedLayer);
+    }
+
+    this.setSelectedLayerIds([]);
+
+    for (const groupId of affectedGroupIds) {
+      this.updateParentGroupBounds(groupId);
+    }
+
+    return removedLayers;
   }
 
   groupLayers(layerIds: string[], name = "Group") {

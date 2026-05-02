@@ -19,6 +19,8 @@ type ToolbarProps = {
   canUndo: boolean;
   canvasSize: { height: number; width: number } | null;
   documentTitle: string;
+  onCopy: () => void;
+  onCut: () => void;
   onDeleteSelectedLayer: () => void;
   onDuplicateSelectedLayer: () => void;
   onGroupSelectedLayers: () => void;
@@ -28,6 +30,7 @@ type ToolbarProps = {
   onOpenExportDialog: () => void;
   onOpenImageResize: () => void;
   onOpenProject: (file: File, handle?: WebsterFileHandle | null) => void;
+  onPaste: () => void;
   onRedo: () => void;
   onRestoreImageOriginal: () => void;
   onExportTemplate: () => void;
@@ -88,6 +91,9 @@ const shortcutMenuGroups = [
       ["Arrows", "Nudge"],
       ["Shift+Arrows", "10 px"],
       ["Del", "Delete"],
+      ["Ctrl/Cmd+C", "Copy"],
+      ["Ctrl/Cmd+X", "Cut"],
+      ["Ctrl/Cmd+V", "Paste"],
       ["Ctrl/Cmd+J", "Duplicate"],
       ["Ctrl/Cmd+G", "Group"]
     ]
@@ -113,6 +119,8 @@ export function Toolbar({
   canUndo,
   canvasSize,
   documentTitle,
+  onCopy,
+  onCut,
   onDeleteSelectedLayer,
   onDuplicateSelectedLayer,
   onGroupSelectedLayers,
@@ -122,6 +130,7 @@ export function Toolbar({
   onOpenExportDialog,
   onOpenImageResize,
   onOpenProject,
+  onPaste,
   onRedo,
   onRestoreImageOriginal,
   onExportTemplate,
@@ -420,14 +429,41 @@ export function Toolbar({
               <span className={toolbarMenuHintClass}>Ctrl/Cmd+G</span>
             </button>
             <MenuSeparator />
-            <button className={toolbarMenuItemClass} disabled type="button">
-              Cut <span className={toolbarMenuHintClass}>TODO</span>
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!canEditDocument}
+              onClick={(event) => {
+                closeMenu(event);
+                onCut();
+              }}
+              type="button"
+            >
+              <span>Cut</span>
+              <span className={toolbarMenuHintClass}>Ctrl/Cmd+X</span>
             </button>
-            <button className={toolbarMenuItemClass} disabled type="button">
-              Copy <span className={toolbarMenuHintClass}>TODO</span>
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!canEditDocument}
+              onClick={(event) => {
+                closeMenu(event);
+                onCopy();
+              }}
+              type="button"
+            >
+              <span>Copy</span>
+              <span className={toolbarMenuHintClass}>Ctrl/Cmd+C</span>
             </button>
-            <button className={toolbarMenuItemClass} disabled type="button">
-              Paste <span className={toolbarMenuHintClass}>TODO</span>
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!canEditDocument}
+              onClick={(event) => {
+                closeMenu(event);
+                onPaste();
+              }}
+              type="button"
+            >
+              <span>Paste</span>
+              <span className={toolbarMenuHintClass}>Ctrl/Cmd+V</span>
             </button>
             <button
               className={toolbarMenuItemClass}

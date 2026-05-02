@@ -1,6 +1,7 @@
 /** Hook that provides open/save actions for `.webster` project files. */
 import { MutableRefObject, useCallback, useEffect, useRef } from "react";
 import { EditorApp } from "../../app/EditorApp";
+import type { EditorClipboardCommand } from "../../app/EditorApp";
 import { useEditorKeyboardShortcuts } from "./useEditorKeyboardShortcuts";
 import { saveProjectFile } from "../../projects/projectFiles";
 import type { WebsterFileHandle } from "../../projects/projectFiles";
@@ -108,6 +109,33 @@ export function useProjectFileActions({
     [activeDocumentId, activeDocumentTitle, editorAppRef, setWebglError, updateSaveStatus]
   );
 
+  const runClipboardCommand = useCallback(
+    async (command: EditorClipboardCommand) => {
+      if (!editorAppRef.current) {
+        return;
+      }
+
+      const result =
+        command === "copy"
+          ? await editorAppRef.current.copySelectedContent()
+          : command === "cut"
+            ? await editorAppRef.current.cutSelectedContent()
+            : await editorAppRef.current.pasteClipboardContent();
+
+      if (!result.didHandle) {
+        return;
+      }
+
+      setWebglError(null);
+
+      if (result.didChangeScene) {
+        onLayersChange(editorAppRef.current.getLayerSummaries());
+        onSceneChange();
+      }
+    },
+    [editorAppRef, onLayersChange, onSceneChange, setWebglError]
+  );
+
   useEffect(() => {
     return () => {
       if (saveStatusTimerRef.current) {
@@ -129,6 +157,8 @@ export function useProjectFileActions({
         setWebglError(null);
       }
     },
+    onCopy: () => runClipboardCommand("copy"),
+    onCut: () => runClipboardCommand("cut"),
     onDeleteSelectedLayer: () => {
       if (!editorAppRef.current) {
         return;
@@ -191,6 +221,7 @@ export function useProjectFileActions({
         setWebglError(null);
       }
     },
+    onPaste: () => runClipboardCommand("paste"),
     onSaveProject: () => saveCurrentProject("save"),
     onSelectTool,
     onUndo: () => {

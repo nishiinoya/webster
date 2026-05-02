@@ -2,6 +2,11 @@ import { Camera2D } from "../../geometry/Camera2D";
 import { Scene } from "../../scene/Scene";
 import { InputController } from "../../tools/input/InputController";
 
+type ReplaceSceneOptions = {
+  disposeCurrent?: boolean;
+  rememberActiveDocument?: boolean;
+};
+
 /**
  * Creates an empty editor scene for a blank document.
  */
@@ -46,7 +51,7 @@ export function switchEditorDocument(input: {
   activeDocumentId: string | null;
   currentScene: Scene;
   document: { height: number; id: string; width: number };
-  replaceScene: (nextScene: Scene, options?: { disposeCurrent?: boolean }) => Scene;
+  replaceScene: (nextScene: Scene, options?: ReplaceSceneOptions) => Scene;
   tabScenes: Map<string, Scene>;
 }) {
   if (input.activeDocumentId === input.document.id) {
@@ -64,10 +69,13 @@ export function switchEditorDocument(input: {
 
   if (!nextScene) {
     nextScene = createBlankDocumentScene(input.document.width, input.document.height);
+    input.tabScenes.set(input.document.id, nextScene);
   }
 
-  input.tabScenes.set(input.document.id, nextScene);
-  const scene = input.replaceScene(nextScene, { disposeCurrent: false });
+  const scene = input.replaceScene(nextScene, {
+    disposeCurrent: false,
+    rememberActiveDocument: false
+  });
 
   return {
     activeDocumentId: input.document.id,
@@ -78,7 +86,11 @@ export function switchEditorDocument(input: {
 /**
  * Records the currently active scene under a document id.
  */
-export function rememberEditorDocument(tabScenes: Map<string, Scene>, documentId: string, scene: Scene) {
+export function rememberEditorDocument(
+  tabScenes: Map<string, Scene>,
+  documentId: string,
+  scene: Scene
+) {
   tabScenes.set(documentId, scene);
   return documentId;
 }

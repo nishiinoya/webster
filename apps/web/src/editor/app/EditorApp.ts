@@ -4,6 +4,8 @@ import type { MaskBrushOptions } from "../tools/mask-brush/MaskBrushTypes";
 import type { DrawingToolOptions } from "../tools/drawing/DrawingTool";
 import type { ToolPointerEvent } from "../tools/move/MoveTool";
 import { Camera2D } from "../geometry/Camera2D";
+import { getLayerCorners, getModelMatrix } from "../geometry/TransformGeometry";
+import { invert3x3, transformPoint3x3 } from "../geometry/Matrix3";
 import { Scene } from "../scene/Scene";
 import type { SceneSnapshot } from "../scene/sceneSnapshots";
 import {
@@ -13,9 +15,14 @@ import {
   restoreSceneSnapshot
 } from "../scene/sceneSnapshots";
 import type { DocumentResizeAnchor, LayerMaskAction, LayerStackPlacement } from "../scene/Scene";
+import type { LayerClipboardSnapshot } from "../scene/Scene";
 import { exportScenePackage, importScenePackage } from "../projects/ProjectPackage";
+import { ImageLayer } from "../layers/ImageLayer";
 import { TextLayer } from "../layers/TextLayer";
 import type { ShapeKind } from "../layers/ShapeLayer";
+import type { Layer } from "../layers/Layer";
+import { containsSelectionPoint } from "../selection/SelectionManager";
+import type { Selection, SelectionBounds } from "../selection/SelectionManager";
 import {
   createBlankDocumentScene,
   forgetEditorDocument,
@@ -35,6 +42,7 @@ import {
   resampleImageLayerInScene,
   restoreOriginalImageLayerInScene
 } from "./image/imageLayerOperations";
+import { loadImageElementFromBlob } from "./image/imageFileUtils";
 import {
   applyDocumentCommandToScene,
   applyImageLayerCommandToScene,
@@ -117,10 +125,38 @@ export type LayerCommand =
 
 export type SelectionCommand = "clear" | "convert-to-mask" | "invert";
 
+export type EditorClipboardCommand = "copy" | "cut" | "paste";
+
+export type EditorClipboardCommandResult = {
+  didChangeScene: boolean;
+  didHandle: boolean;
+};
+
 type EditorAppStateSnapshot = {
   scene: SceneSnapshot;
   textEditingState: TextEditingState;
 };
+
+type ImageClipboardSnapshot = {
+  blob: Blob;
+  height: number;
+  name: string;
+  width: number;
+  x: number | null;
+  y: number | null;
+};
+
+type EditorClipboardData =
+  | {
+      kind: "image";
+      image: ImageClipboardSnapshot;
+    }
+  | {
+      kind: "layers";
+      layers: LayerClipboardSnapshot;
+    };
+
+let editorClipboardData: EditorClipboardData | null = null;
 
 type HistoryComparisonMode = "full" | "scene" | "scene-ignore-selection";
 
@@ -303,7 +339,9 @@ export class EditorApp {
    * Replaces the current scene with a new blank document scene.
    */
   createDocument(width: number, height: number) {
-    this.replaceScene(createBlankDocumentScene(width, height));
+    this.replaceScene(createBlankDocumentScene(width, height), {
+      rememberActiveDocument: true
+    });
     this.resetCurrentHistory("New document");
 
     return this.scene;
@@ -315,7 +353,9 @@ export class EditorApp {
   async createImageDocument(file: File) {
     const scene = await createImageDocumentFromFile(file);
 
-    this.replaceScene(scene);
+    this.replaceScene(scene, {
+      rememberActiveDocument: true
+    });
     this.camera.fitBounds(scene.document);
     this.notifyCameraChange();
     this.resetCurrentHistory("Opened image");
@@ -326,7 +366,13 @@ export class EditorApp {
   /**
    * Swaps the active scene and rebinds camera and input systems to it.
    */
-  replaceScene(nextScene: Scene, options: { disposeCurrent?: boolean } = {}) {
+  replaceScene(
+    nextScene: Scene,
+    options: {
+      disposeCurrent?: boolean;
+      rememberActiveDocument?: boolean;
+    } = {}
+  ) {
     this.scene = replaceEditorScene({
       camera: this.camera,
       currentScene: this.scene,
@@ -336,7 +382,9 @@ export class EditorApp {
       notifyCameraChange: this.notifyCameraChange.bind(this)
     });
 
-    if (this.activeDocumentId) {
+    const shouldRemember = options.rememberActiveDocument ?? true;
+
+    if (shouldRemember && this.activeDocumentId) {
       this.tabScenes.set(this.activeDocumentId, this.scene);
     }
 
@@ -450,7 +498,9 @@ export class EditorApp {
    */
   async importProjectFile(file: File) {
     const nextScene = await importScenePackage(file);
-    this.replaceScene(nextScene);
+    this.replaceScene(nextScene, {
+      rememberActiveDocument: true
+    });
     this.resetCurrentHistory("Opened project");
 
     return this.scene;
@@ -571,6 +621,171 @@ export class EditorApp {
     );
 
     return true;
+  }
+
+  async copySelectedContent(): Promise<EditorClipboardCommandResult> {
+    if (this.hasActiveTextEdit()) {
+      return { didChangeScene: false, didHandle: false };
+    }
+
+    const imageClipboard = await this.createSelectedPixelClipboardSnapshot();
+
+    if (imageClipboard) {
+      editorClipboardData = {
+        image: imageClipboard,
+        kind: "image"
+      };
+      await writeImageBlobToSystemClipboard(imageClipboard.blob);
+
+      return { didChangeScene: false, didHandle: true };
+    }
+
+    const layerClipboard = this.scene.createLayerClipboardSnapshot();
+
+    if (!layerClipboard) {
+      return { didChangeScene: false, didHandle: false };
+    }
+
+    editorClipboardData = {
+      kind: "layers",
+      layers: layerClipboard
+    };
+    await writeClipboardTextMarker("Webster layer clipboard");
+
+    return { didChangeScene: false, didHandle: true };
+  }
+
+  async cutSelectedContent(): Promise<EditorClipboardCommandResult> {
+    if (this.hasActiveTextEdit()) {
+      return { didChangeScene: false, didHandle: false };
+    }
+
+    const selectedImageLayer = this.getSelectedImageLayer();
+
+    if (this.scene.selection.current && selectedImageLayer && !selectedImageLayer.locked) {
+      const imageClipboard = await this.createSelectedPixelClipboardSnapshot(selectedImageLayer);
+
+      if (!imageClipboard) {
+        return { didChangeScene: false, didHandle: false };
+      }
+
+      const before = this.captureAppSnapshot();
+      const didClearPixels = await clearSelectedImageLayerPixels(
+        selectedImageLayer,
+        this.scene.selection.current
+      );
+
+      if (!didClearPixels) {
+        return { didChangeScene: false, didHandle: false };
+      }
+
+      editorClipboardData = {
+        image: imageClipboard,
+        kind: "image"
+      };
+      await writeImageBlobToSystemClipboard(imageClipboard.blob);
+      this.recordHistoryAction(
+        this.createHistoryAction({
+          kind: "scene",
+          label: `Cut pixels from ${selectedImageLayer.name}`,
+          operation: "cut-selected-pixels",
+          payload: {
+            layerId: selectedImageLayer.id
+          }
+        }),
+        before,
+        "scene"
+      );
+
+      return { didChangeScene: true, didHandle: true };
+    }
+
+    const layerClipboard = this.scene.createLayerClipboardSnapshot();
+
+    if (!layerClipboard) {
+      return { didChangeScene: false, didHandle: false };
+    }
+
+    const before = this.captureAppSnapshot();
+    const removedLayers = this.scene.removeLayersById(layerClipboard.rootLayerIds);
+
+    if (!removedLayers) {
+      return { didChangeScene: false, didHandle: false };
+    }
+
+    editorClipboardData = {
+      kind: "layers",
+      layers: layerClipboard
+    };
+    await writeClipboardTextMarker("Webster layer clipboard");
+    this.recordHistoryAction(
+      this.createHistoryAction({
+        kind: "scene",
+        label: layerClipboard.rootLayerIds.length > 1 ? "Cut layers" : "Cut layer",
+        operation: "cut-layers",
+        payload: {
+          layerIds: layerClipboard.rootLayerIds
+        }
+      }),
+      before,
+      "scene"
+    );
+
+    return { didChangeScene: true, didHandle: true };
+  }
+
+  async pasteClipboardContent(): Promise<EditorClipboardCommandResult> {
+    if (this.hasActiveTextEdit()) {
+      return { didChangeScene: false, didHandle: false };
+    }
+
+    if (editorClipboardData?.kind === "image") {
+      return {
+        didChangeScene: await this.pasteImageClipboardSnapshot(
+          editorClipboardData.image,
+          "Paste pixels"
+        ),
+        didHandle: true
+      };
+    }
+
+    const systemImage = await readSystemClipboardImage();
+
+    if (systemImage) {
+      return {
+        didChangeScene: await this.pasteImageClipboardSnapshot(systemImage, "Paste clipboard image"),
+        didHandle: true
+      };
+    }
+
+    if (!editorClipboardData) {
+      return { didChangeScene: false, didHandle: false };
+    }
+
+    const before = this.captureAppSnapshot();
+    const pastedLayers = this.scene.pasteLayerClipboardSnapshot(editorClipboardData.layers);
+
+    if (!pastedLayers) {
+      return { didChangeScene: false, didHandle: false };
+    }
+
+    this.recordHistoryAction(
+      this.createHistoryAction({
+        kind: "scene",
+        label:
+          editorClipboardData.layers.rootLayerIds.length > 1
+            ? "Paste layers"
+            : "Paste layer",
+        operation: "paste-layers",
+        payload: {
+          layerIds: this.scene.selectedLayerIds
+        }
+      }),
+      before,
+      "scene"
+    );
+
+    return { didChangeScene: true, didHandle: true };
   }
 
   /**
@@ -940,6 +1155,71 @@ export class EditorApp {
     return result;
   }
 
+  private getSelectedImageLayer() {
+    if (this.scene.selectedLayerIds.length !== 1 || !this.scene.selectedLayerId) {
+      return null;
+    }
+
+    const layer = this.scene.getLayer(this.scene.selectedLayerId);
+
+    return layer instanceof ImageLayer ? layer : null;
+  }
+
+  private async createSelectedPixelClipboardSnapshot(layer = this.getSelectedImageLayer()) {
+    const selection = this.scene.selection.current;
+
+    if (!selection || !layer) {
+      return null;
+    }
+
+    return copySelectedImageLayerPixels(layer, selection);
+  }
+
+  private async pasteImageClipboardSnapshot(
+    imageClipboard: ImageClipboardSnapshot,
+    label: string
+  ) {
+    const before = this.captureAppSnapshot();
+    const image = await loadImageElementFromBlob(imageClipboard.blob);
+    const imageWidth = image.naturalWidth || image.width;
+    const imageHeight = image.naturalHeight || image.height;
+    const maxInitialSize = 420;
+    const shouldKeepDocumentPlacement = imageClipboard.x !== null && imageClipboard.y !== null;
+    const scale = shouldKeepDocumentPlacement
+      ? 1
+      : Math.min(1, maxInitialSize / Math.max(imageWidth, imageHeight));
+    const layer = new ImageLayer({
+      assetId: crypto.randomUUID(),
+      height: imageHeight,
+      id: crypto.randomUUID(),
+      image,
+      mimeType: imageClipboard.blob.type || "image/png",
+      name: imageClipboard.name,
+      objectUrl: image.src,
+      scaleX: shouldKeepDocumentPlacement ? imageClipboard.width / imageWidth : scale,
+      scaleY: shouldKeepDocumentPlacement ? imageClipboard.height / imageHeight : scale,
+      width: imageWidth,
+      x: shouldKeepDocumentPlacement ? imageClipboard.x ?? 0 : (-imageWidth * scale) / 2,
+      y: shouldKeepDocumentPlacement ? imageClipboard.y ?? 0 : (-imageHeight * scale) / 2
+    });
+
+    this.scene.addLayer(layer);
+    this.recordHistoryAction(
+      this.createHistoryAction({
+        kind: "scene",
+        label,
+        operation: "paste-image-layer",
+        payload: {
+          layerId: layer.id
+        }
+      }),
+      before,
+      "scene"
+    );
+
+    return true;
+  }
+
   async addImageFile(file: File) {
     const before = this.captureAppSnapshot();
     const result = await addImageFileToScene(this.scene, file);
@@ -1280,4 +1560,278 @@ function getMaskActionLabel(layerName: string, action: LayerMaskAction) {
 
 function getLayerName(scene: Scene, layerId: string) {
   return scene.getLayer(layerId)?.name ?? "Layer";
+}
+
+async function copySelectedImageLayerPixels(
+  layer: ImageLayer,
+  selection: Selection
+): Promise<ImageClipboardSnapshot | null> {
+  const inverseMatrix = invert3x3(getModelMatrix(layer));
+
+  if (!inverseMatrix) {
+    return null;
+  }
+
+  const source = createImagePixelCanvas(layer.image);
+  const sourceImageData = source.context.getImageData(0, 0, source.width, source.height);
+  const bounds = getSelectedPixelCopyBounds(layer, selection);
+  const size = getClipboardCanvasSize(bounds);
+  const width = size.width;
+  const height = size.height;
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+
+  if (!context) {
+    throw new Error("Unable to copy selected pixels.");
+  }
+
+  canvas.width = width;
+  canvas.height = height;
+
+  const outputImageData = context.createImageData(width, height);
+  let copiedPixels = 0;
+
+  for (let y = 0; y < height; y += 1) {
+    const worldY = bounds.y + ((y + 0.5) / height) * bounds.height;
+
+    for (let x = 0; x < width; x += 1) {
+      const worldX = bounds.x + ((x + 0.5) / width) * bounds.width;
+
+      if (!containsSelectionPoint(selection, worldX, worldY)) {
+        continue;
+      }
+
+      const localPoint = transformPoint3x3(inverseMatrix, worldX, worldY);
+
+      if (
+        localPoint.x < 0 ||
+        localPoint.x > 1 ||
+        localPoint.y < 0 ||
+        localPoint.y > 1
+      ) {
+        continue;
+      }
+
+      const sourceX = Math.min(
+        source.width - 1,
+        Math.max(0, Math.floor(localPoint.x * source.width))
+      );
+      const sourceY = Math.min(
+        source.height - 1,
+        Math.max(0, Math.floor((1 - localPoint.y) * source.height))
+      );
+      const sourceIndex = (sourceY * source.width + sourceX) * 4;
+      const outputIndex = (y * width + x) * 4;
+
+      outputImageData.data[outputIndex] = sourceImageData.data[sourceIndex];
+      outputImageData.data[outputIndex + 1] = sourceImageData.data[sourceIndex + 1];
+      outputImageData.data[outputIndex + 2] = sourceImageData.data[sourceIndex + 2];
+      outputImageData.data[outputIndex + 3] = sourceImageData.data[sourceIndex + 3];
+      copiedPixels += 1;
+    }
+  }
+
+  if (copiedPixels === 0) {
+    return null;
+  }
+
+  context.putImageData(outputImageData, 0, 0);
+
+  return {
+    blob: await canvasToBlob(canvas, "image/png"),
+    height: bounds.height,
+    name: `${layer.name} pixels.png`,
+    width: bounds.width,
+    x: bounds.x,
+    y: bounds.y
+  };
+}
+
+async function clearSelectedImageLayerPixels(layer: ImageLayer, selection: Selection) {
+  const source = createImagePixelCanvas(layer.image);
+  const imageData = source.context.getImageData(0, 0, source.width, source.height);
+  const modelMatrix = getModelMatrix(layer);
+  let didClear = false;
+
+  for (let y = 0; y < source.height; y += 1) {
+    for (let x = 0; x < source.width; x += 1) {
+      const localX = source.width <= 1 ? 0 : (x + 0.5) / source.width;
+      const localY = source.height <= 1 ? 0 : 1 - (y + 0.5) / source.height;
+      const worldPoint = transformPoint3x3(modelMatrix, localX, localY);
+
+      if (!containsSelectionPoint(selection, worldPoint.x, worldPoint.y)) {
+        continue;
+      }
+
+      const alphaIndex = (y * source.width + x) * 4 + 3;
+
+      if (imageData.data[alphaIndex] !== 0) {
+        imageData.data[alphaIndex] = 0;
+        didClear = true;
+      }
+    }
+  }
+
+  if (!didClear) {
+    return false;
+  }
+
+  source.context.putImageData(imageData, 0, 0);
+
+  const mimeType = "image/png";
+  const blob = await canvasToBlob(source.canvas, mimeType);
+  const image = await loadImageElementFromBlob(blob);
+
+  layer.replaceImage(image, image.src, {
+    assetId: crypto.randomUUID(),
+    mimeType: blob.type || mimeType
+  });
+
+  return true;
+}
+
+function createImagePixelCanvas(image: HTMLImageElement) {
+  const width = image.naturalWidth || image.width;
+  const height = image.naturalHeight || image.height;
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+
+  if (!context || width <= 0 || height <= 0) {
+    throw new Error("Unable to read image pixels.");
+  }
+
+  canvas.width = width;
+  canvas.height = height;
+  context.drawImage(image, 0, 0, width, height);
+
+  return {
+    canvas,
+    context,
+    height,
+    width
+  };
+}
+
+function getSelectedPixelCopyBounds(layer: Layer, selection: Selection): SelectionBounds {
+  if (!selection.inverted) {
+    return {
+      height: Math.max(1, selection.bounds.height),
+      width: Math.max(1, selection.bounds.width),
+      x: selection.bounds.x,
+      y: selection.bounds.y
+    };
+  }
+
+  return getLayerWorldBounds(layer);
+}
+
+function getLayerWorldBounds(layer: Layer): SelectionBounds {
+  const corners = getLayerCorners(layer);
+  const points = [corners.topLeft, corners.topRight, corners.bottomRight, corners.bottomLeft];
+  const minX = Math.min(...points.map((point) => point.x));
+  const minY = Math.min(...points.map((point) => point.y));
+  const maxX = Math.max(...points.map((point) => point.x));
+  const maxY = Math.max(...points.map((point) => point.y));
+
+  return {
+    height: Math.max(1, maxY - minY),
+    width: Math.max(1, maxX - minX),
+    x: minX,
+    y: minY
+  };
+}
+
+function clampClipboardCanvasDimension(value: number) {
+  return Math.min(Math.max(Math.round(value), 1), 12000);
+}
+
+function getClipboardCanvasSize(bounds: SelectionBounds) {
+  const maxPixelArea = 16_000_000;
+  let width = clampClipboardCanvasDimension(bounds.width);
+  let height = clampClipboardCanvasDimension(bounds.height);
+  const area = width * height;
+
+  if (area > maxPixelArea) {
+    const scale = Math.sqrt(maxPixelArea / area);
+
+    width = Math.max(1, Math.round(width * scale));
+    height = Math.max(1, Math.round(height * scale));
+  }
+
+  return { height, width };
+}
+
+async function readSystemClipboardImage(): Promise<ImageClipboardSnapshot | null> {
+  if (!navigator.clipboard || typeof navigator.clipboard.read !== "function") {
+    return null;
+  }
+
+  try {
+    const clipboardItems = await navigator.clipboard.read();
+
+    for (const item of clipboardItems) {
+      const imageType = item.types.find((type) => type.startsWith("image/"));
+
+      if (!imageType) {
+        continue;
+      }
+
+      const blob = await item.getType(imageType);
+
+      return {
+        blob,
+        height: 0,
+        name: getClipboardImageName(imageType),
+        width: 0,
+        x: null,
+        y: null
+      };
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+async function writeImageBlobToSystemClipboard(blob: Blob) {
+  if (
+    !navigator.clipboard ||
+    typeof navigator.clipboard.write !== "function" ||
+    !("ClipboardItem" in window)
+  ) {
+    return;
+  }
+
+  try {
+    const mimeType = blob.type || "image/png";
+
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        [mimeType]: blob
+      })
+    ]);
+  } catch {
+    // Clipboard image writes may be blocked by browser permissions.
+  }
+}
+
+async function writeClipboardTextMarker(text: string) {
+  try {
+    await navigator.clipboard?.writeText(text);
+  } catch {
+    // Clipboard text writes may be blocked by browser permissions.
+  }
+}
+
+function getClipboardImageName(mimeType: string) {
+  if (mimeType === "image/jpeg") {
+    return "Clipboard image.jpg";
+  }
+
+  if (mimeType === "image/webp") {
+    return "Clipboard image.webp";
+  }
+
+  return "Clipboard image.png";
 }

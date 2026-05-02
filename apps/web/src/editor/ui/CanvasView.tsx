@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import type {
   DocumentCommand,
+  EditorClipboardCommand,
   HistoryStateSnapshot,
   ImageExportBackground,
   ImageExportFormat,
@@ -31,6 +32,7 @@ import { cn } from "./classNames";
 
 type CanvasViewProps = {
   activeDocument: EditorDocumentTab;
+  clipboardCommandRequest: { command: EditorClipboardCommand; id: number } | null;
   closedDocumentRequest: { id: number; tabId: string } | null;
   documentCommandRequest: { command: DocumentCommand; id: number } | null;
   historyCommandRequest: { command: "redo" | "undo"; id: number } | null;
@@ -49,6 +51,7 @@ type CanvasViewProps = {
   layerCommandRequest: { command: LayerCommand; id: number } | null;
   maskBrushOptions: MaskBrushOptions;
   onHistoryChange: (history: HistoryStateSnapshot) => void;
+  onClipboardCommandRequestHandled: (requestId: number) => void;
   onHistoryCommandRequestHandled: (requestId: number) => void;
   onLayersChange: (layers: LayerSummary[]) => void;
   onStrokeLayerCreated: (layerId: string) => void;
@@ -95,6 +98,7 @@ type CanvasViewProps = {
 
 export function CanvasView({
   activeDocument,
+  clipboardCommandRequest,
   closedDocumentRequest,
   documentCommandRequest,
   historyCommandRequest,
@@ -104,6 +108,7 @@ export function CanvasView({
   layerCommandRequest,
   maskBrushOptions,
   onHistoryChange,
+  onClipboardCommandRequestHandled,
   onHistoryCommandRequestHandled,
   onLayersChange,
   onStrokeLayerCreated,
@@ -143,6 +148,7 @@ export function CanvasView({
   showCanvasBorder
 }: CanvasViewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const handledClipboardCommandRequestIdRef = useRef<number | null>(null);
   const handledTemplateInsertRequestIdRef = useRef<number | null>(null);
   const [fps, setFps] = useState(0);
   const { editorAppRef, editorReadyId, setWebglError, webglError } = useEditorApp({
@@ -211,6 +217,65 @@ export function CanvasView({
     projectSaveRequest,
     setWebglError
   });
+
+  useEffect(() => {
+    if (!clipboardCommandRequest || !editorAppRef.current) {
+      return;
+    }
+
+    if (handledClipboardCommandRequestIdRef.current === clipboardCommandRequest.id) {
+      return;
+    }
+
+    handledClipboardCommandRequestIdRef.current = clipboardCommandRequest.id;
+    const request = clipboardCommandRequest;
+    let didCancel = false;
+
+    async function runClipboardCommand() {
+      if (!editorAppRef.current) {
+        return;
+      }
+
+      try {
+        const result =
+          request.command === "copy"
+            ? await editorAppRef.current.copySelectedContent()
+            : request.command === "cut"
+              ? await editorAppRef.current.cutSelectedContent()
+              : await editorAppRef.current.pasteClipboardContent();
+
+        if (!didCancel && result.didChangeScene && editorAppRef.current) {
+          onLayersChange(editorAppRef.current.getLayerSummaries());
+          rememberActiveScene();
+        }
+
+        if (!didCancel && result.didHandle) {
+          setWebglError(null);
+        }
+      } catch (error) {
+        if (!didCancel) {
+          setWebglError(error instanceof Error ? error.message : "Clipboard command failed.");
+        }
+      } finally {
+        if (!didCancel) {
+          onClipboardCommandRequestHandled(request.id);
+        }
+      }
+    }
+
+    void runClipboardCommand();
+
+    return () => {
+      didCancel = true;
+    };
+  }, [
+    clipboardCommandRequest,
+    editorAppRef,
+    onClipboardCommandRequestHandled,
+    onLayersChange,
+    rememberActiveScene,
+    setWebglError
+  ]);
 
   useEffect(() => {
     if (!templateSaveRequest || !editorAppRef.current) {

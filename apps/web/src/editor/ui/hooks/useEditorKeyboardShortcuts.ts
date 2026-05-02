@@ -4,10 +4,13 @@ import { useEffect, useRef } from "react";
 type EditorKeyboardShortcutHandlers = {
   isTextEditingActive?: () => boolean;
   onClearSelection?: () => Promise<void> | void;
+  onCopy?: () => Promise<void> | void;
+  onCut?: () => Promise<void> | void;
   onDeleteSelectedLayer?: () => Promise<void> | void;
   onDuplicateSelectedLayer?: () => Promise<void> | void;
   onGroupSelectedLayers?: () => Promise<void> | void;
   onNudgeSelectedLayer?: (dx: number, dy: number) => Promise<void> | void;
+  onPaste?: () => Promise<void> | void;
   onRedo: () => Promise<void> | void;
   onSaveProject: () => Promise<void> | void;
   onSelectTool?: (tool: string) => Promise<void> | void;
@@ -17,10 +20,13 @@ type EditorKeyboardShortcutHandlers = {
 export function useEditorKeyboardShortcuts({
   isTextEditingActive,
   onClearSelection,
+  onCopy,
+  onCut,
   onDeleteSelectedLayer,
   onDuplicateSelectedLayer,
   onGroupSelectedLayers,
   onNudgeSelectedLayer,
+  onPaste,
   onRedo,
   onSaveProject,
   onSelectTool,
@@ -29,10 +35,13 @@ export function useEditorKeyboardShortcuts({
   const handlersRef = useRef<EditorKeyboardShortcutHandlers>({
     isTextEditingActive,
     onClearSelection,
+    onCopy,
+    onCut,
     onDeleteSelectedLayer,
     onDuplicateSelectedLayer,
     onGroupSelectedLayers,
     onNudgeSelectedLayer,
+    onPaste,
     onRedo,
     onSaveProject,
     onSelectTool,
@@ -46,10 +55,13 @@ export function useEditorKeyboardShortcuts({
     handlersRef.current = {
       isTextEditingActive,
       onClearSelection,
+      onCopy,
+      onCut,
       onDeleteSelectedLayer,
       onDuplicateSelectedLayer,
       onGroupSelectedLayers,
       onNudgeSelectedLayer,
+      onPaste,
       onRedo,
       onSaveProject,
       onSelectTool,
@@ -58,10 +70,13 @@ export function useEditorKeyboardShortcuts({
   }, [
     isTextEditingActive,
     onClearSelection,
+    onCopy,
+    onCut,
     onDeleteSelectedLayer,
     onDuplicateSelectedLayer,
     onGroupSelectedLayers,
     onNudgeSelectedLayer,
+    onPaste,
     onRedo,
     onSaveProject,
     onSelectTool,
@@ -113,6 +128,45 @@ export function useEditorKeyboardShortcuts({
 
       if (handlers.isTextEditingActive?.()) {
         clearPressedArrowKeys();
+        return;
+      }
+
+      if (
+        handlers.onCopy &&
+        !event.repeat &&
+        hasModifier &&
+        !event.altKey &&
+        !event.shiftKey &&
+        key === "c"
+      ) {
+        event.preventDefault();
+        await handlers.onCopy();
+        return;
+      }
+
+      if (
+        handlers.onCut &&
+        !event.repeat &&
+        hasModifier &&
+        !event.altKey &&
+        !event.shiftKey &&
+        key === "x"
+      ) {
+        event.preventDefault();
+        await handlers.onCut();
+        return;
+      }
+
+      if (
+        handlers.onPaste &&
+        !event.repeat &&
+        hasModifier &&
+        !event.altKey &&
+        !event.shiftKey &&
+        key === "v"
+      ) {
+        event.preventDefault();
+        await handlers.onPaste();
         return;
       }
 

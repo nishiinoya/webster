@@ -4,6 +4,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import type {
   DocumentCommand,
+  EditorClipboardCommand,
   HistoryStateSnapshot,
   ImageExportBackground,
   ImageExportFormat,
@@ -251,6 +252,10 @@ export function EditorPage() {
     command: SelectionCommand;
     id: number;
   } | null>(null);
+  const [clipboardCommandRequest, setClipboardCommandRequest] = useState<{
+    command: EditorClipboardCommand;
+    id: number;
+  } | null>(null);
   const [closedDocumentRequest, setClosedDocumentRequest] = useState<{
     id: number;
     tabId: string;
@@ -324,6 +329,10 @@ export function EditorPage() {
 
   function runLayerCommand(command: LayerCommand) {
     setLayerCommandRequest({ command, id: Date.now() });
+  }
+
+  function runClipboardCommand(command: EditorClipboardCommand) {
+    setClipboardCommandRequest({ command, id: Date.now() });
   }
 
   function groupSelectedLayers() {
@@ -772,6 +781,8 @@ export function EditorPage() {
             : null
         }
         documentTitle={activeDocument?.title ?? "No document"}
+        onCopy={() => runClipboardCommand("copy")}
+        onCut={() => runClipboardCommand("cut")}
         onDeleteSelectedLayer={() => {
           if (selectedLayer) {
             runLayerCommand({ layerId: selectedLayer.id, type: "delete" });
@@ -788,6 +799,7 @@ export function EditorPage() {
         onOpenExportDialog={() => setIsExportImageDialogOpen(true)}
         onOpenImageResize={() => setIsResizeImageDialogOpen(true)}
         onOpenProject={openProjectInNewTab}
+        onPaste={() => runClipboardCommand("paste")}
         onOpenImageDocument={(file) => void openImageAsNewDocument(file)}
         onRedo={() => setHistoryCommandRequest({ command: "redo", id: Date.now() })}
         onRestoreImageOriginal={() => {
@@ -886,6 +898,7 @@ export function EditorPage() {
           {activeDocument ? (
             <CanvasView
               activeDocument={activeDocument}
+              clipboardCommandRequest={clipboardCommandRequest}
               closedDocumentRequest={closedDocumentRequest}
               documentCommandRequest={documentCommandRequest}
               historyCommandRequest={historyCommandRequest}
@@ -902,6 +915,11 @@ export function EditorPage() {
               }}
               onHistoryCommandRequestHandled={(requestId) =>
                 setHistoryCommandRequest((request) => (request?.id === requestId ? null : request))
+              }
+              onClipboardCommandRequestHandled={(requestId) =>
+                setClipboardCommandRequest((request) =>
+                  request?.id === requestId ? null : request
+                )
               }
               onLayerCommandRequestHandled={(requestId) =>
                 setLayerCommandRequest((request) => (request?.id === requestId ? null : request))
