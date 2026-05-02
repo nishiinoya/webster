@@ -62,6 +62,7 @@ type CanvasViewProps = {
   onSaveStatusChange: (status: SaveStatus) => void;
   onSelectionCommandRequestHandled: (requestId: number) => void;
   onSelectLayerRequestHandled: (requestId: number) => void;
+  onSelectTool: (tool: string) => void;
   onUploadRequestHandled: (requestId: number) => void;
   onZoomChange: (zoomPercentage: number) => void;
   projectFileRequest: {
@@ -110,6 +111,7 @@ export function CanvasView({
   onSaveStatusChange,
   onSelectionCommandRequestHandled,
   onSelectLayerRequestHandled,
+  onSelectTool,
   onUploadRequestHandled,
   onZoomChange,
   projectFileRequest,
@@ -190,6 +192,7 @@ export function CanvasView({
     onProjectSaveRequestHandled,
     onSaveStatusChange,
     onSceneChange: rememberActiveScene,
+    onSelectTool,
     projectFileRequest,
     projectSaveRequest,
     setWebglError

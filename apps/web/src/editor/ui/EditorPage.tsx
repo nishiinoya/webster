@@ -602,6 +602,16 @@ export function EditorPage() {
             : null
         }
         documentTitle={activeDocument?.title ?? "No document"}
+        onDeleteSelectedLayer={() => {
+          if (selectedLayer) {
+            runLayerCommand({ layerId: selectedLayer.id, type: "delete" });
+          }
+        }}
+        onDuplicateSelectedLayer={() => {
+          if (selectedLayer) {
+            runLayerCommand({ layerId: selectedLayer.id, type: "duplicate" });
+          }
+        }}
         onNewDocument={() => setIsNewDocumentDialogOpen(true)}
         onOpenCanvasResize={() => setIsResizeCanvasDialogOpen(true)}
         onOpenExportDialog={() => setIsExportImageDialogOpen(true)}
@@ -755,6 +765,7 @@ export function EditorPage() {
               onSelectLayerRequestHandled={(requestId) =>
                 setSelectLayerRequest((request) => (request?.id === requestId ? null : request))
               }
+              onSelectTool={setSelectedTool}
               onUploadRequestHandled={(requestId) =>
                 setUploadRequest((request) => (request?.id === requestId ? null : request))
               }

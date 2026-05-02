@@ -18,6 +18,8 @@ type ToolbarProps = {
   canUndo: boolean;
   canvasSize: { height: number; width: number } | null;
   documentTitle: string;
+  onDeleteSelectedLayer: () => void;
+  onDuplicateSelectedLayer: () => void;
   onNewDocument: () => void;
   onOpenCanvasResize: () => void;
   onOpenImageDocument: (file: File) => void;
@@ -62,12 +64,51 @@ export type StrokeTargetSelection = {
   mode: "layer" | "new" | "selected";
 };
 
+const shortcutMenuGroups = [
+  {
+    label: "Tools",
+    shortcuts: [
+      ["V", "Move"],
+      ["H", "Pan"],
+      ["B", "Mask brush"],
+      ["T", "Text"],
+      ["D", "Draw"],
+      ["S", "Shape"],
+      ["R", "Rectangle"],
+      ["E", "Ellipse"]
+    ]
+  },
+  {
+    label: "Layer",
+    shortcuts: [
+      ["Arrows", "Nudge"],
+      ["Shift+Arrows", "10 px"],
+      ["Del", "Delete"],
+      ["Ctrl/Cmd+J", "Duplicate"]
+    ]
+  },
+  {
+    label: "Selection",
+    shortcuts: [["Ctrl/Cmd+D", "Clear"]]
+  },
+  {
+    label: "History",
+    shortcuts: [
+      ["Ctrl/Cmd+Z", "Undo"],
+      ["Shift+Ctrl/Cmd+Z", "Redo"],
+      ["Ctrl/Cmd+S", "Save"]
+    ]
+  }
+];
+
 export function Toolbar({
   canEditDocument,
   canRedo,
   canUndo,
   canvasSize,
   documentTitle,
+  onDeleteSelectedLayer,
+  onDuplicateSelectedLayer,
   onNewDocument,
   onOpenCanvasResize,
   onOpenImageDocument,
@@ -304,6 +345,31 @@ export function Toolbar({
               <span className={toolbarMenuHintClass}>Shift+Ctrl/Cmd+Z</span>
             </button>
             <MenuSeparator />
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!selectedLayer}
+              onClick={(event) => {
+                closeMenu(event);
+                onDuplicateSelectedLayer();
+              }}
+              type="button"
+            >
+              <span>Duplicate layer</span>
+              <span className={toolbarMenuHintClass}>Ctrl/Cmd+J</span>
+            </button>
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!selectedLayer}
+              onClick={(event) => {
+                closeMenu(event);
+                onDeleteSelectedLayer();
+              }}
+              type="button"
+            >
+              <span>Delete layer</span>
+              <span className={toolbarMenuHintClass}>Del / Backspace</span>
+            </button>
+            <MenuSeparator />
             <button className={toolbarMenuItemClass} disabled type="button">
               Cut <span className={toolbarMenuHintClass}>TODO</span>
             </button>
@@ -312,18 +378,6 @@ export function Toolbar({
             </button>
             <button className={toolbarMenuItemClass} disabled type="button">
               Paste <span className={toolbarMenuHintClass}>TODO</span>
-            </button>
-            <MenuSeparator />
-            <button
-              className={toolbarMenuItemClass}
-              disabled={!canEditDocument}
-              onClick={(event) => {
-                closeMenu(event);
-                onSelectTool("Move");
-              }}
-              type="button"
-            >
-              Move / transform tool
             </button>
             <button
               className={toolbarMenuItemClass}
@@ -353,28 +407,29 @@ export function Toolbar({
               Revert image to original pixels
               <span className={toolbarMenuHintClass}>Image</span>
             </button>
-            <button
-              className={toolbarMenuItemClass}
-              disabled={!canEditDocument}
-              onClick={(event) => {
-                closeMenu(event);
-                onSelectTool("Draw");
-              }}
-              type="button"
-            >
-              Draw tool
-            </button>
-            <button
-              className={toolbarMenuItemClass}
-              disabled={!canEditDocument}
-              onClick={(event) => {
-                closeMenu(event);
-                onSelectTool("Text");
-              }}
-              type="button"
-            >
-              Text tool
-            </button>
+          </div>
+        </details>
+        <details className="toolbar-menu relative" onToggle={closeSiblingMenus}>
+          <summary className={toolbarButtonClass}>Keys</summary>
+          <div className={toolbarShortcutMenuClass} aria-label="Keyboard shortcuts">
+            {shortcutMenuGroups.map((group) => (
+              <div className="grid gap-1.5" key={group.label}>
+                <span className="text-[10px] font-extrabold uppercase tracking-normal text-[#8b929b]">
+                  {group.label}
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {group.shortcuts.map(([keys, action]) => (
+                    <span
+                      className="inline-flex min-h-7 items-center gap-1.5 rounded-md border border-[#333941] bg-[#202329] px-2 text-[11px] font-bold text-[#dce1e6]"
+                      key={`${group.label}-${keys}`}
+                    >
+                      <kbd className="font-extrabold text-[#79dac7]">{keys}</kbd>
+                      <span className="text-[#9aa1ab]">{action}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         </details>
         <details className="toolbar-menu relative" onToggle={closeSiblingMenus}>
@@ -484,7 +539,8 @@ export function Toolbar({
               }}
               type="button"
             >
-              Clear selection
+              <span>Clear selection</span>
+              <span className={toolbarMenuHintClass}>Ctrl/Cmd+D</span>
             </button>
             <button
               className={toolbarMenuItemClass}
@@ -765,7 +821,10 @@ const toolbarButtonClass =
   "block cursor-default list-none rounded-lg border border-transparent bg-transparent px-2.5 py-2 text-[13px] text-[#d9dde3] hover:border-[#4c535c] hover:bg-[#252930] focus-visible:border-[#4c535c] focus-visible:bg-[#252930] [&::-webkit-details-marker]:hidden [.toolbar-menu[open]_&]:border-[#4c535c] [.toolbar-menu[open]_&]:bg-[#252930]";
 
 const toolbarMenuClass =
-  "absolute left-0 top-[calc(100%+6px)] z-10 grid w-[250px] rounded-lg border border-[#33373d] bg-[#17191d] p-1.5 shadow-[0_18px_34px_rgba(0,0,0,0.35)]";
+  "absolute left-0 top-[calc(100%+6px)] z-10 grid w-[280px] rounded-lg border border-[#33373d] bg-[#17191d] p-1.5 shadow-[0_18px_34px_rgba(0,0,0,0.35)]";
+
+const toolbarShortcutMenuClass =
+  "absolute left-0 top-[calc(100%+6px)] z-10 grid w-[min(430px,calc(100vw-24px))] gap-3 rounded-lg border border-[#33373d] bg-[#17191d] p-3 shadow-[0_18px_34px_rgba(0,0,0,0.35)]";
 
 const toolbarMenuItemClass =
   "flex w-full items-center justify-between gap-3 rounded-lg border border-transparent bg-transparent px-2.5 py-2 text-left text-[13px] text-[#eef1f4] hover:border-[#4c535c] hover:bg-[#252930] focus-visible:border-[#4c535c] focus-visible:bg-[#252930] disabled:cursor-not-allowed disabled:text-[#6f7680] disabled:hover:border-transparent disabled:hover:bg-transparent";

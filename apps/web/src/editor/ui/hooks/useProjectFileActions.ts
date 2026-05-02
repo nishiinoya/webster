@@ -19,6 +19,7 @@ type UseProjectFileActionsOptions = {
   onProjectSaveRequestHandled: (requestId: number) => void;
   onSaveStatusChange: (status: SaveStatus) => void;
   onSceneChange: () => void;
+  onSelectTool: (tool: string) => void;
   projectFileRequest: {
     file: File;
     handle?: WebsterFileHandle | null;
@@ -41,6 +42,7 @@ export function useProjectFileActions({
   onProjectSaveRequestHandled,
   onSaveStatusChange,
   onSceneChange,
+  onSelectTool,
   projectFileRequest,
   projectSaveRequest,
   setWebglError
@@ -115,7 +117,65 @@ export function useProjectFileActions({
   }, []);
 
   useEditorKeyboardShortcuts({
+    isTextEditingActive: () => editorAppRef.current?.hasActiveTextEdit() ?? false,
+    onClearSelection: () => {
+      if (!editorAppRef.current) {
+        return;
+      }
+
+      if (editorAppRef.current.applySelectionCommand("clear")) {
+        onLayersChange(editorAppRef.current.getLayerSummaries());
+        onSceneChange();
+        setWebglError(null);
+      }
+    },
+    onDeleteSelectedLayer: () => {
+      if (!editorAppRef.current) {
+        return;
+      }
+
+      const layerId = editorAppRef.current.getSelectedLayerId();
+
+      if (!layerId) {
+        return;
+      }
+
+      if (editorAppRef.current.applyLayerCommand({ layerId, type: "delete" })) {
+        onLayersChange(editorAppRef.current.getLayerSummaries());
+        onSceneChange();
+        setWebglError(null);
+      }
+    },
+    onDuplicateSelectedLayer: () => {
+      if (!editorAppRef.current) {
+        return;
+      }
+
+      const layerId = editorAppRef.current.getSelectedLayerId();
+
+      if (!layerId) {
+        return;
+      }
+
+      if (editorAppRef.current.applyLayerCommand({ layerId, type: "duplicate" })) {
+        onLayersChange(editorAppRef.current.getLayerSummaries());
+        onSceneChange();
+        setWebglError(null);
+      }
+    },
+    onNudgeSelectedLayer: (dx, dy) => {
+      if (!editorAppRef.current) {
+        return;
+      }
+
+      if (editorAppRef.current.nudgeSelectedLayer(dx, dy)) {
+        onLayersChange(editorAppRef.current.getLayerSummaries());
+        onSceneChange();
+        setWebglError(null);
+      }
+    },
     onSaveProject: () => saveCurrentProject("save"),
+    onSelectTool,
     onUndo: () => {
       if (!editorAppRef.current) {
         return;

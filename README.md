@@ -427,8 +427,8 @@ This section maps the expected demo requirements to current project status.
 | Move elements with mouse | Present | Move tool works. |
 | Move elements with keyboard | Planned | Arrow-key movement is not implemented. |
 | Delete elements from canvas | Present | Layer menu delete exists. Keyboard delete is planned. |
-| Change history and restore previous version | Partial | History panel exists; full undo/revision restore is planned. |
-| Resize canvas | Partial | New document size exists; resizing an existing document is planned. |
+| Change history and restore previous version | Present | History panel exists; full undo/revision restore is present. |
+| Resize canvas | Present | New document size exists; resizing an existing document is present. |
 | Zoom canvas | Present | Mouse wheel zoom works. |
 | Save project as JPG | Present | Export as JPEG. |
 | Save project as PNG | Present | Export as transparent/white/checkerboard PNG. |

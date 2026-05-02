@@ -473,6 +473,61 @@ export class EditorApp {
     return this.scene.selectLayer(layerId);
   }
 
+  getSelectedLayerId() {
+    return this.scene.selectedLayerId;
+  }
+
+  hasActiveTextEdit() {
+    return Boolean(
+      this.textEditLayerId && this.scene.getLayer(this.textEditLayerId) instanceof TextLayer
+    );
+  }
+
+  nudgeSelectedLayer(dx: number, dy: number) {
+    if (dx === 0 && dy === 0) {
+      return false;
+    }
+
+    const layer = this.scene.selectedLayerId
+      ? this.scene.getLayer(this.scene.selectedLayerId)
+      : null;
+
+    if (!layer || layer.locked || this.hasActiveTextEdit()) {
+      return false;
+    }
+
+    const before = this.captureAppSnapshot();
+    const nextX = layer.x + dx;
+    const nextY = layer.y + dy;
+    const result = this.scene.updateLayer(layer.id, {
+      x: nextX,
+      y: nextY
+    });
+
+    if (!result) {
+      return false;
+    }
+
+    this.recordHistoryAction(
+      this.createHistoryAction({
+        kind: "command",
+        label: `Nudge ${layer.name}`,
+        mergeKey: `layer-nudge:${layer.id}`,
+        payload: {
+          dx,
+          dy,
+          layerId: layer.id,
+          type: "nudge"
+        },
+        scope: "layer"
+      }),
+      before,
+      "scene-ignore-selection"
+    );
+
+    return true;
+  }
+
   /**
    * Applies a layer command against the active scene.
    */
