@@ -77,7 +77,7 @@ type CanvasViewProps = {
   } | null;
   projectSaveRequest: { id: number; mode: "save" | "save-as" } | null;
   templateExportRequest: { id: number; name: string } | null;
-  templateInsertRequest: { file: File; id: number; name: string } | null;
+  templateInsertRequest: { file: File; id: number; name: string; tabId: string } | null;
   templateSaveRequest: { id: number; name: string } | null;
   selectLayerRequest: { layerIds: string[]; id: number } | null;
   selectionCommandRequest: { command: SelectionCommand; id: number } | null;
@@ -143,6 +143,7 @@ export function CanvasView({
   showCanvasBorder
 }: CanvasViewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const handledTemplateInsertRequestIdRef = useRef<number | null>(null);
   const [fps, setFps] = useState(0);
   const { editorAppRef, editorReadyId, setWebglError, webglError } = useEditorApp({
     canvasRef,
@@ -270,8 +271,17 @@ export function CanvasView({
       return;
     }
 
-    let didCancel = false;
     const request = templateInsertRequest;
+
+    if (
+      request.tabId !== activeDocument.id ||
+      handledTemplateInsertRequestIdRef.current === request.id
+    ) {
+      return;
+    }
+
+    handledTemplateInsertRequestIdRef.current = request.id;
+    let didCancel = false;
 
     async function insertTemplate() {
       try {
@@ -299,6 +309,7 @@ export function CanvasView({
     };
   }, [
     editorAppRef,
+    activeDocument.id,
     onLayersChange,
     onTemplateInsertRequestHandled,
     rememberActiveScene,

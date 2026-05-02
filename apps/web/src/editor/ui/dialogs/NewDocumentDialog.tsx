@@ -93,7 +93,7 @@ export function NewDocumentDialog({
           <div>
             <h2 className="m-0 text-lg font-bold text-[#f2f4f7]">New project</h2>
             <p className="m-0 mt-1 text-[12px] font-bold text-[#8b929b]">
-              Templates create a new project copy; saved templates stay unchanged.
+              Templates open as grouped starter layers; saved templates stay unchanged.
             </p>
           </div>
           <button
@@ -204,7 +204,7 @@ export function NewDocumentDialog({
                         onClick={() => onCreateFromUserTemplate(template)}
                         type="button"
                       >
-                        Use
+                        Use group
                       </button>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -214,7 +214,7 @@ export function NewDocumentDialog({
                           onClick={() => onInsertUserTemplate(template)}
                           type="button"
                         >
-                          Insert group
+                          Insert in current
                         </button>
                       ) : null}
                       <button

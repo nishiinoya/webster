@@ -235,6 +235,7 @@ export function EditorPage() {
     file: File;
     id: number;
     name: string;
+    tabId: string;
   } | null>(null);
   const [imageExportRequest, setImageExportRequest] = useState<{
     background: ImageExportBackground;
@@ -393,12 +394,12 @@ export function EditorPage() {
       ...currentTabs.map((currentTab) => ({ ...currentTab, isActive: false })),
       tab
     ]);
-    setProjectFileRequest({
+    setTemplateInsertRequest({
       file: new File([storedTemplate.projectBlob], getProjectFilename(title), {
         type: "application/vnd.webster.project"
       }),
-      handle: null,
       id: Date.now(),
+      name: storedTemplate.name,
       tabId: tab.id
     });
     setRecentProjectError(null);
@@ -455,7 +456,8 @@ export function EditorPage() {
         type: "application/vnd.webster.project"
       }),
       id: Date.now(),
-      name: storedTemplate.name
+      name: storedTemplate.name,
+      tabId: activeDocument.id
     });
     setIsNewDocumentDialogOpen(false);
   }
