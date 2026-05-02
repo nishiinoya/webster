@@ -1,5 +1,5 @@
 import type { MouseEvent as ReactMouseEvent, SyntheticEvent } from "react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   canPickProjectFileHandle,
   pickProjectFileWithHandle
@@ -147,6 +147,7 @@ export function Toolbar({
   undoLabel,
   zoomPercentage
 }: ToolbarProps) {
+  const [isShortcutDialogOpen, setIsShortcutDialogOpen] = useState(false);
   const toolbarRef = useRef<HTMLElement | null>(null);
   const documentImageInputRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -163,9 +164,15 @@ export function Toolbar({
     }
 
     function closeMenusOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape" && toolbarRef.current) {
+      if (event.key !== "Escape") {
+        return;
+      }
+
+      if (toolbarRef.current) {
         closeAllMenus(toolbarRef.current);
       }
+
+      setIsShortcutDialogOpen(false);
     }
 
     document.addEventListener("pointerdown", closeOpenMenus);
@@ -410,29 +417,6 @@ export function Toolbar({
           </div>
         </details>
         <details className="toolbar-menu relative" onToggle={closeSiblingMenus}>
-          <summary className={toolbarButtonClass}>Keys</summary>
-          <div className={toolbarShortcutMenuClass} aria-label="Keyboard shortcuts">
-            {shortcutMenuGroups.map((group) => (
-              <div className="grid gap-1.5" key={group.label}>
-                <span className="text-[10px] font-extrabold uppercase tracking-normal text-[#8b929b]">
-                  {group.label}
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  {group.shortcuts.map(([keys, action]) => (
-                    <span
-                      className="inline-flex min-h-7 items-center gap-1.5 rounded-md border border-[#333941] bg-[#202329] px-2 text-[11px] font-bold text-[#dce1e6]"
-                      key={`${group.label}-${keys}`}
-                    >
-                      <kbd className="font-extrabold text-[#79dac7]">{keys}</kbd>
-                      <span className="text-[#9aa1ab]">{action}</span>
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </details>
-        <details className="toolbar-menu relative" onToggle={closeSiblingMenus}>
           <summary className={toolbarButtonClass}>View</summary>
           <div className={toolbarMenuClass} role="menu">
             <button className={toolbarMenuItemClass} disabled type="button">
@@ -461,6 +445,18 @@ export function Toolbar({
             </button>
             <button className={toolbarMenuItemClass} disabled type="button">
               Fit canvas <span className={toolbarMenuHintClass}>TODO</span>
+            </button>
+            <MenuSeparator />
+            <button
+              className={toolbarMenuItemClass}
+              onClick={(event) => {
+                closeMenu(event);
+                setIsShortcutDialogOpen(true);
+              }}
+              type="button"
+            >
+              <span>Keyboard shortcuts...</span>
+              <span className={toolbarMenuHintClass}>Keys</span>
             </button>
             <MenuSeparator />
             <button
@@ -718,6 +714,57 @@ export function Toolbar({
           type="file"
         />
       </nav>
+      {isShortcutDialogOpen ? (
+        <div
+          aria-label="Keyboard shortcuts"
+          aria-modal="true"
+          className="fixed inset-0 z-50 grid place-items-center bg-black/55 px-5 py-8"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setIsShortcutDialogOpen(false);
+            }
+          }}
+          role="dialog"
+        >
+          <div className="grid w-[min(760px,100%)] max-h-[min(720px,calc(100vh-48px))] gap-5 overflow-auto rounded-lg border border-[#3a414a] bg-[#17191d] p-5 shadow-[0_28px_72px_rgba(0,0,0,0.58)]">
+            <div className="flex items-center justify-between gap-4">
+              <h2 className="m-0 text-[20px] font-extrabold text-[#f2f4f7]">
+                Keyboard shortcuts
+              </h2>
+              <button
+                aria-label="Close keyboard shortcuts"
+                className="grid h-9 w-9 place-items-center rounded-md border border-[#333941] bg-[#202329] text-lg font-bold text-[#dce1e6] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]"
+                onClick={() => setIsShortcutDialogOpen(false)}
+                type="button"
+              >
+                x
+              </button>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {shortcutMenuGroups.map((group) => (
+                <section className="grid content-start gap-2" key={group.label}>
+                  <h3 className="m-0 text-[11px] font-extrabold uppercase tracking-normal text-[#8b929b]">
+                    {group.label}
+                  </h3>
+                  <div className="grid gap-2">
+                    {group.shortcuts.map(([keys, action]) => (
+                      <div
+                        className="grid min-h-10 grid-cols-[minmax(120px,auto)_1fr] items-center gap-3 rounded-md border border-[#30353d] bg-[#202329] px-3 py-2"
+                        key={`${group.label}-${keys}`}
+                      >
+                        <kbd className="justify-self-start rounded border border-[#3b5f58] bg-[#10231f] px-2 py-1 text-[12px] font-extrabold text-[#79dac7]">
+                          {keys}
+                        </kbd>
+                        <span className="text-[13px] font-bold text-[#dce1e6]">{action}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div
         className="flex items-center justify-end gap-2 text-[13px] text-[#c9cdd2] max-[980px]:hidden"
         aria-label="Current editor status"
@@ -822,9 +869,6 @@ const toolbarButtonClass =
 
 const toolbarMenuClass =
   "absolute left-0 top-[calc(100%+6px)] z-10 grid w-[280px] rounded-lg border border-[#33373d] bg-[#17191d] p-1.5 shadow-[0_18px_34px_rgba(0,0,0,0.35)]";
-
-const toolbarShortcutMenuClass =
-  "absolute left-0 top-[calc(100%+6px)] z-10 grid w-[min(430px,calc(100vw-24px))] gap-3 rounded-lg border border-[#33373d] bg-[#17191d] p-3 shadow-[0_18px_34px_rgba(0,0,0,0.35)]";
 
 const toolbarMenuItemClass =
   "flex w-full items-center justify-between gap-3 rounded-lg border border-transparent bg-transparent px-2.5 py-2 text-left text-[13px] text-[#eef1f4] hover:border-[#4c535c] hover:bg-[#252930] focus-visible:border-[#4c535c] focus-visible:bg-[#252930] disabled:cursor-not-allowed disabled:text-[#6f7680] disabled:hover:border-transparent disabled:hover:bg-transparent";
