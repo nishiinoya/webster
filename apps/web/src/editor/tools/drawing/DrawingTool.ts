@@ -290,10 +290,14 @@ function cloneSelectionClip(selection: StrokeSelectionClip | null): StrokeSelect
           selection.shape === "lasso"
             ? selection.points?.map((point) => ({ ...point }))
             : undefined,
-        shape:
-          selection.shape === "ellipse" || selection.shape === "lasso"
-            ? selection.shape
-            : "rectangle"
+        mask: selection.mask
+          ? {
+              data: new Uint8Array(selection.mask.data),
+              height: selection.mask.height,
+              width: selection.mask.width
+            }
+          : undefined,
+        shape: selection.shape
       }
     : null;
 }

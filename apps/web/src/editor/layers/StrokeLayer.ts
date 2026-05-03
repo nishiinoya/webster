@@ -179,7 +179,25 @@ export class StrokeLayer extends Layer {
     return {
       ...this.toJSONBase(),
       color: this.color,
-      paths: this.paths,
+      paths: this.paths.map((path) => ({
+        ...path,
+        color: [...path.color],
+        points: path.points.map((point) => ({ ...point })),
+        selectionClip: path.selectionClip
+          ? {
+              ...path.selectionClip,
+              bounds: { ...path.selectionClip.bounds },
+              mask: path.selectionClip.mask
+                ? {
+                    data: Array.from(path.selectionClip.mask.data),
+                    height: path.selectionClip.mask.height,
+                    width: path.selectionClip.mask.width
+                  }
+                : undefined,
+              points: path.selectionClip.points?.map((point) => ({ ...point }))
+            }
+          : path.selectionClip
+      })) as StrokePath[],
       strokeStyle: this.strokeStyle,
       strokeWidth: this.strokeWidth,
       type: "stroke"
@@ -295,6 +313,7 @@ function cloneSelectionClip(selection: StrokeSelectionClip | null) {
         coordinateSpace: selection.coordinateSpace,
         inverted: selection.inverted,
         points: selection.points?.map((point) => ({ ...point })),
+        mask: cloneSelectionMask(selection.mask),
         shape: selection.shape
       }
     : null;
@@ -329,6 +348,7 @@ function worldSelectionClipToLayer(
     },
     coordinateSpace: "layer",
     inverted: selection.inverted,
+    mask: cloneSelectionMask(selection.mask),
     points,
     shape: selection.shape
   };
@@ -370,7 +390,18 @@ function layerSelectionClipToWorld(
     },
     coordinateSpace: "world",
     inverted: selection.inverted,
+    mask: cloneSelectionMask(selection.mask),
     points,
     shape: selection.shape
   };
+}
+
+function cloneSelectionMask(mask: StrokeSelectionClip["mask"]) {
+  return mask
+    ? {
+        data: new Uint8Array(mask.data),
+        height: mask.height,
+        width: mask.width
+      }
+    : undefined;
 }

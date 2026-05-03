@@ -34,6 +34,7 @@ export class BrushShaderProgram extends ShaderProgram {
   private readonly selectionShapeUniformLocation: WebGLUniformLocation;
   private readonly selectionInvertedUniformLocation: WebGLUniformLocation;
   private readonly selectionBoundsUniformLocation: WebGLUniformLocation;
+  private readonly selectionMaskUniformLocation: WebGLUniformLocation;
   private readonly selectionPointCountUniformLocation: WebGLUniformLocation;
   private readonly selectionPointUniformLocations: WebGLUniformLocation[];
 
@@ -79,6 +80,7 @@ export class BrushShaderProgram extends ShaderProgram {
     this.selectionShapeUniformLocation = this.getUniformLocation("u_selectionShape");
     this.selectionInvertedUniformLocation = this.getUniformLocation("u_selectionInverted");
     this.selectionBoundsUniformLocation = this.getUniformLocation("u_selectionBounds");
+    this.selectionMaskUniformLocation = this.getUniformLocation("u_selectionMask");
     this.selectionPointCountUniformLocation = this.getUniformLocation("u_selectionPointCount");
     this.selectionPointUniformLocations = this.getUniformArrayLocations(
       "u_selectionPoints",
@@ -174,7 +176,7 @@ export class BrushShaderProgram extends ShaderProgram {
       bounds: { height: number; width: number; x: number; y: number };
       inverted: boolean;
       points?: Array<{ x: number; y: number }>;
-      shape: "ellipse" | "lasso" | "rectangle";
+      shape: "ellipse" | "lasso" | "mask" | "rectangle";
     } | null
   ) {
     this.gl.uniform1i(this.selectionEnabledUniformLocation, clip ? 1 : 0);
@@ -199,6 +201,10 @@ export class BrushShaderProgram extends ShaderProgram {
     this.setSelectionClipPoints(clip.shape === "lasso" ? clip.points ?? [] : []);
   }
 
+  setSelectionMaskTextureUnit(textureUnit: number) {
+    this.gl.uniform1i(this.selectionMaskUniformLocation, textureUnit);
+  }
+
   private getUniformArrayLocations(name: string, count: number) {
     return Array.from({ length: count }, (_, index) =>
       this.getUniformLocation(`${name}[${index}]`)
@@ -218,13 +224,17 @@ export class BrushShaderProgram extends ShaderProgram {
   }
 }
 
-function getSelectionShapeUniform(shape: "ellipse" | "lasso" | "rectangle") {
+function getSelectionShapeUniform(shape: "ellipse" | "lasso" | "mask" | "rectangle") {
   if (shape === "ellipse") {
     return 1;
   }
 
   if (shape === "lasso") {
     return 2;
+  }
+
+  if (shape === "mask") {
+    return 3;
   }
 
   return 0;

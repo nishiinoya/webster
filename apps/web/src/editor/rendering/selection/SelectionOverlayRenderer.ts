@@ -20,19 +20,11 @@ type Point = {
   y: number;
 };
 
-type MaskEdgeSegment = {
-  end: Point;
-  start: Point;
-};
-
-type MaskEdgeCacheEntry = {
-  height: number;
-  segments: MaskEdgeSegment[];
-  width: number;
+type SelectionOverlayRenderOptions = {
+  showDim?: boolean;
 };
 
 export class SelectionOverlayRenderer {
-  private readonly maskEdgeCache = new WeakMap<SelectionMask, MaskEdgeCacheEntry>();
   private readonly maskTextures = new Set<WebGLTexture>();
   private readonly maskTextureCache = new WeakMap<SelectionMask, WebGLTexture>();
 
@@ -45,26 +37,40 @@ export class SelectionOverlayRenderer {
   render(
     selection: SelectionSnapshot,
     camera: Camera2D,
-    documentBounds: { height: number; width: number; x: number; y: number }
+    documentBounds: { height: number; width: number; x: number; y: number },
+    options: SelectionOverlayRenderOptions = {}
   ) {
     const bounds = selection.bounds;
-    const lineWidth = Math.max(1.25 / camera.zoom, 0.45);
+    const showDim = options.showDim ?? true;
+    const lineWidth = 1.25 / Math.max(camera.zoom, 1e-6);
     const dashLength = 8 / Math.max(camera.zoom, 1e-6);
     const gapLength = 5 / Math.max(camera.zoom, 1e-6);
     const dashOffset =
-      ((window.performance.now() / 120) * (dashLength + gapLength)) %
+      ((window.performance.now() / 360) * (dashLength + gapLength)) %
       (dashLength + gapLength);
 
     this.solidColorShaderProgram.use();
     this.solidColorShaderProgram.setProjection(camera.projectionMatrix);
     this.solidColorShaderProgram.setFilters(defaultLayerFilters);
     this.solidColorShaderProgram.setAdjustmentFilters([]);
-    this.drawDim(selection, documentBounds, camera);
-    this.solidColorShaderProgram.setColor([0.02, 0.025, 0.03, 0.95]);
+    if (showDim) {
+      this.drawDim(selection, documentBounds, camera);
+    }
 
     if (selection.shape === "mask" && selection.mask) {
-      this.drawMaskOutline(selection, lineWidth);
-    } else if (selection.shape === "ellipse") {
+      this.drawMaskMarchingOutline(
+        selection,
+        this.getMaskTexture(selection.mask),
+        lineWidth,
+        dashOffset,
+        camera.zoom
+      );
+      return;
+    }
+
+    this.solidColorShaderProgram.setColor([0.02, 0.025, 0.03, 0.95]);
+
+    if (selection.shape === "ellipse") {
       this.drawEllipseOutline(bounds, lineWidth * 1.8);
     } else if (selection.shape === "lasso" && selection.points && selection.points.length > 1) {
       this.drawPolylineOutline(selection.points, true, lineWidth * 1.8);
@@ -76,9 +82,7 @@ export class SelectionOverlayRenderer {
       selection.isDraft ? [0.94, 0.78, 0.36, 1] : [0.96, 0.98, 1, 1]
     );
 
-    if (selection.shape === "mask" && selection.mask) {
-      this.drawMaskOutline(selection, lineWidth * 0.72, true);
-    } else if (selection.shape === "ellipse") {
+    if (selection.shape === "ellipse") {
       this.drawDashedEllipseOutline(bounds, lineWidth, dashLength, gapLength, dashOffset);
     } else if (selection.shape === "lasso" && selection.points && selection.points.length > 1) {
       this.drawDashedPolyline(selection.points, true, lineWidth, dashLength, gapLength, dashOffset);
@@ -143,10 +147,6 @@ export class SelectionOverlayRenderer {
     this.drawRectangleDim(selection.bounds, documentBounds);
     this.drawMaskedRectangle(selection.bounds, maskTexture, true);
 
-    this.solidColorShaderProgram.setColor(
-      selection.isDraft ? [0.94, 0.78, 0.36, 0.1] : [0.32, 0.64, 1, 0.1]
-    );
-    this.drawMaskedRectangle(selection.bounds, maskTexture, false);
     this.solidColorShaderProgram.setColor(
       selection.isDraft ? [0.02, 0.025, 0.03, 0.18] : [0.02, 0.025, 0.03, 0.34]
     );
@@ -473,6 +473,67 @@ export class SelectionOverlayRenderer {
     this.solidColorShaderProgram.setMaskEnabled(false);
   }
 
+  private drawMaskMarchingOutline(
+    selection: SelectionSnapshot,
+    maskTexture: WebGLTexture,
+    lineWidth: number,
+    dashOffset: number,
+    zoom: number
+  ) {
+    if (!selection.mask) {
+      return;
+    }
+
+    const phasePixels = dashOffset * Math.max(zoom, 1e-6);
+
+    this.drawMaskEdgeRectangle(
+      selection.bounds,
+      maskTexture,
+      lineWidth * 2.4,
+      phasePixels,
+      false,
+      zoom,
+      [0.02, 0.025, 0.03, 0.95]
+    );
+    this.drawMaskEdgeRectangle(
+      selection.bounds,
+      maskTexture,
+      lineWidth,
+      phasePixels + 6.5,
+      true,
+      zoom,
+      selection.isDraft ? [1, 0.92, 0.55, 0.96] : [0.96, 0.98, 1, 0.96]
+    );
+  }
+
+  private drawMaskEdgeRectangle(
+    rectangle: Rectangle,
+    maskTexture: WebGLTexture,
+    edgeWorldWidth: number,
+    dashPhase: number,
+    dashed: boolean,
+    zoom: number,
+    color: [number, number, number, number]
+  ) {
+    this.solidColorShaderProgram.setColor(color);
+    this.solidColorShaderProgram.setModel(getModelMatrix(rectangle));
+    this.solidColorShaderProgram.setMaskTextureUnit(1);
+    this.solidColorShaderProgram.setMaskEnabled(true);
+    this.solidColorShaderProgram.setMaskInverted(false);
+    this.solidColorShaderProgram.setMaskEdgeTexCoordStep(
+      edgeWorldWidth / Math.max(1e-6, rectangle.width),
+      edgeWorldWidth / Math.max(1e-6, rectangle.height)
+    );
+    this.solidColorShaderProgram.setMaskEdgeDashPhase(dashPhase);
+    this.solidColorShaderProgram.setMaskEdgeDashed(dashed);
+    this.solidColorShaderProgram.setMaskEdgeWorldToScreenScale(zoom);
+    this.solidColorShaderProgram.setMaskEdgeEnabled(true);
+    this.gl.activeTexture(this.gl.TEXTURE1);
+    this.gl.bindTexture(this.gl.TEXTURE_2D, maskTexture);
+    this.quad.drawTextured(this.solidColorShaderProgram);
+    this.solidColorShaderProgram.setMaskEnabled(false);
+  }
+
   private drawRectangleIfVisible(rectangle: Rectangle) {
     if (rectangle.width <= 0 || rectangle.height <= 0) {
       return;
@@ -493,33 +554,6 @@ export class SelectionOverlayRenderer {
       height: width,
       rotation
     });
-  }
-
-  private drawMaskOutline(
-    selection: SelectionSnapshot,
-    lineWidth: number,
-    accentOnly = false
-  ) {
-    if (!selection.mask) {
-      return;
-    }
-
-    const segments = this.getMaskEdgeSegments(selection.mask, selection.bounds);
-
-    if (segments.length === 0) {
-      this.drawRectangleOutline(selection.bounds, lineWidth);
-      return;
-    }
-
-    for (let index = 0; index < segments.length; index += 1) {
-      if (accentOnly && index % 2 !== 0) {
-        continue;
-      }
-
-      const segment = segments[index];
-
-      this.drawLine(segment.start, segment.end, lineWidth);
-    }
   }
 
   private getMaskTexture(mask: SelectionMask) {
@@ -558,24 +592,6 @@ export class SelectionOverlayRenderer {
     this.maskTextures.add(texture);
 
     return texture;
-  }
-
-  private getMaskEdgeSegments(mask: SelectionMask, bounds: Rectangle) {
-    const cached = this.maskEdgeCache.get(mask);
-
-    if (cached && cached.width === mask.width && cached.height === mask.height) {
-      return cached.segments;
-    }
-
-    const segments = buildMaskEdgeSegments(mask, bounds);
-
-    this.maskEdgeCache.set(mask, {
-      height: mask.height,
-      segments,
-      width: mask.width
-    });
-
-    return segments;
   }
 
 }
@@ -646,93 +662,4 @@ function getPolygonInsideIntervals(
   }
 
   return intervals;
-}
-
-function buildMaskEdgeSegments(mask: SelectionMask, bounds: Rectangle) {
-  const maxSegmentCount = 2400;
-  let stride = Math.max(1, Math.ceil(Math.sqrt((mask.width * mask.height) / 90_000)));
-
-  for (let attempt = 0; attempt < 6; attempt += 1) {
-    const segments = collectMaskEdgeSegments(mask, bounds, stride);
-
-    if (segments.length <= maxSegmentCount) {
-      return segments;
-    }
-
-    stride *= 2;
-  }
-
-  return collectMaskEdgeSegments(mask, bounds, stride).slice(0, maxSegmentCount);
-}
-
-function collectMaskEdgeSegments(
-  mask: SelectionMask,
-  bounds: Rectangle,
-  stride: number
-): MaskEdgeSegment[] {
-  const segments: MaskEdgeSegment[] = [];
-
-  for (let y = 0; y < mask.height; y += stride) {
-    for (let x = 0; x < mask.width; x += stride) {
-      if (!isMaskCellSelected(mask, x, y)) {
-        continue;
-      }
-
-      const left = x;
-      const right = Math.min(mask.width, x + stride);
-      const bottom = y;
-      const top = Math.min(mask.height, y + stride);
-
-      if (!isMaskCellSelected(mask, x - stride, y)) {
-        segments.push({
-          end: maskPointToWorld(bounds, left, top, mask.width, mask.height),
-          start: maskPointToWorld(bounds, left, bottom, mask.width, mask.height)
-        });
-      }
-
-      if (!isMaskCellSelected(mask, x + stride, y)) {
-        segments.push({
-          end: maskPointToWorld(bounds, right, top, mask.width, mask.height),
-          start: maskPointToWorld(bounds, right, bottom, mask.width, mask.height)
-        });
-      }
-
-      if (!isMaskCellSelected(mask, x, y - stride)) {
-        segments.push({
-          end: maskPointToWorld(bounds, right, bottom, mask.width, mask.height),
-          start: maskPointToWorld(bounds, left, bottom, mask.width, mask.height)
-        });
-      }
-
-      if (!isMaskCellSelected(mask, x, y + stride)) {
-        segments.push({
-          end: maskPointToWorld(bounds, right, top, mask.width, mask.height),
-          start: maskPointToWorld(bounds, left, top, mask.width, mask.height)
-        });
-      }
-    }
-  }
-
-  return segments;
-}
-
-function isMaskCellSelected(mask: SelectionMask, x: number, y: number) {
-  if (x < 0 || y < 0 || x >= mask.width || y >= mask.height) {
-    return false;
-  }
-
-  return mask.data[y * mask.width + x] > 127;
-}
-
-function maskPointToWorld(
-  bounds: Rectangle,
-  x: number,
-  y: number,
-  maskWidth: number,
-  maskHeight: number
-): Point {
-  return {
-    x: bounds.x + (x / Math.max(1, maskWidth)) * bounds.width,
-    y: bounds.y + (y / Math.max(1, maskHeight)) * bounds.height
-  };
 }

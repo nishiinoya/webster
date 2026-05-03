@@ -6,6 +6,7 @@ precision mediump float;
 
 uniform vec4 u_color;
 uniform sampler2D u_mask;
+uniform sampler2D u_selectionMask;
 uniform bool u_maskEnabled;
 uniform int u_brushStyle;
 uniform float u_brushSize;
@@ -154,6 +155,13 @@ float selectionClipMask(vec2 layerCoord) {
 
   if (u_selectionShape == 2) {
     inside = insideRect && u_selectionPointCount >= 3 && isInsideSelectionLasso(layerCoord);
+  }
+
+  if (u_selectionShape == 3 && insideRect) {
+    vec2 selectionCoord =
+      (layerCoord - minPoint) / max(u_selectionBounds.zw, vec2(0.0001));
+
+    inside = texture2D(u_selectionMask, selectionCoord).r > 0.5;
   }
 
   if (u_selectionInverted) {

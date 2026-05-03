@@ -26,6 +26,11 @@ export class SolidColorShaderProgram extends ShaderProgram {
   private readonly adjustmentInverseMatrixUniformLocations: WebGLUniformLocation[];
   private readonly adjustmentSizeUniformLocations: WebGLUniformLocation[];
   private readonly maskEnabledUniformLocation: WebGLUniformLocation;
+  private readonly maskEdgeDashedUniformLocation: WebGLUniformLocation;
+  private readonly maskEdgeEnabledUniformLocation: WebGLUniformLocation;
+  private readonly maskEdgeDashPhaseUniformLocation: WebGLUniformLocation;
+  private readonly maskEdgeTexCoordStepUniformLocation: WebGLUniformLocation;
+  private readonly maskEdgeWorldToScreenScaleUniformLocation: WebGLUniformLocation;
   private readonly maskInvertedUniformLocation: WebGLUniformLocation;
   private readonly maskUniformLocation: WebGLUniformLocation;
 
@@ -65,6 +70,13 @@ export class SolidColorShaderProgram extends ShaderProgram {
       maxAdjustmentFilters
     );
     this.maskEnabledUniformLocation = this.getUniformLocation("u_maskEnabled");
+    this.maskEdgeDashedUniformLocation = this.getUniformLocation("u_maskEdgeDashed");
+    this.maskEdgeEnabledUniformLocation = this.getUniformLocation("u_maskEdgeEnabled");
+    this.maskEdgeDashPhaseUniformLocation = this.getUniformLocation("u_maskEdgeDashPhase");
+    this.maskEdgeTexCoordStepUniformLocation = this.getUniformLocation("u_maskEdgeTexCoordStep");
+    this.maskEdgeWorldToScreenScaleUniformLocation = this.getUniformLocation(
+      "u_maskEdgeWorldToScreenScale"
+    );
     this.maskInvertedUniformLocation = this.getUniformLocation("u_maskInverted");
     this.maskUniformLocation = this.getUniformLocation("u_mask");
 
@@ -138,6 +150,7 @@ export class SolidColorShaderProgram extends ShaderProgram {
 
   setMaskEnabled(enabled: boolean) {
     this.gl.uniform1i(this.maskEnabledUniformLocation, enabled ? 1 : 0);
+    this.gl.uniform1i(this.maskEdgeEnabledUniformLocation, 0);
     this.gl.uniform1i(this.maskInvertedUniformLocation, 0);
   }
 
@@ -147,6 +160,26 @@ export class SolidColorShaderProgram extends ShaderProgram {
 
   setMaskInverted(inverted: boolean) {
     this.gl.uniform1i(this.maskInvertedUniformLocation, inverted ? 1 : 0);
+  }
+
+  setMaskEdgeEnabled(enabled: boolean) {
+    this.gl.uniform1i(this.maskEdgeEnabledUniformLocation, enabled ? 1 : 0);
+  }
+
+  setMaskEdgeDashed(dashed: boolean) {
+    this.gl.uniform1i(this.maskEdgeDashedUniformLocation, dashed ? 1 : 0);
+  }
+
+  setMaskEdgeDashPhase(phase: number) {
+    this.gl.uniform1f(this.maskEdgeDashPhaseUniformLocation, phase);
+  }
+
+  setMaskEdgeTexCoordStep(x: number, y: number) {
+    this.gl.uniform2f(this.maskEdgeTexCoordStepUniformLocation, Math.max(0, x), Math.max(0, y));
+  }
+
+  setMaskEdgeWorldToScreenScale(scale: number) {
+    this.gl.uniform1f(this.maskEdgeWorldToScreenScaleUniformLocation, Math.max(1e-6, scale));
   }
 
   private getUniformArrayLocations(name: string, count: number) {

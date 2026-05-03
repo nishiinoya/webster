@@ -15,6 +15,7 @@ import { GroupLayer } from "../layers/GroupLayer";
 import { ShapeLayer } from "../layers/ShapeLayer";
 import { StrokeLayer } from "../layers/StrokeLayer";
 import { TextLayer } from "../layers/TextLayer";
+import type { SelectionMask } from "../selection/SelectionManager";
 import { CheckerboardShaderProgram } from "./shaders/CheckerboardShaderProgram";
 import { BrushShaderProgram } from "./shaders/BrushShaderProgram";
 import { loadShaderSource } from "./shaders/loadShaderSource";
@@ -129,6 +130,8 @@ export class Renderer {
   private readonly textGeometryTexCoordBuffer: WebGLBuffer;
   private readonly supportsUint32Indices: boolean;
   private readonly strokeGeometryCache = new WeakMap<StrokeLayer, StrokeGeometryCacheEntry>();
+  private readonly selectionClipMaskTextureCache = new WeakMap<SelectionMask, WebGLTexture>();
+  private readonly selectionClipMaskTextures = new Set<WebGLTexture>();
   private activeRenderTarget: RenderTarget | null = null;
   private layerBlurRenderTarget: RenderTarget | null = null;
   private layerSourceRenderTarget: RenderTarget | null = null;
@@ -509,6 +512,10 @@ export class Renderer {
     this.quad.dispose();
     this.selectionOverlayRenderer.dispose();
     this.textureManager.dispose();
+    for (const texture of this.selectionClipMaskTextures) {
+      this.gl.deleteTexture(texture);
+    }
+    this.selectionClipMaskTextures.clear();
     this.texturedShaderProgram.dispose();
     this.postProcessShaderProgram.dispose();
     this.checkerboardShaderProgram.dispose();
@@ -776,6 +783,55 @@ export class Renderer {
     );
   }
 
+  private bindSelectionClipMask(mask: SelectionMask | null, shaderProgram: BrushShaderProgram) {
+    shaderProgram.setSelectionMaskTextureUnit(2);
+
+    if (!mask) {
+      return;
+    }
+
+    this.gl.activeTexture(this.gl.TEXTURE2);
+    this.gl.bindTexture(this.gl.TEXTURE_2D, this.getSelectionClipMaskTexture(mask));
+  }
+
+  private getSelectionClipMaskTexture(mask: SelectionMask) {
+    const cachedTexture = this.selectionClipMaskTextureCache.get(mask);
+
+    if (cachedTexture) {
+      return cachedTexture;
+    }
+
+    const texture = this.gl.createTexture();
+
+    if (!texture) {
+      throw new Error("Unable to create stroke selection mask texture.");
+    }
+
+    this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+    this.gl.pixelStorei(this.gl.UNPACK_ALIGNMENT, 1);
+    this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, false);
+    this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
+    this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
+    this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.NEAREST);
+    this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.NEAREST);
+    this.gl.texImage2D(
+      this.gl.TEXTURE_2D,
+      0,
+      this.gl.LUMINANCE,
+      mask.width,
+      mask.height,
+      0,
+      this.gl.LUMINANCE,
+      this.gl.UNSIGNED_BYTE,
+      mask.data
+    );
+
+    this.selectionClipMaskTextureCache.set(mask, texture);
+    this.selectionClipMaskTextures.add(texture);
+
+    return texture;
+  }
+
   private drawRectangle(rectangle: {
     height: number;
     rotation?: number;
@@ -881,6 +937,7 @@ export class Renderer {
         {
           brushShaderProgram: this.brushShaderProgram,
           bindMask: this.bindMaskToProgram.bind(this),
+          bindSelectionClipMask: this.bindSelectionClipMask.bind(this),
           drawBrushLayerLocalVertexData: this.drawBrushLayerLocalVertexData.bind(this),
           getRenderColor: this.getRenderColor.bind(this),
           getStrokeGeometry: this.getStrokeGeometry.bind(this)

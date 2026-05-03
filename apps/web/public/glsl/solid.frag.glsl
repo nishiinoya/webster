@@ -3,6 +3,11 @@ precision mediump float;
 uniform vec4 u_color;
 uniform sampler2D u_mask;
 uniform bool u_maskEnabled;
+uniform bool u_maskEdgeDashed;
+uniform bool u_maskEdgeEnabled;
+uniform float u_maskEdgeDashPhase;
+uniform vec2 u_maskEdgeTexCoordStep;
+uniform float u_maskEdgeWorldToScreenScale;
 uniform bool u_maskInverted;
 uniform float u_filterBrightness;
 uniform float u_filterBlur;
@@ -110,11 +115,67 @@ vec3 applyFilters(vec3 color) {
   return color;
 }
 
-void main() {
-  float maskValue = u_maskEnabled ? texture2D(u_mask, v_texCoord).r : 1.0;
+float sampleMaskValue(vec2 texCoord) {
+  if (
+    texCoord.x < 0.0 ||
+    texCoord.x > 1.0 ||
+    texCoord.y < 0.0 ||
+    texCoord.y > 1.0
+  ) {
+    return u_maskInverted ? 1.0 : 0.0;
+  }
 
-  if (u_maskEnabled && u_maskInverted) {
-    maskValue = 1.0 - maskValue;
+  float value = texture2D(u_mask, texCoord).r;
+
+  return u_maskInverted ? 1.0 - value : value;
+}
+
+float maskEdgeAlpha(float maskValue) {
+  float selected = step(0.5, maskValue);
+
+  if (selected <= 0.0) {
+    return 0.0;
+  }
+
+  float minimumNeighbor = 1.0;
+
+  minimumNeighbor = min(minimumNeighbor, sampleMaskValue(v_texCoord + vec2(u_maskEdgeTexCoordStep.x, 0.0)));
+  minimumNeighbor = min(minimumNeighbor, sampleMaskValue(v_texCoord - vec2(u_maskEdgeTexCoordStep.x, 0.0)));
+  minimumNeighbor = min(minimumNeighbor, sampleMaskValue(v_texCoord + vec2(0.0, u_maskEdgeTexCoordStep.y)));
+  minimumNeighbor = min(minimumNeighbor, sampleMaskValue(v_texCoord - vec2(0.0, u_maskEdgeTexCoordStep.y)));
+  minimumNeighbor = min(minimumNeighbor, sampleMaskValue(v_texCoord + u_maskEdgeTexCoordStep));
+  minimumNeighbor = min(minimumNeighbor, sampleMaskValue(v_texCoord + vec2(u_maskEdgeTexCoordStep.x, -u_maskEdgeTexCoordStep.y)));
+  minimumNeighbor = min(minimumNeighbor, sampleMaskValue(v_texCoord + vec2(-u_maskEdgeTexCoordStep.x, u_maskEdgeTexCoordStep.y)));
+  minimumNeighbor = min(minimumNeighbor, sampleMaskValue(v_texCoord - u_maskEdgeTexCoordStep));
+
+  return selected * (1.0 - step(0.5, minimumNeighbor));
+}
+
+float marchingMaskDash() {
+  if (!u_maskEdgeDashed) {
+    return 1.0;
+  }
+
+  float period = 13.0;
+  float activeLength = 6.5;
+  float position =
+    (v_worldCoord.x + v_worldCoord.y) * u_maskEdgeWorldToScreenScale +
+    u_maskEdgeDashPhase;
+
+  return 1.0 - step(activeLength, mod(position, period));
+}
+
+void main() {
+  float maskValue = u_maskEnabled ? sampleMaskValue(v_texCoord) : 1.0;
+
+  if (u_maskEnabled && u_maskEdgeEnabled) {
+    float edgeAlpha = maskEdgeAlpha(maskValue) * marchingMaskDash();
+
+    gl_FragColor = vec4(
+      applyFilters(u_color.rgb),
+      u_color.a * edgeAlpha * softGeometryAlpha()
+    );
+    return;
   }
 
   gl_FragColor = vec4(applyFilters(u_color.rgb), u_color.a * maskValue * softGeometryAlpha());

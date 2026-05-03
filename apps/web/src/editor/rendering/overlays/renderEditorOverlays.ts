@@ -59,10 +59,30 @@ export function renderEditorOverlays(
     drawSelectionOutline(context, selectedLayer, camera);
   }
 
-  const selection = scene.selection.visibleSelection;
+  if (options.showSelectionOverlay) {
+    const currentSelection = scene.selection.current
+      ? {
+          ...scene.selection.current,
+          isDraft: false
+        }
+      : null;
+    const draftSelection = scene.selection.draft
+      ? {
+          ...scene.selection.draft,
+          inverted: false,
+          isDraft: true
+        }
+      : null;
 
-  if (options.showSelectionOverlay && selection) {
-    context.selectionOverlayRenderer.render(selection, camera, scene.document);
+    if (currentSelection) {
+      context.selectionOverlayRenderer.render(currentSelection, camera, scene.document, {
+        showDim: !draftSelection
+      });
+    }
+
+    if (draftSelection) {
+      context.selectionOverlayRenderer.render(draftSelection, camera, scene.document);
+    }
   }
 }
 

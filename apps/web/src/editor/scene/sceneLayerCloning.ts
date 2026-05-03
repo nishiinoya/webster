@@ -102,7 +102,21 @@ export function cloneLayer(
       paths: layer.paths.map((path) => ({
         ...path,
         color: [...path.color],
-        points: path.points.map((point) => ({ ...point }))
+        points: path.points.map((point) => ({ ...point })),
+        selectionClip: path.selectionClip
+          ? {
+              ...path.selectionClip,
+              bounds: { ...path.selectionClip.bounds },
+              mask: path.selectionClip.mask
+                ? {
+                    data: new Uint8Array(path.selectionClip.mask.data),
+                    height: path.selectionClip.mask.height,
+                    width: path.selectionClip.mask.width
+                  }
+                : undefined,
+              points: path.selectionClip.points?.map((point) => ({ ...point }))
+            }
+          : path.selectionClip
       })),
       strokeStyle: layer.strokeStyle,
       strokeWidth: layer.strokeWidth

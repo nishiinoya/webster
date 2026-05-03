@@ -4,6 +4,7 @@ import type { LayerFilterSettings } from "../layers/Layer";
 import { ShapeLayer } from "../layers/ShapeLayer";
 import { StrokeLayer } from "../layers/StrokeLayer";
 import type { StrokeSelectionClip } from "../layers/StrokeLayer";
+import type { SelectionMask } from "../selection/SelectionManager";
 
 /**
  * Guards against invalid float buffers before uploading them to WebGL.
@@ -92,8 +93,9 @@ export function getLayerSelectionClip(
 ): {
   bounds: { height: number; width: number; x: number; y: number };
   inverted: boolean;
+  mask?: SelectionMask;
   points?: Array<{ x: number; y: number }>;
-  shape: "ellipse" | "lasso" | "rectangle";
+  shape: "ellipse" | "lasso" | "mask" | "rectangle";
 } | null {
   if (!clip) {
     return null;
@@ -103,6 +105,7 @@ export function getLayerSelectionClip(
     return {
       bounds: clip.bounds,
       inverted: clip.inverted,
+      mask: clip.mask,
       points: clip.shape === "lasso" ? clip.points?.map((point) => ({ ...point })) : undefined,
       shape: getShaderSelectionShape(clip)
     };
@@ -135,13 +138,14 @@ export function getLayerSelectionClip(
       y: minY
     },
     inverted: clip.inverted,
+    mask: clip.mask,
     points: clip.shape === "lasso" ? points : undefined,
     shape: getShaderSelectionShape(clip)
   };
 }
 
 function getShaderSelectionShape(clip: StrokeSelectionClip) {
-  if (clip.shape === "ellipse" || clip.shape === "lasso") {
+  if (clip.shape === "ellipse" || clip.shape === "lasso" || clip.shape === "mask") {
     return clip.shape;
   }
 
