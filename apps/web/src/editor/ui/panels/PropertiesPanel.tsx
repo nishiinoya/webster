@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import type { LayerCommand, LayerSummary } from "../../app/EditorApp";
 import type { LayerFilterSettings } from "../../layers/Layer";
+import type { ImageLayerGeometry } from "../../layers/Layer";
 import { defaultLayerFilters } from "../../layers/Layer";
+import { createDefaultImageLayerGeometry } from "../../layers/ImageLayer";
 import type { CompiledFontManifest } from "../../rendering/text/CompiledFont";
 import { cn } from "../classNames";
 
@@ -34,6 +36,12 @@ type ShapeLayerSummary = LayerSummary & {
   strokeColor: [number, number, number, number];
   strokeWidth: number;
 };
+
+type ImageLayerSummary = LayerSummary & {
+  hasCustomImageGeometry: boolean;
+  imageGeometry: ImageLayerGeometry;
+};
+type ImageGeometryCornerId = keyof ImageLayerGeometry["corners"];
 
 export function PropertiesPanel({
   isCollapsed,
@@ -101,6 +109,37 @@ export function PropertiesPanel({
     updateSelectedLayer({
       filters: {
         [field]: numberValue / scale
+      }
+    });
+  }
+
+  function updateImageGeometry(geometry: ImageLayerGeometry) {
+    updateSelectedLayer({ imageGeometry: geometry });
+  }
+
+  function updateImageCorner(
+    cornerId: ImageGeometryCornerId,
+    axis: "x" | "y",
+    value: string
+  ) {
+    if (!isImageLayerSummary(selectedLayer)) {
+      return;
+    }
+
+    const numberValue = Number(value);
+
+    if (!Number.isFinite(numberValue)) {
+      return;
+    }
+
+    updateImageGeometry({
+      ...selectedLayer.imageGeometry,
+      corners: {
+        ...selectedLayer.imageGeometry.corners,
+        [cornerId]: {
+          ...selectedLayer.imageGeometry.corners[cornerId],
+          [axis]: numberValue / 100
+        }
       }
     });
   }
@@ -393,6 +432,100 @@ export function PropertiesPanel({
             </label>
           </div>
         ) : null}
+        {isImageLayerSummary(selectedLayer) ? (
+          <div className={propertySectionClass}>
+            <h3 className={propertySectionTitleClass}>Image geometry</h3>
+            <div className={propertyRowClass}>
+              <span className={propertyLabelClass}>State</span>
+              <strong className={propertyValueClass}>
+                {selectedLayer.hasCustomImageGeometry ? "Custom" : "Default"}
+              </strong>
+            </div>
+            <div className={propertyRowClass}>
+              <span className={propertyLabelClass}>Crop</span>
+              <strong className={propertyValueClass}>
+                {formatCropValue(selectedLayer.imageGeometry.crop)}
+              </strong>
+            </div>
+            {selectedTool === "Transform" ? (
+              <div className="grid gap-2">
+                <h4 className="m-0 text-[11px] font-extrabold uppercase text-[#9aa1ab]">
+                  Corner points
+                </h4>
+                {getImageCornerRows().map(([cornerId, label]) => {
+                  const corner = selectedLayer.imageGeometry.corners[cornerId];
+
+                  return (
+                    <div
+                      className="grid min-h-[34px] grid-cols-[32px_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2"
+                      key={cornerId}
+                    >
+                      <span className={propertyLabelClass}>{label}</span>
+                      <input
+                        className={propertyInputClass}
+                        disabled={selectedLayer.locked}
+                        onChange={(event) =>
+                          updateImageCorner(cornerId, "x", event.target.value)
+                        }
+                        type="number"
+                        value={Math.round(corner.x * 100)}
+                      />
+                      <input
+                        className={propertyInputClass}
+                        disabled={selectedLayer.locked}
+                        onChange={(event) =>
+                          updateImageCorner(cornerId, "y", event.target.value)
+                        }
+                        type="number"
+                        value={Math.round(corner.y * 100)}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                className={propertyToggleClass}
+                disabled={selectedLayer.locked}
+                onClick={() => {
+                  const defaults = createDefaultImageLayerGeometry();
+
+                  updateImageGeometry({
+                    ...selectedLayer.imageGeometry,
+                    crop: defaults.crop
+                  });
+                }}
+                type="button"
+              >
+                Reset crop
+              </button>
+              <button
+                className={propertyToggleClass}
+                disabled={selectedLayer.locked}
+                onClick={() => {
+                  const defaults = createDefaultImageLayerGeometry();
+
+                  updateImageGeometry({
+                    ...selectedLayer.imageGeometry,
+                    corners: defaults.corners
+                  });
+                }}
+                type="button"
+              >
+                Reset warp
+              </button>
+              <button
+                className={propertyToggleClass}
+                disabled={selectedLayer.locked}
+                onClick={() => updateImageGeometry(createDefaultImageLayerGeometry())}
+                type="button"
+              >
+                Reset all
+              </button>
+            </div>
+          </div>
+        ) : null}
         {selectedLayer ? (
           <div className={propertySectionClass}>
             <div className="flex items-center justify-between gap-2">
@@ -545,6 +678,26 @@ function isTextLayerSummary(layer: LayerSummary | null): layer is TextLayerSumma
 
 function isShapeLayerSummary(layer: LayerSummary | null): layer is ShapeLayerSummary {
   return Boolean(layer && layer.type === "shape" && "shape" in layer);
+}
+
+function isImageLayerSummary(layer: LayerSummary | null): layer is ImageLayerSummary {
+  return Boolean(layer && layer.type === "image" && "imageGeometry" in layer);
+}
+
+function formatCropValue(crop: ImageLayerGeometry["crop"]) {
+  const width = Math.round((crop.right - crop.left) * 100);
+  const height = Math.round((crop.top - crop.bottom) * 100);
+
+  return `${width}% x ${height}%`;
+}
+
+function getImageCornerRows(): Array<[ImageGeometryCornerId, string]> {
+  return [
+    ["topLeft", "TL"],
+    ["topRight", "TR"],
+    ["bottomRight", "BR"],
+    ["bottomLeft", "BL"]
+  ];
 }
 
 function FilterSlider({

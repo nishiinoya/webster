@@ -1,9 +1,10 @@
 import { AdjustmentLayer } from "../layers/AdjustmentLayer";
+import { getLayerCorners } from "../geometry/TransformGeometry";
 import { GroupLayer } from "../layers/GroupLayer";
 import { Layer } from "../layers/Layer";
 
 /**
- * Returns the topmost visible non-adjustment layer under the given world point.
+ * Returns the topmost visible non-adjustment, non-group layer under the given world point.
  */
 export function hitTestVisibleLayer(layers: Layer[], x: number, y: number) {
   const groupsById = new Map(
@@ -14,6 +15,59 @@ export function hitTestVisibleLayer(layers: Layer[], x: number, y: number) {
 
   for (let index = layers.length - 1; index >= 0; index -= 1) {
     const layer = layers[index];
+    const groupState = getLayerGroupState(layer, groupsById);
+
+    if (!groupState.visible || !layer.visible || layer.opacity <= 0) {
+      continue;
+    }
+
+    if (layer instanceof AdjustmentLayer) {
+      continue;
+    }
+
+    if (layer instanceof GroupLayer) {
+      continue;
+    }
+
+    if (!isPointInsideGroupChain(layer, groupsById, x, y)) {
+      continue;
+    }
+
+    if (isPointInsideLayer(layer, x, y)) {
+      return layer;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Returns the topmost visible descendant of a group under the provided world point.
+ */
+export function hitTestVisibleLayerInsideGroup(
+  layers: Layer[],
+  groupId: string,
+  x: number,
+  y: number
+) {
+  const groupsById = new Map(
+    layers
+      .filter((layer): layer is GroupLayer => layer instanceof GroupLayer)
+      .map((group) => [group.id, group])
+  );
+  const group = groupsById.get(groupId);
+
+  if (!group || !isPointInsideLayer(group, x, y)) {
+    return null;
+  }
+
+  for (let index = layers.length - 1; index >= 0; index -= 1) {
+    const layer = layers[index];
+
+    if (layer.id === groupId || !isLayerInsideGroup(layer, groupId, groupsById)) {
+      continue;
+    }
+
     const groupState = getLayerGroupState(layer, groupsById);
 
     if (!groupState.visible || !layer.visible || layer.opacity <= 0) {
@@ -65,6 +119,26 @@ function getLayerGroupState(layer: Layer, groupsById: Map<string, GroupLayer>) {
   return { visible };
 }
 
+function isLayerInsideGroup(
+  layer: Layer,
+  targetGroupId: string,
+  groupsById: Map<string, GroupLayer>
+) {
+  let groupId = layer.groupId;
+  const visitedGroupIds = new Set<string>();
+
+  while (groupId && !visitedGroupIds.has(groupId)) {
+    if (groupId === targetGroupId) {
+      return true;
+    }
+
+    visitedGroupIds.add(groupId);
+    groupId = groupsById.get(groupId)?.groupId ?? null;
+  }
+
+  return false;
+}
+
 function isPointInsideGroupChain(
   layer: Layer,
   groupsById: Map<string, GroupLayer>,
@@ -97,26 +171,31 @@ function isPointInsideGroupChain(
  * Tests whether a world-space point falls inside the layer's transformed bounds.
  */
 export function isPointInsideLayer(layer: Layer, x: number, y: number) {
-  const width = layer.width * layer.scaleX;
-  const height = layer.height * layer.scaleY;
-
-  const centerX = layer.x + width / 2;
-  const centerY = layer.y + height / 2;
-
-  const radians = (-layer.rotation * Math.PI) / 180;
-  const cos = Math.cos(radians);
-  const sin = Math.sin(radians);
-
-  const dx = x - centerX;
-  const dy = y - centerY;
-
-  const localX = dx * cos - dy * sin;
-  const localY = dx * sin + dy * cos;
+  const corners = getLayerCorners(layer);
 
   return (
-    localX >= -width / 2 &&
-    localX <= width / 2 &&
-    localY >= -height / 2 &&
-    localY <= height / 2
+    isPointInTriangle({ x, y }, corners.bottomLeft, corners.bottomRight, corners.topLeft) ||
+    isPointInTriangle({ x, y }, corners.topLeft, corners.bottomRight, corners.topRight)
   );
+}
+
+function isPointInTriangle(
+  point: { x: number; y: number },
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  c: { x: number; y: number }
+) {
+  const denominator = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
+
+  if (Math.abs(denominator) <= 1e-8) {
+    return false;
+  }
+
+  const alpha =
+    ((b.y - c.y) * (point.x - c.x) + (c.x - b.x) * (point.y - c.y)) / denominator;
+  const beta =
+    ((c.y - a.y) * (point.x - c.x) + (a.x - c.x) * (point.y - c.y)) / denominator;
+  const gamma = 1 - alpha - beta;
+
+  return alpha >= 0 && beta >= 0 && gamma >= 0;
 }

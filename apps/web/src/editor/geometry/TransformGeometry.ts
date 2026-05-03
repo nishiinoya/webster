@@ -2,6 +2,7 @@
  * Geometry helpers for transform handles, rotated layer bounds, and model matrices.
  */
 import { Camera2D } from "./Camera2D";
+import { ImageLayer } from "../layers/ImageLayer";
 import { Layer } from "../layers/Layer";
 
 export type TransformHandleId =
@@ -69,6 +70,17 @@ export function getLayerCenter(layer: Layer) {
  * Returns the four transformed corners for a possibly rotated layer.
  */
 export function getLayerCorners(layer: Layer): LayerCorners {
+  if (layer instanceof ImageLayer) {
+    return getImageLayerGeometryCorners(layer);
+  }
+
+  return getLayerFrameCorners(layer);
+}
+
+/**
+ * Returns the rectangular layer frame, ignoring image warp geometry.
+ */
+export function getLayerFrameCorners(layer: Layer): LayerCorners {
   const { width, height } = getLayerSize(layer);
   const center = getLayerCenter(layer);
 
@@ -81,10 +93,30 @@ export function getLayerCorners(layer: Layer): LayerCorners {
 }
 
 /**
+ * Converts a normalized layer-local point into world space.
+ */
+export function getLayerNormalizedPoint(layer: Layer, point: Point) {
+  const { width, height } = getLayerSize(layer);
+  const center = getLayerCenter(layer);
+  const offset = rotateVector(
+    {
+      x: point.x * width - width / 2,
+      y: point.y * height - height / 2
+    },
+    layer.rotation
+  );
+
+  return {
+    x: center.x + offset.x,
+    y: center.y + offset.y
+  };
+}
+
+/**
  * Builds the visible resize and rotation handles for the current camera zoom level.
  */
 export function getTransformHandles(layer: Layer, camera: Camera2D): TransformHandle[] {
-  const corners = getLayerCorners(layer);
+  const corners = getLayerFrameCorners(layer);
   const rotationGap = 34 / camera.zoom;
   const topCenter = midpoint(corners.topLeft, corners.topRight);
   const center = getLayerCenter(layer);
@@ -203,4 +235,13 @@ export function getModelMatrix(rectangle: TransformRectangle) {
     translateY,
     1
   ]);
+}
+
+function getImageLayerGeometryCorners(layer: ImageLayer): LayerCorners {
+  return {
+    bottomLeft: getLayerNormalizedPoint(layer, layer.geometry.corners.bottomLeft),
+    bottomRight: getLayerNormalizedPoint(layer, layer.geometry.corners.bottomRight),
+    topRight: getLayerNormalizedPoint(layer, layer.geometry.corners.topRight),
+    topLeft: getLayerNormalizedPoint(layer, layer.geometry.corners.topLeft)
+  };
 }

@@ -368,6 +368,8 @@ function getToolForShortcutKey(key: string) {
   switch (key) {
     case "b":
       return "Mask Brush";
+    case "c":
+      return "Crop";
     case "d":
       return "Draw";
     case "e":
@@ -382,6 +384,8 @@ function getToolForShortcutKey(key: string) {
       return "Shape";
     case "t":
       return "Text";
+    case "q":
+      return "Transform";
     case "v":
       return "Move";
     case "w":

@@ -1,6 +1,6 @@
 import { AdjustmentLayer } from "../layers/AdjustmentLayer";
 import { GroupLayer } from "../layers/GroupLayer";
-import { ImageLayer } from "../layers/ImageLayer";
+import { cloneImageLayerGeometry, ImageLayer } from "../layers/ImageLayer";
 import { Layer } from "../layers/Layer";
 import { ShapeLayer } from "../layers/ShapeLayer";
 import { StrokeLayer } from "../layers/StrokeLayer";
@@ -61,6 +61,7 @@ export function cloneLayer(
     return new ImageLayer({
       ...options,
       assetId: layer.assetId,
+      geometry: cloneImageLayerGeometry(layer.geometry),
       image: layer.image,
       mimeType: layer.mimeType,
       objectUrl: "",

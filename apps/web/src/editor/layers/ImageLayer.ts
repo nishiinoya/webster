@@ -1,9 +1,10 @@
 /** Image layer model and serialization helpers. */
 import { Layer } from "./Layer";
-import type { LayerOptions, SerializedImageLayer } from "./Layer";
+import type { ImageLayerGeometry, LayerOptions, SerializedImageLayer } from "./Layer";
 
 export type ImageLayerOptions = Omit<LayerOptions, "type"> & {
   assetId?: string;
+  geometry?: Partial<ImageLayerGeometry> | null;
   image: HTMLImageElement;
   mimeType?: string;
   objectUrl: string;
@@ -22,6 +23,7 @@ export class ImageLayer extends Layer {
   readonly originalImage: HTMLImageElement;
   readonly originalMimeType: string;
   readonly originalObjectUrl: string;
+  geometry: ImageLayerGeometry;
   hasWorkingImageChanges = false;
   revision = 0;
 
@@ -39,6 +41,7 @@ export class ImageLayer extends Layer {
     this.originalImage = options.originalImage ?? this.image;
     this.originalMimeType = options.originalMimeType ?? this.mimeType;
     this.originalObjectUrl = options.originalObjectUrl ?? this.objectUrl;
+    this.geometry = normalizeImageLayerGeometry(options.geometry);
     this.hasWorkingImageChanges =
       this.assetId !== this.originalAssetId || this.objectUrl !== this.originalObjectUrl;
   }
@@ -97,6 +100,7 @@ export class ImageLayer extends Layer {
       ...this.toJSONBase(),
       assetId: this.assetId,
       assetPath,
+      geometry: isDefaultImageLayerGeometry(this.geometry) ? undefined : cloneImageLayerGeometry(this.geometry),
       mimeType,
       originalAssetId: this.originalAssetId,
       originalAssetPath,
@@ -112,6 +116,66 @@ export class ImageLayer extends Layer {
   async toOriginalAssetBlob() {
     return imageToBlob(this.originalImage, getSerializableMimeType(this.originalMimeType));
   }
+}
+
+export function createDefaultImageLayerGeometry(): ImageLayerGeometry {
+  return {
+    corners: {
+      bottomLeft: { x: 0, y: 0 },
+      bottomRight: { x: 1, y: 0 },
+      topLeft: { x: 0, y: 1 },
+      topRight: { x: 1, y: 1 }
+    },
+    crop: {
+      bottom: 0,
+      left: 0,
+      right: 1,
+      top: 1
+    }
+  };
+}
+
+export function cloneImageLayerGeometry(geometry: ImageLayerGeometry): ImageLayerGeometry {
+  return {
+    corners: {
+      bottomLeft: { ...geometry.corners.bottomLeft },
+      bottomRight: { ...geometry.corners.bottomRight },
+      topLeft: { ...geometry.corners.topLeft },
+      topRight: { ...geometry.corners.topRight }
+    },
+    crop: { ...geometry.crop }
+  };
+}
+
+export function normalizeImageLayerGeometry(
+  geometry?: Partial<ImageLayerGeometry> | null
+): ImageLayerGeometry {
+  const fallback = createDefaultImageLayerGeometry();
+
+  return {
+    corners: {
+      bottomLeft: normalizePoint(geometry?.corners?.bottomLeft, fallback.corners.bottomLeft),
+      bottomRight: normalizePoint(geometry?.corners?.bottomRight, fallback.corners.bottomRight),
+      topLeft: normalizePoint(geometry?.corners?.topLeft, fallback.corners.topLeft),
+      topRight: normalizePoint(geometry?.corners?.topRight, fallback.corners.topRight)
+    },
+    crop: normalizeCrop(geometry?.crop, fallback.crop)
+  };
+}
+
+export function isDefaultImageLayerGeometry(geometry: ImageLayerGeometry) {
+  const fallback = createDefaultImageLayerGeometry();
+
+  return (
+    arePointsEqual(geometry.corners.bottomLeft, fallback.corners.bottomLeft) &&
+    arePointsEqual(geometry.corners.bottomRight, fallback.corners.bottomRight) &&
+    arePointsEqual(geometry.corners.topLeft, fallback.corners.topLeft) &&
+    arePointsEqual(geometry.corners.topRight, fallback.corners.topRight) &&
+    geometry.crop.left === fallback.crop.left &&
+    geometry.crop.right === fallback.crop.right &&
+    geometry.crop.bottom === fallback.crop.bottom &&
+    geometry.crop.top === fallback.crop.top
+  );
 }
 
 async function imageToBlob(image: HTMLImageElement, mimeType: string) {
@@ -140,6 +204,58 @@ async function imageToBlob(image: HTMLImageElement, mimeType: string) {
       mimeType
     );
   });
+}
+
+function normalizePoint(
+  point: { x?: number; y?: number } | undefined,
+  fallback: { x: number; y: number }
+) {
+  return {
+    x: Number.isFinite(point?.x) ? Number(point?.x) : fallback.x,
+    y: Number.isFinite(point?.y) ? Number(point?.y) : fallback.y
+  };
+}
+
+function normalizeCrop(
+  crop: Partial<ImageLayerGeometry["crop"]> | undefined,
+  fallback: ImageLayerGeometry["crop"]
+) {
+  let left = clamp01(Number.isFinite(crop?.left) ? Number(crop?.left) : fallback.left);
+  let right = clamp01(Number.isFinite(crop?.right) ? Number(crop?.right) : fallback.right);
+  let bottom = clamp01(Number.isFinite(crop?.bottom) ? Number(crop?.bottom) : fallback.bottom);
+  let top = clamp01(Number.isFinite(crop?.top) ? Number(crop?.top) : fallback.top);
+  const minSpan = 0.01;
+
+  if (right - left < minSpan) {
+    const center = clamp01((left + right) / 2);
+
+    left = Math.max(0, center - minSpan / 2);
+    right = Math.min(1, left + minSpan);
+    left = Math.max(0, right - minSpan);
+  }
+
+  if (top - bottom < minSpan) {
+    const center = clamp01((bottom + top) / 2);
+
+    bottom = Math.max(0, center - minSpan / 2);
+    top = Math.min(1, bottom + minSpan);
+    bottom = Math.max(0, top - minSpan);
+  }
+
+  return {
+    bottom,
+    left,
+    right,
+    top
+  };
+}
+
+function clamp01(value: number) {
+  return Math.min(Math.max(value, 0), 1);
+}
+
+function arePointsEqual(left: { x: number; y: number }, right: { x: number; y: number }) {
+  return left.x === right.x && left.y === right.y;
 }
 
 function getSerializableMimeType(mimeType: string) {

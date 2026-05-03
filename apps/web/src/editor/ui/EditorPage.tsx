@@ -57,10 +57,22 @@ const initialTabs: EditorDocumentTab[] = [];
 
 const editorTools: ToolDefinition[] = [
   {
-    description: "Pick, move, and transform layers.",
+    description: "Pick and move layers only.",
     icon: "M",
     label: "Move",
     value: "Move"
+  },
+  {
+    description: "Resize and rotate the selected layer.",
+    icon: "Q",
+    label: "Transform",
+    value: "Transform"
+  },
+  {
+    description: "Cut layer bounds with crop handles.",
+    icon: "C",
+    label: "Crop",
+    value: "Crop"
   },
   {
     description: "Drag the workspace without editing artwork.",

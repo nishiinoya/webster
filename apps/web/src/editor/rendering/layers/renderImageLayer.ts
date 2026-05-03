@@ -1,5 +1,5 @@
 import { Camera2D } from "../../geometry/Camera2D";
-import { ImageLayer } from "../../layers/ImageLayer";
+import { ImageLayer, isDefaultImageLayerGeometry } from "../../layers/ImageLayer";
 import { defaultLayerFilters, Layer } from "../../layers/Layer";
 import { TexturedShaderProgram } from "../shaders/TexturedShaderProgram";
 import { SolidColorShaderProgram } from "../shaders/SolidColorShaderProgram";
@@ -46,10 +46,70 @@ export function renderImageLayer(
   context.gl.activeTexture(context.gl.TEXTURE0);
   context.gl.bindTexture(context.gl.TEXTURE_2D, context.textureManager.getTexture(layer));
   context.bindMask(layer, context.texturedShaderProgram);
-  context.quad.drawTextured(context.texturedShaderProgram);
+  if (isDefaultImageLayerGeometry(layer.geometry)) {
+    context.quad.drawTextured(context.texturedShaderProgram);
+  } else {
+    const geometry = getImageLayerVertexData(layer);
+
+    context.quad.drawTexturedVertexData(
+      context.texturedShaderProgram,
+      geometry.vertices,
+      geometry.texCoords,
+      geometry.maskCoords
+    );
+  }
   context.texturedShaderProgram.setTintEnabled(false);
   context.solidColorShaderProgram.use();
   context.solidColorShaderProgram.setProjection(camera.projectionMatrix);
   context.solidColorShaderProgram.setFilters(defaultLayerFilters);
   context.solidColorShaderProgram.setAdjustmentFilters([]);
+}
+
+function getImageLayerVertexData(layer: ImageLayer) {
+  const { corners, crop } = layer.geometry;
+
+  return {
+    vertices: new Float32Array([
+      corners.bottomLeft.x,
+      corners.bottomLeft.y,
+      corners.bottomRight.x,
+      corners.bottomRight.y,
+      corners.topLeft.x,
+      corners.topLeft.y,
+      corners.topLeft.x,
+      corners.topLeft.y,
+      corners.bottomRight.x,
+      corners.bottomRight.y,
+      corners.topRight.x,
+      corners.topRight.y
+    ]),
+    texCoords: new Float32Array([
+      crop.left,
+      crop.bottom,
+      crop.right,
+      crop.bottom,
+      crop.left,
+      crop.top,
+      crop.left,
+      crop.top,
+      crop.right,
+      crop.bottom,
+      crop.right,
+      crop.top
+    ]),
+    maskCoords: new Float32Array([
+      0,
+      0,
+      1,
+      0,
+      0,
+      1,
+      0,
+      1,
+      1,
+      0,
+      1,
+      1
+    ])
+  };
 }

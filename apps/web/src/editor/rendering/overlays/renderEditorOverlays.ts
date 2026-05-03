@@ -2,12 +2,14 @@ import { Camera2D } from "../../geometry/Camera2D";
 import {
   distance,
   getLayerCorners,
+  getLayerFrameCorners,
   getModelMatrix,
   getTransformHandles,
   midpoint
 } from "../../geometry/TransformGeometry";
 import { defaultLayerFilters, Layer } from "../../layers/Layer";
 import { GroupLayer } from "../../layers/GroupLayer";
+import { ImageLayer } from "../../layers/ImageLayer";
 import { Scene } from "../../scene/Scene";
 import { Quad } from "../geometry/Quad";
 import { SelectionOverlayRenderer } from "../selection/SelectionOverlayRenderer";
@@ -33,8 +35,11 @@ type OverlayRendererContext = {
 
 type RenderOptions = {
   showCanvasBorder: boolean;
+  showImageWarpControls: boolean;
+  showRotationHandle: boolean;
   showSelectionOverlay: boolean;
   showSelectionOutline: boolean;
+  showTransformHandles: boolean;
 };
 
 /**
@@ -56,7 +61,14 @@ export function renderEditorOverlays(
   }
 
   if (options.showSelectionOutline && selectedLayer?.visible && selectedLayer.opacity > 0) {
-    drawSelectionOutline(context, selectedLayer, camera);
+    drawSelectionOutline(
+      context,
+      selectedLayer,
+      camera,
+      options.showImageWarpControls,
+      options.showTransformHandles,
+      options.showRotationHandle
+    );
   }
 
   if (options.showSelectionOverlay) {
@@ -128,9 +140,13 @@ function drawDocumentBorderLines(
 function drawSelectionOutline(
   context: OverlayRendererContext,
   layer: Layer,
-  camera: Camera2D
+  camera: Camera2D,
+  showImageWarpControls: boolean,
+  showTransformHandles: boolean,
+  showRotationHandle: boolean
 ) {
-  const corners = getLayerCorners(layer);
+  const frameCorners = getLayerFrameCorners(layer);
+  const warpCorners = getLayerCorners(layer);
   const outlineWidth = Math.max(1.5 / camera.zoom, 0.5);
 
   context.solidColorShaderProgram.use();
@@ -138,27 +154,100 @@ function drawSelectionOutline(
   context.solidColorShaderProgram.setFilters(defaultLayerFilters);
   context.solidColorShaderProgram.setAdjustmentFilters([]);
   context.solidColorShaderProgram.setColor([0.39, 0.86, 0.75, 1]);
+  drawCornerOutline(context, frameCorners, outlineWidth);
 
-  context.drawWorldLine(corners.bottomLeft, corners.bottomRight, outlineWidth);
-  context.drawWorldLine(corners.bottomRight, corners.topRight, outlineWidth);
-  context.drawWorldLine(corners.topRight, corners.topLeft, outlineWidth);
-  context.drawWorldLine(corners.topLeft, corners.bottomLeft, outlineWidth);
+  if (showTransformHandles && !layer.locked && !(layer instanceof GroupLayer)) {
+    if (showImageWarpControls && layer instanceof ImageLayer) {
+      context.solidColorShaderProgram.setColor([0.39, 0.86, 0.75, 0.35]);
+      drawCornerOutline(context, warpCorners, Math.max(5 / camera.zoom, 1.2));
 
-  if (!layer.locked && !(layer instanceof GroupLayer)) {
-    drawTransformHandles(context, layer, camera);
+      context.solidColorShaderProgram.setColor([0.39, 0.86, 0.75, 1]);
+      drawCornerOutline(context, warpCorners, outlineWidth);
+      drawImageWarpCornerDots(context, warpCorners, camera);
+    } else if (!areCornerSetsEqual(warpCorners, frameCorners)) {
+      context.solidColorShaderProgram.setColor([0.39, 0.86, 0.75, 0.38]);
+      drawCornerOutline(context, frameCorners, Math.max(1 / camera.zoom, 0.4));
+    }
+
+    drawTransformHandles(context, layer, camera, showRotationHandle);
   }
+}
+
+function drawCornerOutline(
+  context: OverlayRendererContext,
+  corners: ReturnType<typeof getLayerCorners>,
+  width: number
+) {
+  context.drawWorldLine(corners.bottomLeft, corners.bottomRight, width);
+  context.drawWorldLine(corners.bottomRight, corners.topRight, width);
+  context.drawWorldLine(corners.topRight, corners.topLeft, width);
+  context.drawWorldLine(corners.topLeft, corners.bottomLeft, width);
+}
+
+function areCornerSetsEqual(
+  left: ReturnType<typeof getLayerCorners>,
+  right: ReturnType<typeof getLayerCorners>
+) {
+  return (
+    arePointsClose(left.bottomLeft, right.bottomLeft) &&
+    arePointsClose(left.bottomRight, right.bottomRight) &&
+    arePointsClose(left.topLeft, right.topLeft) &&
+    arePointsClose(left.topRight, right.topRight)
+  );
+}
+
+function arePointsClose(left: { x: number; y: number }, right: { x: number; y: number }) {
+  return Math.abs(left.x - right.x) < 1e-6 && Math.abs(left.y - right.y) < 1e-6;
+}
+
+function drawImageWarpCornerDots(
+  context: OverlayRendererContext,
+  corners: ReturnType<typeof getLayerCorners>,
+  camera: Camera2D
+) {
+  const points = [corners.topLeft, corners.topRight, corners.bottomRight, corners.bottomLeft];
+  const glowSize = 22 / camera.zoom;
+  const midSize = 14 / camera.zoom;
+  const coreSize = 7 / camera.zoom;
+
+  for (const point of points) {
+    context.solidColorShaderProgram.setColor([0.29, 1, 0.84, 0.16]);
+    drawPointSquare(context, point, glowSize);
+
+    context.solidColorShaderProgram.setColor([0.39, 0.86, 0.75, 0.48]);
+    drawPointSquare(context, point, midSize);
+
+    context.solidColorShaderProgram.setColor([0.96, 0.84, 0.38, 1]);
+    drawPointSquare(context, point, coreSize);
+  }
+}
+
+function drawPointSquare(
+  context: OverlayRendererContext,
+  point: { x: number; y: number },
+  size: number
+) {
+  context.drawWorldRectangle({
+    height: size,
+    width: size,
+    x: point.x - size / 2,
+    y: point.y - size / 2
+  });
 }
 
 function drawTransformHandles(
   context: OverlayRendererContext,
   layer: Layer,
-  camera: Camera2D
+  camera: Camera2D,
+  showRotationHandle: boolean
 ) {
   const handleSize = 10 / camera.zoom;
   const rotationHandleSize = 12 / camera.zoom;
-  const corners = getLayerCorners(layer);
+  const corners = getLayerFrameCorners(layer);
   const topCenter = midpoint(corners.topLeft, corners.topRight);
-  const handles = getTransformHandles(layer, camera);
+  const handles = getTransformHandles(layer, camera).filter(
+    (handle) => showRotationHandle || handle.id !== "rotate"
+  );
   const rotationHandle = handles.find((handle) => handle.id === "rotate");
 
   if (rotationHandle) {

@@ -272,7 +272,10 @@ export class EditorApp {
       this.renderer.render(this.scene, this.camera, {
         ...editorRenderOptions,
         showCanvasBorder: this.showCanvasBorder,
+        showImageWarpControls: this.selectedTool === "Transform",
+        showRotationHandle: this.selectedTool === "Transform",
         showSelectionOutline: shouldShowSelectionOutline(this.selectedTool),
+        showTransformHandles: this.selectedTool === "Transform" || this.selectedTool === "Crop",
         textEdit: this.textEditLayerId
           ? {
               caretIndex: this.textCaretIndex,
@@ -1459,7 +1462,7 @@ export class EditorApp {
 }
 
 function shouldShowSelectionOutline(tool: string) {
-  return tool === "Move" || tool === "Text";
+  return tool === "Move" || tool === "Transform" || tool === "Text" || tool === "Crop";
 }
 
 function cloneTextEditingState(state: TextEditingState): TextEditingState {
@@ -1507,10 +1510,11 @@ function didHistoryStateChange(
 }
 
 function getGestureHistoryConfig(tool: string) {
-  if (tool === "Move") {
+  if (tool === "Move" || tool === "Transform" || tool === "Crop") {
     return {
       compareMode: "scene-ignore-selection" as const,
-      label: "Transform layer"
+      label:
+        tool === "Crop" ? "Crop layer" : tool === "Transform" ? "Transform layer" : "Move layer"
     };
   }
 

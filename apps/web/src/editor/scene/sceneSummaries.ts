@@ -1,4 +1,8 @@
-import { ImageLayer } from "../layers/ImageLayer";
+import {
+  cloneImageLayerGeometry,
+  ImageLayer,
+  isDefaultImageLayerGeometry
+} from "../layers/ImageLayer";
 import { Layer } from "../layers/Layer";
 import { GroupLayer } from "../layers/GroupLayer";
 import { ShapeLayer } from "../layers/ShapeLayer";
@@ -80,6 +84,8 @@ export function getLayerSummary(
     return {
       ...baseSummary,
       canRestoreOriginalPixels: layer.hasWorkingImageChanges,
+      hasCustomImageGeometry: !isDefaultImageLayerGeometry(layer.geometry),
+      imageGeometry: cloneImageLayerGeometry(layer.geometry),
       imagePixelHeight: layer.image.naturalHeight || layer.image.height,
       imagePixelWidth: layer.image.naturalWidth || layer.image.width,
       originalImagePixelHeight: layer.originalImage.naturalHeight || layer.originalImage.height,

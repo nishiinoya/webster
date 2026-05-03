@@ -1,6 +1,7 @@
 import { normalizeLayerFilters } from "../layers/Layer";
-import type { LayerFilterSettings } from "../layers/Layer";
+import type { ImageLayerGeometry, LayerFilterSettings } from "../layers/Layer";
 import { GroupLayer } from "../layers/GroupLayer";
+import { ImageLayer, normalizeImageLayerGeometry } from "../layers/ImageLayer";
 import { Layer } from "../layers/Layer";
 import { ShapeLayer } from "../layers/ShapeLayer";
 import { StrokeLayer } from "../layers/StrokeLayer";
@@ -17,6 +18,7 @@ export type SceneLayerUpdates = Partial<{
   fontFamily: string;
   fontSize: number;
   height: number;
+  imageGeometry: Partial<ImageLayerGeometry> | null;
   italic: boolean;
   locked: boolean;
   name: string;
@@ -113,6 +115,10 @@ export function applySceneLayerUpdates(layer: Layer, updates: SceneLayerUpdates)
     if (updates.strokeWidth !== undefined) {
       layer.strokeWidth = Math.max(0, updates.strokeWidth);
     }
+  }
+
+  if (layer instanceof ImageLayer && !layer.locked && updates.imageGeometry !== undefined) {
+    layer.geometry = normalizeImageLayerGeometry(updates.imageGeometry);
   }
 
   if (layer instanceof StrokeLayer && !layer.locked) {

@@ -81,6 +81,8 @@ const shortcutMenuGroups = [
     label: "Tools",
     shortcuts: [
       ["V", "Move"],
+      ["Q", "Transform"],
+      ["C", "Crop"],
       ["H", "Pan"],
       ["B", "Mask brush"],
       ["T", "Text"],

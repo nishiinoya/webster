@@ -5,6 +5,7 @@ import type { LayerFilterAdjustment, LayerFilterSettings } from "../../layers/La
 const maxAdjustmentFilters = 4;
 
 export class TexturedShaderProgram extends ShaderProgram {
+  readonly maskCoordAttributeLocation: number;
   readonly texCoordAttributeLocation: number;
   private readonly modelUniformLocation: WebGLUniformLocation;
   private readonly projectionUniformLocation: WebGLUniformLocation;
@@ -36,6 +37,7 @@ export class TexturedShaderProgram extends ShaderProgram {
     super(gl, vertexShaderSource, fragmentShaderSource);
 
     this.texCoordAttributeLocation = gl.getAttribLocation(this.program, "a_texCoord");
+    this.maskCoordAttributeLocation = gl.getAttribLocation(this.program, "a_maskCoord");
     this.modelUniformLocation = this.getUniformLocation("u_model");
     this.projectionUniformLocation = this.getUniformLocation("u_projection");
     this.textureUniformLocation = this.getUniformLocation("u_texture");
@@ -76,6 +78,10 @@ export class TexturedShaderProgram extends ShaderProgram {
 
     if (this.texCoordAttributeLocation < 0) {
       throw new Error("WebGL texture coordinate attribute is unavailable.");
+    }
+
+    if (this.maskCoordAttributeLocation < 0) {
+      throw new Error("WebGL mask coordinate attribute is unavailable.");
     }
   }
 

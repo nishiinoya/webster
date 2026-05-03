@@ -1,6 +1,6 @@
 import { AdjustmentLayer } from "../layers/AdjustmentLayer";
 import { GroupLayer } from "../layers/GroupLayer";
-import { ImageLayer } from "../layers/ImageLayer";
+import { cloneImageLayerGeometry, ImageLayer } from "../layers/ImageLayer";
 import { Layer } from "../layers/Layer";
 import { LayerMask } from "../masks/LayerMask";
 import type { SelectionManagerState } from "../selection/SelectionManager";
@@ -155,6 +155,7 @@ function cloneLayerForSnapshot(layer: Layer) {
     const copy = new ImageLayer({
       ...baseOptions,
       assetId: layer.assetId,
+      geometry: cloneImageLayerGeometry(layer.geometry),
       image: layer.image,
       mimeType: layer.mimeType,
       objectUrl: layer.objectUrl,
@@ -287,6 +288,7 @@ function areLayersEqual(left: Layer, right: Layer) {
   if (left instanceof ImageLayer && right instanceof ImageLayer) {
     return (
       left.assetId === right.assetId &&
+      areImageLayerGeometriesEqual(left.geometry, right.geometry) &&
       left.mimeType === right.mimeType &&
       left.originalAssetId === right.originalAssetId &&
       left.originalMimeType === right.originalMimeType &&
@@ -356,6 +358,26 @@ function areLayersEqual(left: Layer, right: Layer) {
   }
 
   return false;
+}
+
+function areImageLayerGeometriesEqual(
+  left: ImageLayer["geometry"],
+  right: ImageLayer["geometry"]
+) {
+  return (
+    left.crop.left === right.crop.left &&
+    left.crop.right === right.crop.right &&
+    left.crop.bottom === right.crop.bottom &&
+    left.crop.top === right.crop.top &&
+    left.corners.bottomLeft.x === right.corners.bottomLeft.x &&
+    left.corners.bottomLeft.y === right.corners.bottomLeft.y &&
+    left.corners.bottomRight.x === right.corners.bottomRight.x &&
+    left.corners.bottomRight.y === right.corners.bottomRight.y &&
+    left.corners.topLeft.x === right.corners.topLeft.x &&
+    left.corners.topLeft.y === right.corners.topLeft.y &&
+    left.corners.topRight.x === right.corners.topRight.x &&
+    left.corners.topRight.y === right.corners.topRight.y
+  );
 }
 
 function areMasksEqual(left: LayerMask | null, right: LayerMask | null) {

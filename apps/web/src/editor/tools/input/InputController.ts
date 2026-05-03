@@ -43,6 +43,7 @@ export class InputController {
 
   setSelectedTool(tool: string) {
     this.selectedTool = tool;
+    this.moveTool.setMode(tool === "Crop" ? "crop" : tool === "Transform" ? "transform" : "move");
 
     if (tool === "Ellipse Select") {
       this.selectionTool.setShape("ellipse");
@@ -101,7 +102,11 @@ export class InputController {
       return this.drawingTool.pointerDown(event);
     }
 
-    if (this.selectedTool !== "Move") {
+    if (
+      this.selectedTool !== "Move" &&
+      this.selectedTool !== "Transform" &&
+      this.selectedTool !== "Crop"
+    ) {
       return false;
     }
 
@@ -125,7 +130,11 @@ export class InputController {
       return this.drawingTool.pointerMove(event);
     }
 
-    if (this.selectedTool !== "Move") {
+    if (
+      this.selectedTool !== "Move" &&
+      this.selectedTool !== "Transform" &&
+      this.selectedTool !== "Crop"
+    ) {
       return false;
     }
 
@@ -185,7 +194,11 @@ export class InputController {
       return this.drawingTool.getCursor();
     }
 
-    if (this.selectedTool !== "Move") {
+    if (
+      this.selectedTool !== "Move" &&
+      this.selectedTool !== "Transform" &&
+      this.selectedTool !== "Crop"
+    ) {
       return "default";
     }
 

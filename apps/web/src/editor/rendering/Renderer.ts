@@ -70,8 +70,11 @@ export type RendererShaderSources = {
 export type RenderOptions = {
   documentBackground: "checkerboard" | "transparent" | "white";
   showCanvasBorder: boolean;
+  showImageWarpControls: boolean;
   showSelectionOverlay: boolean;
   showSelectionOutline: boolean;
+  showRotationHandle: boolean;
+  showTransformHandles: boolean;
   textEdit?: {
     caretIndex: number;
     layerId: string;
@@ -95,16 +98,22 @@ type RenderTarget = {
 export const editorRenderOptions: RenderOptions = {
   documentBackground: "checkerboard",
   showCanvasBorder: true,
+  showImageWarpControls: true,
   showSelectionOverlay: true,
   showSelectionOutline: true,
+  showRotationHandle: true,
+  showTransformHandles: true,
   textEdit: null
 };
 
 export const imageExportRenderOptions: RenderOptions = {
   documentBackground: "transparent",
   showCanvasBorder: false,
+  showImageWarpControls: false,
   showSelectionOverlay: false,
   showSelectionOutline: false,
+  showRotationHandle: false,
+  showTransformHandles: false,
   textEdit: null
 };
 

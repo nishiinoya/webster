@@ -6,7 +6,7 @@ import type { LayerFilterSettings, SerializedLayer } from "../layers/Layer";
 import { ShapeLayer } from "../layers/ShapeLayer";
 import { SelectionManager } from "../selection/SelectionManager";
 import { disposeLayer, cloneLayer } from "./sceneLayerCloning";
-import { hitTestVisibleLayer } from "./sceneHitTesting";
+import { hitTestVisibleLayer, hitTestVisibleLayerInsideGroup } from "./sceneHitTesting";
 import { applySceneLayerUpdates } from "./sceneLayerUpdates";
 import type { SceneLayerUpdates } from "./sceneLayerUpdates";
 import { applyLayerMaskAction } from "./sceneMaskActions";
@@ -243,6 +243,13 @@ export class Scene {
    */
   hitTestLayer(x: number, y: number) {
     return hitTestVisibleLayer(this.layers, x, y);
+  }
+
+  /**
+   * Finds the topmost visible layer inside a group under the provided world-space point.
+   */
+  hitTestLayerInsideGroup(groupId: string, x: number, y: number) {
+    return hitTestVisibleLayerInsideGroup(this.layers, groupId, x, y);
   }
 
   /**

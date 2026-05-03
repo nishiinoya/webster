@@ -24,6 +24,7 @@ uniform mat3 u_adjustmentInverseMatrix[4];
 uniform vec2 u_adjustmentSize[4];
 
 varying vec2 v_texCoord;
+varying vec2 v_maskCoord;
 varying vec2 v_worldCoord;
 
 vec4 sampleBlurredTexture() {
@@ -120,7 +121,7 @@ vec3 applyFilters(vec3 color) {
 
 void main() {
   vec4 color = sampleBlurredTexture();
-  float maskValue = u_maskEnabled ? texture2D(u_mask, v_texCoord).r : 1.0;
+  float maskValue = u_maskEnabled ? texture2D(u_mask, v_maskCoord).r : 1.0;
   vec3 filteredColor = u_tintEnabled ? u_tintColor.rgb : applyFilters(color.rgb);
   float tintAlpha = u_tintEnabled ? u_tintColor.a : 1.0;
   gl_FragColor = vec4(filteredColor, color.a * u_opacity * maskValue * tintAlpha);

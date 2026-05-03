@@ -29,6 +29,21 @@ export type LayerFilterAdjustment = {
   size: [number, number];
 };
 
+export type ImageLayerGeometry = {
+  corners: {
+    bottomLeft: { x: number; y: number };
+    bottomRight: { x: number; y: number };
+    topLeft: { x: number; y: number };
+    topRight: { x: number; y: number };
+  };
+  crop: {
+    bottom: number;
+    left: number;
+    right: number;
+    top: number;
+  };
+};
+
 export const defaultLayerFilters: LayerFilterSettings = {
   brightness: 0,
   blur: 0,
@@ -84,6 +99,7 @@ export type SerializedGroupLayer = SerializedLayerBase & {
 export type SerializedImageLayer = SerializedLayerBase & {
   assetId: string;
   assetPath: string;
+  geometry?: Partial<ImageLayerGeometry> | null;
   mimeType: string;
   originalAssetId?: string;
   originalAssetPath?: string;
@@ -221,6 +237,7 @@ export abstract class Layer {
       return new ImageLayer({
         ...getLayerOptions(data),
         assetId: data.assetId,
+        geometry: data.geometry,
         originalAssetId,
         originalImage,
         originalMimeType: data.originalMimeType ?? data.mimeType,

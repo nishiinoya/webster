@@ -95,6 +95,7 @@ export function useCanvasPointerInput({
             button: event.button,
             clientX: event.clientX,
             clientY: event.clientY,
+            detail: event.detail,
             shiftKey: event.shiftKey
           });
 
@@ -127,6 +128,7 @@ export function useCanvasPointerInput({
           button: event.button,
           clientX: event.clientX,
           clientY: event.clientY,
+          detail: event.detail,
           shiftKey: event.shiftKey
         });
 
@@ -161,6 +163,8 @@ export function useCanvasPointerInput({
 function isCanvasInputTool(tool: string) {
   return (
     tool === "Move" ||
+    tool === "Transform" ||
+    tool === "Crop" ||
     tool === "Draw" ||
     tool === "Mask Brush" ||
     tool === "Shape" ||
