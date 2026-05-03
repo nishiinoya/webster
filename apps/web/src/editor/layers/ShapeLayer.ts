@@ -1,6 +1,11 @@
 /** Shape layer model. */
-import { Layer } from "./Layer";
-import type { LayerOptions, SerializedShapeLayer } from "./Layer";
+import { Layer, normalizeLayerTexture, serializeImportedLayerTexture } from "./Layer";
+import type {
+  ImportedLayerTexture,
+  LayerOptions,
+  LayerTextureSettings,
+  SerializedShapeLayer
+} from "./Layer";
 
 export type ShapeKind = "rectangle" | "circle" | "line" | "triangle" | "diamond" | "arrow";
 
@@ -9,6 +14,8 @@ export type ShapeLayerOptions = Omit<LayerOptions, "type"> & {
   shape?: ShapeKind;
   strokeColor?: [number, number, number, number];
   strokeWidth?: number;
+  texture?: Partial<LayerTextureSettings> | null;
+  textureImage?: ImportedLayerTexture | null;
 };
 
 export class ShapeLayer extends Layer {
@@ -16,6 +23,8 @@ export class ShapeLayer extends Layer {
   shape: ShapeKind;
   strokeColor: [number, number, number, number];
   strokeWidth: number;
+  texture: LayerTextureSettings;
+  textureImage: ImportedLayerTexture | null;
 
   constructor(options: ShapeLayerOptions) {
     super({
@@ -27,6 +36,8 @@ export class ShapeLayer extends Layer {
     this.shape = options.shape ?? "rectangle";
     this.strokeColor = options.strokeColor ?? [0.07, 0.08, 0.09, 1];
     this.strokeWidth = options.strokeWidth ?? 0;
+    this.texture = normalizeLayerTexture(options.texture);
+    this.textureImage = options.textureImage ?? null;
   }
 
 
@@ -37,6 +48,8 @@ export class ShapeLayer extends Layer {
       shape: this.shape,
       strokeColor: this.strokeColor,
       strokeWidth: this.strokeWidth,
+      texture: this.texture,
+      textureImage: serializeImportedLayerTexture(this.textureImage),
       type: "shape"
     };
   }

@@ -4,7 +4,50 @@ import type { SerializedLayerMask } from "../masks/LayerMask";
 
 import type { StrokePath, StrokePoint, StrokeStyle } from "./StrokeLayer";
 
-export type LayerType = "adjustment" | "shape" | "image" | "text" | "stroke" | "group";
+export type LayerType =
+  | "adjustment"
+  | "shape"
+  | "image"
+  | "text"
+  | "stroke"
+  | "group"
+  | "object3d";
+
+export type LayerTextureKind =
+  | "none"
+  | "checkerboard"
+  | "stripes"
+  | "dots"
+  | "grain"
+  | "image";
+
+export type LayerTextureSettings = {
+  blend: number;
+  color: [number, number, number, number];
+  contrast: number;
+  kind: LayerTextureKind;
+  scale: number;
+};
+
+export type ImportedLayerTexture = {
+  dataUrl: string;
+  height: number;
+  id: string;
+  image: HTMLImageElement;
+  mimeType: string;
+  name: string;
+  width: number;
+};
+
+export type SerializedImportedLayerTexture = Omit<ImportedLayerTexture, "image">;
+
+export type Object3DKind = "cube" | "sphere" | "pyramid" | "imported";
+
+export type SerializedObject3DModel = {
+  format: "obj";
+  name: string;
+  source: string;
+};
 
 export type LayerFilterSettings = {
   brightness: number;
@@ -60,6 +103,14 @@ export const defaultLayerFilters: LayerFilterSettings = {
   shadow: 0
 };
 
+export const defaultLayerTexture: LayerTextureSettings = {
+  blend: 0,
+  color: [1, 1, 1, 0.85],
+  contrast: 0.7,
+  kind: "none",
+  scale: 16
+};
+
 export type SerializedLayerBase = {
   height: number;
   id: string;
@@ -84,7 +135,28 @@ export type SerializedShapeLayer = SerializedLayerBase & {
   shape: "rectangle" | "circle" | "ellipse" | "line" | "triangle" | "diamond" | "arrow";
   strokeColor:[number, number, number, number];
   strokeWidth: number;
+  texture?: Partial<LayerTextureSettings> | null;
+  textureImage?: SerializedImportedLayerTexture | null;
   type: "shape";
+};
+
+export type SerializedObject3DLayer = SerializedLayerBase & {
+  ambient: number;
+  lightIntensity: number;
+  lightX: number;
+  lightY: number;
+  lightZ: number;
+  materialColor: [number, number, number, number];
+  materialTexture?: Partial<LayerTextureSettings> | null;
+  materialTextureImage?: SerializedImportedLayerTexture | null;
+  model?: SerializedObject3DModel | null;
+  objectKind: Object3DKind;
+  rotationX: number;
+  rotationY: number;
+  rotationZ: number;
+  shadowOpacity: number;
+  shadowSoftness: number;
+  type: "object3d";
 };
 
 export type SerializedAdjustmentLayer = SerializedLayerBase & {
@@ -130,6 +202,7 @@ export type SerializedStrokeLayer = SerializedLayerBase & {
 export type SerializedLayer =
   | SerializedAdjustmentLayer
   | SerializedGroupLayer
+  | SerializedObject3DLayer
   | SerializedShapeLayer
   | SerializedImageLayer
   | SerializedTextLayer
@@ -209,7 +282,37 @@ export abstract class Layer {
         fillColor: data.fillColor ?? legacyShapeData.color,
         shape: data.shape === "ellipse" ? "circle" : data.shape ?? "rectangle",
         strokeColor: data.strokeColor ?? [0.07, 0.08, 0.09, 1],
-        strokeWidth: data.strokeWidth ?? 0
+        strokeWidth: data.strokeWidth ?? 0,
+        texture: data.texture,
+        textureImage: data.textureImage
+          ? await loadImportedLayerTexture(data.textureImage)
+          : null
+      });
+    }
+
+    if (data.type === "object3d") {
+      const { Object3DLayer } = await import("./Object3DLayer");
+
+      return new Object3DLayer({
+        ...getLayerOptions(data),
+        ambient: data.ambient,
+        lightIntensity: data.lightIntensity,
+        lightX: data.lightX,
+        lightY: data.lightY,
+        lightZ: data.lightZ,
+        materialColor: data.materialColor,
+        materialTexture: data.materialTexture,
+        materialTextureImage: data.materialTextureImage
+          ? await loadImportedLayerTexture(data.materialTextureImage)
+          : null,
+        modelName: data.model?.name,
+        modelSource: data.model?.source,
+        objectKind: data.objectKind,
+        rotationX: data.rotationX,
+        rotationY: data.rotationY,
+        rotationZ: data.rotationZ,
+        shadowOpacity: data.shadowOpacity,
+        shadowSoftness: data.shadowSoftness
       });
     }
 
@@ -348,8 +451,79 @@ export function normalizeLayerFilters(
   };
 }
 
+export function normalizeLayerTexture(
+  texture?: Partial<LayerTextureSettings> | null
+): LayerTextureSettings {
+  const kind = normalizeTextureKind(texture?.kind);
+
+  return {
+    blend: kind === "none" ? 0 : clampFilter(texture?.blend ?? defaultLayerTexture.blend, 0, 1),
+    color: normalizeColor(texture?.color, defaultLayerTexture.color),
+    contrast: clampFilter(texture?.contrast ?? defaultLayerTexture.contrast, 0, 1),
+    kind,
+    scale: clampFilter(texture?.scale ?? defaultLayerTexture.scale, 2, 96)
+  };
+}
+
 function clampFilter(value: number, min: number, max: number) {
   return Math.min(Math.max(Number.isFinite(value) ? value : 0, min), max);
+}
+
+function normalizeTextureKind(kind: LayerTextureKind | undefined): LayerTextureKind {
+  if (
+    kind === "checkerboard" ||
+    kind === "stripes" ||
+    kind === "dots" ||
+    kind === "grain" ||
+    kind === "image"
+  ) {
+    return kind;
+  }
+
+  return "none";
+}
+
+function normalizeColor(
+  color: [number, number, number, number] | undefined,
+  fallback: [number, number, number, number]
+): [number, number, number, number] {
+  return [
+    clampFilter(color?.[0] ?? fallback[0], 0, 1),
+    clampFilter(color?.[1] ?? fallback[1], 0, 1),
+    clampFilter(color?.[2] ?? fallback[2], 0, 1),
+    clampFilter(color?.[3] ?? fallback[3], 0, 1)
+  ];
+}
+
+export function serializeImportedLayerTexture(
+  texture: ImportedLayerTexture | null
+): SerializedImportedLayerTexture | null {
+  if (!texture) {
+    return null;
+  }
+
+  return {
+    dataUrl: texture.dataUrl,
+    height: texture.height,
+    id: texture.id,
+    mimeType: texture.mimeType,
+    name: texture.name,
+    width: texture.width
+  };
+}
+
+export async function loadImportedLayerTexture(
+  texture: SerializedImportedLayerTexture
+): Promise<ImportedLayerTexture> {
+  return {
+    dataUrl: texture.dataUrl,
+    height: texture.height,
+    id: texture.id || crypto.randomUUID(),
+    image: await loadImageElement(texture.dataUrl),
+    mimeType: texture.mimeType || "image/png",
+    name: texture.name || "Texture",
+    width: texture.width
+  };
 }
 
 function getLayerOptions(data: SerializedLayer): LayerOptions {

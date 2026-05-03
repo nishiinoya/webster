@@ -1,24 +1,7 @@
 precision mediump float;
 
-uniform vec4 u_color;
-uniform sampler2D u_importedTexture;
-uniform bool u_importedTextureEnabled;
-uniform float u_importedTextureBlend;
-uniform sampler2D u_mask;
-uniform bool u_maskEnabled;
-uniform bool u_maskEdgeDashed;
-uniform bool u_maskEdgeEnabled;
-uniform float u_maskEdgeDashPhase;
-uniform vec2 u_maskEdgeTexCoordStep;
-uniform float u_maskEdgeWorldToScreenScale;
-uniform bool u_maskInverted;
-uniform float u_textureBlend;
-uniform vec4 u_textureColor;
-uniform float u_textureContrast;
-uniform int u_textureKind;
-uniform float u_textureScale;
+uniform float u_ambient;
 uniform float u_filterBrightness;
-uniform float u_filterBlur;
 uniform float u_filterContrast;
 uniform float u_filterGrayscale;
 uniform float u_filterHue;
@@ -26,6 +9,17 @@ uniform float u_filterInvert;
 uniform float u_filterSaturation;
 uniform float u_filterSepia;
 uniform float u_filterShadow;
+uniform float u_lightIntensity;
+uniform vec3 u_lightPosition;
+uniform sampler2D u_mask;
+uniform bool u_maskEnabled;
+uniform vec4 u_materialColor;
+uniform float u_opacity;
+uniform float u_textureBlend;
+uniform vec4 u_textureColor;
+uniform float u_textureContrast;
+uniform int u_textureKind;
+uniform float u_textureScale;
 uniform int u_adjustmentCount;
 uniform vec4 u_adjustmentBounds[4];
 uniform vec4 u_adjustmentA[4];
@@ -33,22 +27,11 @@ uniform vec4 u_adjustmentB[4];
 uniform mat3 u_adjustmentInverseMatrix[4];
 uniform vec2 u_adjustmentSize[4];
 
+varying vec2 v_layerTexCoord;
+varying vec3 v_normal;
+varying vec3 v_position3D;
 varying vec2 v_texCoord;
 varying vec2 v_worldCoord;
-
-float softGeometryAlpha() {
-  float blur = min(u_filterBlur, 64.0);
-
-  if (blur <= 0.001) {
-    return 1.0;
-  }
-
-  vec2 edgeDistance = min(v_texCoord, 1.0 - v_texCoord);
-  float edge = min(edgeDistance.x, edgeDistance.y);
-  float softness = clamp(blur / 128.0, 0.001, 0.45);
-
-  return smoothstep(0.0, softness, edge);
-}
 
 vec3 applyFilterValues(vec3 color, vec4 adjustmentA, vec4 adjustmentB) {
   color += adjustmentA.x;
@@ -149,14 +132,7 @@ float texturePattern(vec2 texCoord) {
 }
 
 vec3 applyTexture(vec3 color) {
-  if (u_importedTextureEnabled && u_importedTextureBlend > 0.001) {
-    vec2 importedCoord = fract(v_texCoord * max(0.0625, u_textureScale / 16.0));
-    vec4 importedTexture = texture2D(u_importedTexture, importedCoord);
-
-    color = mix(color, importedTexture.rgb, importedTexture.a * u_importedTextureBlend);
-  }
-
-  if (u_textureKind <= 0 || u_textureKind == 5 || u_textureBlend <= 0.001) {
+  if (u_textureKind <= 0 || u_textureBlend <= 0.001) {
     return color;
   }
 
@@ -174,62 +150,38 @@ float sampleMaskValue(vec2 texCoord) {
     texCoord.y < 0.0 ||
     texCoord.y > 1.0
   ) {
-    return u_maskInverted ? 1.0 : 0.0;
-  }
-
-  float value = texture2D(u_mask, texCoord).r;
-
-  return u_maskInverted ? 1.0 - value : value;
-}
-
-float maskEdgeAlpha(float maskValue) {
-  float selected = step(0.5, maskValue);
-
-  if (selected <= 0.0) {
     return 0.0;
   }
 
-  float minimumNeighbor = 1.0;
-
-  minimumNeighbor = min(minimumNeighbor, sampleMaskValue(v_texCoord + vec2(u_maskEdgeTexCoordStep.x, 0.0)));
-  minimumNeighbor = min(minimumNeighbor, sampleMaskValue(v_texCoord - vec2(u_maskEdgeTexCoordStep.x, 0.0)));
-  minimumNeighbor = min(minimumNeighbor, sampleMaskValue(v_texCoord + vec2(0.0, u_maskEdgeTexCoordStep.y)));
-  minimumNeighbor = min(minimumNeighbor, sampleMaskValue(v_texCoord - vec2(0.0, u_maskEdgeTexCoordStep.y)));
-  minimumNeighbor = min(minimumNeighbor, sampleMaskValue(v_texCoord + u_maskEdgeTexCoordStep));
-  minimumNeighbor = min(minimumNeighbor, sampleMaskValue(v_texCoord + vec2(u_maskEdgeTexCoordStep.x, -u_maskEdgeTexCoordStep.y)));
-  minimumNeighbor = min(minimumNeighbor, sampleMaskValue(v_texCoord + vec2(-u_maskEdgeTexCoordStep.x, u_maskEdgeTexCoordStep.y)));
-  minimumNeighbor = min(minimumNeighbor, sampleMaskValue(v_texCoord - u_maskEdgeTexCoordStep));
-
-  return selected * (1.0 - step(0.5, minimumNeighbor));
-}
-
-float marchingMaskDash() {
-  if (!u_maskEdgeDashed) {
-    return 1.0;
-  }
-
-  float period = 13.0;
-  float activeLength = 6.5;
-  float position =
-    (v_worldCoord.x + v_worldCoord.y) * u_maskEdgeWorldToScreenScale +
-    u_maskEdgeDashPhase;
-
-  return 1.0 - step(activeLength, mod(position, period));
+  return texture2D(u_mask, texCoord).r;
 }
 
 void main() {
-  float maskValue = u_maskEnabled ? sampleMaskValue(v_texCoord) : 1.0;
-  vec3 texturedColor = applyTexture(u_color.rgb);
-
-  if (u_maskEnabled && u_maskEdgeEnabled) {
-    float edgeAlpha = maskEdgeAlpha(maskValue) * marchingMaskDash();
-
-    gl_FragColor = vec4(
-      applyFilters(texturedColor),
-      u_color.a * edgeAlpha * softGeometryAlpha()
-    );
-    return;
+  if (
+    v_layerTexCoord.x < 0.0 ||
+    v_layerTexCoord.x > 1.0 ||
+    v_layerTexCoord.y < 0.0 ||
+    v_layerTexCoord.y > 1.0
+  ) {
+    discard;
   }
 
-  gl_FragColor = vec4(applyFilters(texturedColor), u_color.a * maskValue * softGeometryAlpha());
+  float maskValue = u_maskEnabled ? sampleMaskValue(v_layerTexCoord) : 1.0;
+
+  if (maskValue <= 0.001) {
+    discard;
+  }
+
+  vec3 normal = normalize(v_normal);
+  vec3 lightDirection = normalize(u_lightPosition - v_position3D);
+  vec3 viewDirection = normalize(vec3(0.0, 0.0, 5.0) - v_position3D);
+  vec3 halfDirection = normalize(lightDirection + viewDirection);
+  float diffuse = max(dot(normal, lightDirection), 0.0);
+  float specular = pow(max(dot(normal, halfDirection), 0.0), 32.0) * 0.28 * u_lightIntensity;
+  float rim = pow(1.0 - max(dot(normal, viewDirection), 0.0), 2.4) * 0.2;
+  vec3 material = applyTexture(u_materialColor.rgb);
+  vec3 lit = material * clamp(u_ambient + diffuse * u_lightIntensity, 0.0, 1.8);
+
+  lit += vec3(specular + rim);
+  gl_FragColor = vec4(applyFilters(lit), u_materialColor.a * u_opacity * maskValue);
 }

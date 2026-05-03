@@ -5,6 +5,7 @@ import {
 } from "../layers/ImageLayer";
 import { Layer } from "../layers/Layer";
 import { GroupLayer } from "../layers/GroupLayer";
+import { Object3DLayer } from "../layers/Object3DLayer";
 import { ShapeLayer } from "../layers/ShapeLayer";
 import { StrokeLayer } from "../layers/StrokeLayer";
 import { TextLayer } from "../layers/TextLayer";
@@ -47,7 +48,27 @@ export function getLayerSummary(
       fillColor: layer.fillColor,
       shape: layer.shape,
       strokeColor: layer.strokeColor,
-      strokeWidth: layer.strokeWidth
+      strokeWidth: layer.strokeWidth,
+      texture: layer.texture
+    };
+  }
+
+  if (layer instanceof Object3DLayer) {
+    return {
+      ...baseSummary,
+      ambient: layer.ambient,
+      lightIntensity: layer.lightIntensity,
+      lightX: layer.lightX,
+      lightY: layer.lightY,
+      lightZ: layer.lightZ,
+      materialColor: layer.materialColor,
+      materialTexture: layer.materialTexture,
+      objectKind: layer.objectKind,
+      rotationX: layer.rotationX,
+      rotationY: layer.rotationY,
+      rotationZ: layer.rotationZ,
+      shadowOpacity: layer.shadowOpacity,
+      shadowSoftness: layer.shadowSoftness
     };
   }
 

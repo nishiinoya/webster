@@ -833,6 +833,7 @@ export function EditorPage() {
         onExportTemplate={exportCurrentProjectAsTemplate}
         onSaveTemplate={saveCurrentProjectAsTemplate}
         onAddAdjustmentLayer={() => runLayerCommand({ type: "add-adjustment" })}
+        onAddObject3DLayer={() => runLayerCommand({ type: "add-object3d" })}
         onSelectionCommand={(command) => setSelectionCommandRequest({ command, id: Date.now() })}
         onSelectionModeChange={setSelectedSelectionMode}
         onSelectTool={setSelectedTool}

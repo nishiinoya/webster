@@ -6,6 +6,7 @@ import { LayerMask } from "../masks/LayerMask";
 import type { SelectionManagerState } from "../selection/SelectionManager";
 import type { SelectionMask, SelectionPoint } from "../selection/SelectionManager";
 import { cloneSelectionManagerState } from "../selection/SelectionManager";
+import { Object3DLayer } from "../layers/Object3DLayer";
 import { ShapeLayer } from "../layers/ShapeLayer";
 import { StrokeLayer } from "../layers/StrokeLayer";
 import { TextLayer } from "../layers/TextLayer";
@@ -147,7 +148,27 @@ function cloneLayerForSnapshot(layer: Layer) {
       fillColor: [...layer.fillColor],
       shape: layer.shape,
       strokeColor: [...layer.strokeColor],
-      strokeWidth: layer.strokeWidth
+      strokeWidth: layer.strokeWidth,
+      texture: { ...layer.texture, color: [...layer.texture.color] }
+    });
+  }
+
+  if (layer instanceof Object3DLayer) {
+    return new Object3DLayer({
+      ...baseOptions,
+      ambient: layer.ambient,
+      lightIntensity: layer.lightIntensity,
+      lightX: layer.lightX,
+      lightY: layer.lightY,
+      lightZ: layer.lightZ,
+      materialColor: [...layer.materialColor],
+      materialTexture: { ...layer.materialTexture, color: [...layer.materialTexture.color] },
+      objectKind: layer.objectKind,
+      rotationX: layer.rotationX,
+      rotationY: layer.rotationY,
+      rotationZ: layer.rotationZ,
+      shadowOpacity: layer.shadowOpacity,
+      shadowSoftness: layer.shadowSoftness
     });
   }
 
@@ -281,7 +302,26 @@ function areLayersEqual(left: Layer, right: Layer) {
       left.shape === right.shape &&
       left.strokeWidth === right.strokeWidth &&
       areColorArraysEqual(left.fillColor, right.fillColor) &&
-      areColorArraysEqual(left.strokeColor, right.strokeColor)
+      areColorArraysEqual(left.strokeColor, right.strokeColor) &&
+      areLayerTexturesEqual(left.texture, right.texture)
+    );
+  }
+
+  if (left instanceof Object3DLayer && right instanceof Object3DLayer) {
+    return (
+      left.ambient === right.ambient &&
+      left.lightIntensity === right.lightIntensity &&
+      left.lightX === right.lightX &&
+      left.lightY === right.lightY &&
+      left.lightZ === right.lightZ &&
+      left.objectKind === right.objectKind &&
+      left.rotationX === right.rotationX &&
+      left.rotationY === right.rotationY &&
+      left.rotationZ === right.rotationZ &&
+      left.shadowOpacity === right.shadowOpacity &&
+      left.shadowSoftness === right.shadowSoftness &&
+      areColorArraysEqual(left.materialColor, right.materialColor) &&
+      areLayerTexturesEqual(left.materialTexture, right.materialTexture)
     );
   }
 
@@ -426,6 +466,19 @@ function areLayerFiltersEqual(
     left.saturation === right.saturation &&
     left.sepia === right.sepia &&
     left.shadow === right.shadow
+  );
+}
+
+function areLayerTexturesEqual(
+  left: ShapeLayer["texture"] | Object3DLayer["materialTexture"],
+  right: ShapeLayer["texture"] | Object3DLayer["materialTexture"]
+) {
+  return (
+    left.kind === right.kind &&
+    left.scale === right.scale &&
+    left.blend === right.blend &&
+    left.contrast === right.contrast &&
+    areColorArraysEqual(left.color, right.color)
   );
 }
 

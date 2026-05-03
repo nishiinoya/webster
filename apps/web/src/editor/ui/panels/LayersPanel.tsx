@@ -299,6 +299,8 @@ export function LayersPanel({
                 layer.type === "adjustment" &&
                   "bg-[#252930] bg-[radial-gradient(circle_at_35%_35%,rgba(255,255,255,0.8),rgba(74,163,145,0.45)_42%,rgba(32,35,41,0.95)_70%)]",
                 layer.type === "shape" && "bg-[#2f7d6f]",
+                layer.type === "object3d" &&
+                  "bg-[#252930] bg-[radial-gradient(circle_at_38%_32%,rgba(255,255,255,0.72),rgba(112,196,178,0.62)_28%,rgba(36,53,64,0.96)_62%)]",
                 layer.type === "group" &&
                   "border-[#5f7689] bg-[#252930] bg-[linear-gradient(180deg,#607489_0_38%,#222832_38%_100%)] shadow-[inset_0_0_0_1px_rgba(121,218,199,0.18)]"
               )}

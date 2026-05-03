@@ -39,6 +39,7 @@ type ToolbarProps = {
   onSaveProject: () => void;
   onSaveTemplate: () => void;
   onAddAdjustmentLayer: () => void;
+  onAddObject3DLayer: () => void;
   onSelectionCommand: (command: SelectionCommand) => void;
   onSelectTool: (tool: string) => void;
   onShowCanvasBorderChange: (show: boolean) => void;
@@ -152,6 +153,7 @@ export function Toolbar({
   onSaveProject,
   onSaveTemplate,
   onAddAdjustmentLayer,
+  onAddObject3DLayer,
   onSelectionCommand,
   onSelectTool,
   onShowCanvasBorderChange,
@@ -510,6 +512,33 @@ export function Toolbar({
             >
               Revert image to original pixels
               <span className={toolbarMenuHintClass}>Image</span>
+            </button>
+          </div>
+        </details>
+        <details className="toolbar-menu relative" onToggle={closeSiblingMenus}>
+          <summary className={toolbarButtonClass}>Layer</summary>
+          <div className={toolbarMenuClass} role="menu">
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!canEditDocument}
+              onClick={(event) => {
+                closeMenu(event);
+                onAddObject3DLayer();
+              }}
+              type="button"
+            >
+              Add 3D object layer
+            </button>
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!canEditDocument}
+              onClick={(event) => {
+                closeMenu(event);
+                onAddAdjustmentLayer();
+              }}
+              type="button"
+            >
+              Add adjustment layer
             </button>
           </div>
         </details>

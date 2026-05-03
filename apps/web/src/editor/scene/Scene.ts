@@ -3,6 +3,7 @@ import { getLayerCorners } from "../geometry/TransformGeometry";
 import { GroupLayer } from "../layers/GroupLayer";
 import { Layer } from "../layers/Layer";
 import type { LayerFilterSettings, SerializedLayer } from "../layers/Layer";
+import { Object3DLayer } from "../layers/Object3DLayer";
 import { ShapeLayer } from "../layers/ShapeLayer";
 import { SelectionManager } from "../selection/SelectionManager";
 import { disposeLayer, cloneLayer } from "./sceneLayerCloning";
@@ -142,6 +143,31 @@ export class Scene {
         y: this.document.y,
         width: this.document.width,
         height: this.document.height
+      })
+    );
+  }
+
+  /**
+   * Creates a default isolated 3D object layer in the middle of the document.
+   */
+  addObject3DLayer() {
+    const size = Math.min(this.document.width, this.document.height, 280);
+
+    return this.addLayer(
+      new Object3DLayer({
+        height: size,
+        id: crypto.randomUUID(),
+        materialTexture: {
+          blend: 0.28,
+          color: [0.08, 0.12, 0.14, 0.8],
+          contrast: 0.7,
+          kind: "checkerboard",
+          scale: 14
+        },
+        name: "3D object",
+        width: size,
+        x: this.document.x + (this.document.width - size) / 2,
+        y: this.document.y + (this.document.height - size) / 2
       })
     );
   }

@@ -157,6 +157,39 @@ export function drawLayerLocalCircle(
 }
 
 /**
+ * Draws an ellipse approximation in layer-local space.
+ */
+export function drawLayerLocalEllipse(
+  context: PrimitiveRendererContext,
+  layer: Layer,
+  rectangle: Rectangle
+) {
+  const points: Array<{ x: number; y: number }> = [];
+  const segments = 42;
+  const radiusX = Math.max(0, rectangle.width / 2);
+  const radiusY = Math.max(0, rectangle.height / 2);
+  const center = {
+    x: rectangle.x + radiusX,
+    y: rectangle.y + radiusY
+  };
+
+  if (radiusX <= 0 || radiusY <= 0) {
+    return;
+  }
+
+  for (let index = 0; index < segments; index += 1) {
+    const angle = (index / segments) * Math.PI * 2;
+
+    points.push({
+      x: center.x + Math.cos(angle) * radiusX,
+      y: center.y + Math.sin(angle) * radiusY
+    });
+  }
+
+  drawLayerLocalPolygon(context, layer, points);
+}
+
+/**
  * Draws raw local-space triangle points using the solid color shader.
  */
 export function drawLayerLocalTriangles(

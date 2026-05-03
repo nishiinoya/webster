@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import type { LayerCommand, LayerSummary } from "../../app/EditorApp";
-import type { LayerFilterSettings } from "../../layers/Layer";
+import type {
+  LayerFilterSettings,
+  LayerTextureKind,
+  LayerTextureSettings,
+  Object3DKind
+} from "../../layers/Layer";
 import type { ImageLayerGeometry } from "../../layers/Layer";
 import { defaultLayerFilters } from "../../layers/Layer";
 import { createDefaultImageLayerGeometry } from "../../layers/ImageLayer";
@@ -35,6 +40,23 @@ type ShapeLayerSummary = LayerSummary & {
   shape: "rectangle" | "circle" | "line" | "triangle" | "diamond" | "arrow";
   strokeColor: [number, number, number, number];
   strokeWidth: number;
+  texture: LayerTextureSettings;
+};
+
+type Object3DLayerSummary = LayerSummary & {
+  ambient: number;
+  lightIntensity: number;
+  lightX: number;
+  lightY: number;
+  lightZ: number;
+  materialColor: [number, number, number, number];
+  materialTexture: LayerTextureSettings;
+  objectKind: Object3DKind;
+  rotationX: number;
+  rotationY: number;
+  rotationZ: number;
+  shadowOpacity: number;
+  shadowSoftness: number;
 };
 
 type ImageLayerSummary = LayerSummary & {
@@ -430,6 +452,133 @@ export function PropertiesPanel({
                 value={Math.round(selectedLayer.strokeWidth)}
               />
             </label>
+            <TextureControls
+              disabled={selectedLayer.locked}
+              onChange={(texture) => updateSelectedLayer({ texture })}
+              texture={selectedLayer.texture}
+            />
+          </div>
+        ) : null}
+        {isObject3DLayerSummary(selectedLayer) ? (
+          <div className={propertySectionClass}>
+            <h3 className={propertySectionTitleClass}>3D object</h3>
+            <label className={propertyRowClass}>
+              <span className={propertyLabelClass}>Object</span>
+              <select
+                className={propertyInputClass}
+                disabled={selectedLayer.locked}
+                onChange={(event) =>
+                  updateSelectedLayer({ objectKind: toObject3DKind(event.target.value) })
+                }
+                value={selectedLayer.objectKind}
+              >
+                <option value="cube">Cube</option>
+                <option value="sphere">Sphere</option>
+                <option value="pyramid">Pyramid</option>
+              </select>
+            </label>
+            <label className={propertyRowClass}>
+              <span className={propertyLabelClass}>Material</span>
+              <input
+                className={propertyInputClass}
+                disabled={selectedLayer.locked}
+                onChange={(event) =>
+                  updateSelectedLayer({
+                    materialColor: hexToColor(event.target.value, selectedLayer.materialColor[3])
+                  })
+                }
+                type="color"
+                value={colorToHex(selectedLayer.materialColor)}
+              />
+            </label>
+            <TextureControls
+              disabled={selectedLayer.locked}
+              onChange={(materialTexture) => updateSelectedLayer({ materialTexture })}
+              texture={selectedLayer.materialTexture}
+            />
+            <FilterSlider
+              disabled={selectedLayer.locked}
+              label="Rotate X"
+              max={180}
+              min={-180}
+              onChange={(value) => updateSelectedLayer({ rotationX: Number(value) || 0 })}
+              value={Math.round(selectedLayer.rotationX)}
+            />
+            <FilterSlider
+              disabled={selectedLayer.locked}
+              label="Rotate Y"
+              max={180}
+              min={-180}
+              onChange={(value) => updateSelectedLayer({ rotationY: Number(value) || 0 })}
+              value={Math.round(selectedLayer.rotationY)}
+            />
+            <FilterSlider
+              disabled={selectedLayer.locked}
+              label="Rotate Z"
+              max={180}
+              min={-180}
+              onChange={(value) => updateSelectedLayer({ rotationZ: Number(value) || 0 })}
+              value={Math.round(selectedLayer.rotationZ)}
+            />
+            <FilterSlider
+              disabled={selectedLayer.locked}
+              label="Light X"
+              max={6}
+              min={-6}
+              onChange={(value) => updateSelectedLayer({ lightX: Number(value) || 0 })}
+              step={0.1}
+              value={roundTenth(selectedLayer.lightX)}
+            />
+            <FilterSlider
+              disabled={selectedLayer.locked}
+              label="Light Y"
+              max={6}
+              min={-6}
+              onChange={(value) => updateSelectedLayer({ lightY: Number(value) || 0 })}
+              step={0.1}
+              value={roundTenth(selectedLayer.lightY)}
+            />
+            <FilterSlider
+              disabled={selectedLayer.locked}
+              label="Light Z"
+              max={10}
+              min={1}
+              onChange={(value) => updateSelectedLayer({ lightZ: Number(value) || 1 })}
+              step={0.1}
+              value={roundTenth(selectedLayer.lightZ)}
+            />
+            <FilterSlider
+              disabled={selectedLayer.locked}
+              label="Intensity"
+              max={200}
+              min={0}
+              onChange={(value) => updateSelectedLayer({ lightIntensity: Number(value) / 100 })}
+              value={Math.round(selectedLayer.lightIntensity * 100)}
+            />
+            <FilterSlider
+              disabled={selectedLayer.locked}
+              label="Ambient"
+              max={100}
+              min={0}
+              onChange={(value) => updateSelectedLayer({ ambient: Number(value) / 100 })}
+              value={Math.round(selectedLayer.ambient * 100)}
+            />
+            <FilterSlider
+              disabled={selectedLayer.locked}
+              label="Layer shadow"
+              max={100}
+              min={0}
+              onChange={(value) => updateSelectedLayer({ shadowOpacity: Number(value) / 100 })}
+              value={Math.round(selectedLayer.shadowOpacity * 100)}
+            />
+            <FilterSlider
+              disabled={selectedLayer.locked}
+              label="Shadow soft"
+              max={64}
+              min={0}
+              onChange={(value) => updateSelectedLayer({ shadowSoftness: Number(value) || 0 })}
+              value={Math.round(selectedLayer.shadowSoftness)}
+            />
           </div>
         ) : null}
         {isImageLayerSummary(selectedLayer) ? (
@@ -680,6 +829,10 @@ function isShapeLayerSummary(layer: LayerSummary | null): layer is ShapeLayerSum
   return Boolean(layer && layer.type === "shape" && "shape" in layer);
 }
 
+function isObject3DLayerSummary(layer: LayerSummary | null): layer is Object3DLayerSummary {
+  return Boolean(layer && layer.type === "object3d" && "objectKind" in layer);
+}
+
 function isImageLayerSummary(layer: LayerSummary | null): layer is ImageLayerSummary {
   return Boolean(layer && layer.type === "image" && "imageGeometry" in layer);
 }
@@ -706,6 +859,7 @@ function FilterSlider({
   max,
   min,
   onChange,
+  step,
   value
 }: {
   disabled: boolean;
@@ -713,6 +867,7 @@ function FilterSlider({
   max: number;
   min: number;
   onChange: (value: string) => void;
+  step?: number;
   value: number;
 }) {
   return (
@@ -725,6 +880,7 @@ function FilterSlider({
           max={max}
           min={min}
           onChange={(event) => onChange(event.target.value)}
+          step={step}
           type="range"
           value={value}
         />
@@ -734,11 +890,89 @@ function FilterSlider({
           max={max}
           min={min}
           onChange={(event) => onChange(event.target.value)}
+          step={step}
           type="number"
           value={value}
         />
       </span>
     </label>
+  );
+}
+
+function TextureControls({
+  disabled,
+  onChange,
+  texture
+}: {
+  disabled: boolean;
+  onChange: (texture: Partial<LayerTextureSettings>) => void;
+  texture: LayerTextureSettings;
+}) {
+  return (
+    <>
+      <label className={propertyRowClass}>
+        <span className={propertyLabelClass}>Texture</span>
+        <select
+          className={propertyInputClass}
+          disabled={disabled}
+          onChange={(event) => {
+            const kind = toLayerTextureKind(event.target.value);
+
+            onChange({
+              blend: kind === "none" ? 0 : Math.max(texture.blend, 0.35),
+              kind
+            });
+          }}
+          value={texture.kind}
+        >
+          <option value="none">None</option>
+          <option value="checkerboard">Checkerboard</option>
+          <option value="stripes">Stripes</option>
+          <option value="dots">Dots</option>
+          <option value="grain">Grain</option>
+        </select>
+      </label>
+      {texture.kind !== "none" ? (
+        <>
+          <label className={propertyRowClass}>
+            <span className={propertyLabelClass}>Texture color</span>
+            <input
+              className={propertyInputClass}
+              disabled={disabled}
+              onChange={(event) =>
+                onChange({ color: hexToColor(event.target.value, texture.color[3]) })
+              }
+              type="color"
+              value={colorToHex(texture.color)}
+            />
+          </label>
+          <FilterSlider
+            disabled={disabled}
+            label="Texture scale"
+            max={96}
+            min={2}
+            onChange={(value) => onChange({ scale: Number(value) || 2 })}
+            value={Math.round(texture.scale)}
+          />
+          <FilterSlider
+            disabled={disabled}
+            label="Texture mix"
+            max={100}
+            min={0}
+            onChange={(value) => onChange({ blend: Number(value) / 100 })}
+            value={Math.round(texture.blend * 100)}
+          />
+          <FilterSlider
+            disabled={disabled}
+            label="Texture edge"
+            max={100}
+            min={0}
+            onChange={(value) => onChange({ contrast: Number(value) / 100 })}
+            value={Math.round(texture.contrast * 100)}
+          />
+        </>
+      ) : null}
+    </>
   );
 }
 
@@ -801,6 +1035,31 @@ function getFontFamilyOptions(
 
 function isLegacyBrowserFont(fontFamily: string) {
   return ["arial", "courier new", "georgia"].includes(fontFamily.trim().toLowerCase());
+}
+
+function toObject3DKind(value: string): Object3DKind {
+  if (value === "sphere" || value === "pyramid") {
+    return value;
+  }
+
+  return "cube";
+}
+
+function toLayerTextureKind(value: string): LayerTextureKind {
+  if (
+    value === "checkerboard" ||
+    value === "stripes" ||
+    value === "dots" ||
+    value === "grain"
+  ) {
+    return value;
+  }
+
+  return "none";
+}
+
+function roundTenth(value: number) {
+  return Math.round(value * 10) / 10;
 }
 
 function colorToHex(color: [number, number, number, number]) {

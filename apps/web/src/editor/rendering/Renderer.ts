@@ -12,6 +12,7 @@ import { AdjustmentLayer } from "../layers/AdjustmentLayer";
 import { defaultLayerFilters, Layer } from "../layers/Layer";
 import type { LayerFilterSettings } from "../layers/Layer";
 import { GroupLayer } from "../layers/GroupLayer";
+import { Object3DLayer } from "../layers/Object3DLayer";
 import { ShapeLayer } from "../layers/ShapeLayer";
 import { StrokeLayer } from "../layers/StrokeLayer";
 import { TextLayer } from "../layers/TextLayer";
@@ -25,16 +26,19 @@ import { Quad } from "./geometry/Quad";
 import { EllipseMesh } from "./geometry/EllipseMesh";
 import { SolidColorShaderProgram } from "./shaders/SolidColorShaderProgram";
 import { TexturedShaderProgram } from "./shaders/TexturedShaderProgram";
+import { Object3DShaderProgram } from "./shaders/Object3DShaderProgram";
 import { TextureManager } from "./textures/TextureManager";
 import { SelectionOverlayRenderer } from "./selection/SelectionOverlayRenderer";
 import type { BitmapTextRect } from "./text/BitmapText";
 import { FontLoader } from "./text/FontLoader";
 import { renderImageLayer } from "./layers/renderImageLayer";
+import { renderObject3DLayer } from "./layers/renderObject3DLayer";
 import { renderShapeLayer } from "./layers/renderShapeLayer";
 import { renderStrokeLayer } from "./layers/renderStrokeLayer";
 import { renderTextLayer } from "./layers/renderTextLayer";
 import {
   drawLayerLocalCircle as drawLayerLocalCirclePrimitive,
+  drawLayerLocalEllipse as drawLayerLocalEllipsePrimitive,
   drawLayerLocalLine as drawLayerLocalLinePrimitive,
   drawLayerLocalPolygon as drawLayerLocalPolygonPrimitive,
   drawLayerLocalRectangle as drawLayerLocalRectanglePrimitive,
@@ -54,6 +58,7 @@ import { getAdjustmentLayerBlurRegion, getFullscreenBlurRegion } from "./blur/bl
 import { getDropShadowPasses } from "./renderingHelpers";
 import { buildStrokePathGeometry } from "./strokes/strokeGeometry";
 import type { CachedStrokePathGeometry } from "./strokes/strokeGeometry";
+import { createObject3DMesh, Object3DMesh } from "./geometry/Object3DMesh";
 export type RendererShaderSources = {
   brushFragment: string;
   brushVertex: string;
@@ -61,6 +66,8 @@ export type RendererShaderSources = {
   checkerboardVertex: string;
   solidFragment: string;
   solidVertex: string;
+  object3DFragment: string;
+  object3DVertex: string;
   postProcessFragment: string;
   postProcessVertex: string;
   texturedFragment: string;
@@ -89,6 +96,7 @@ type StrokeGeometryCacheEntry = {
 };
 
 type RenderTarget = {
+  depthBuffer: WebGLRenderbuffer;
   framebuffer: WebGLFramebuffer;
   height: number;
   texture: WebGLTexture;
@@ -127,6 +135,7 @@ export class Renderer {
   private readonly checkerboardShaderProgram: CheckerboardShaderProgram;
   private readonly postProcessShaderProgram: PostProcessShaderProgram;
   private readonly texturedShaderProgram: TexturedShaderProgram;
+  private readonly object3DShaderProgram: Object3DShaderProgram;
   private readonly textureManager: TextureManager;
   private readonly fontLoader: FontLoader;
   private readonly selectionOverlayRenderer: SelectionOverlayRenderer;
@@ -139,6 +148,7 @@ export class Renderer {
   private readonly textGeometryTexCoordBuffer: WebGLBuffer;
   private readonly supportsUint32Indices: boolean;
   private readonly strokeGeometryCache = new WeakMap<StrokeLayer, StrokeGeometryCacheEntry>();
+  private readonly object3DMeshCache = new Map<string, Object3DMesh>();
   private readonly selectionClipMaskTextureCache = new WeakMap<SelectionMask, WebGLTexture>();
   private readonly selectionClipMaskTextures = new Set<WebGLTexture>();
   private activeRenderTarget: RenderTarget | null = null;
@@ -167,6 +177,8 @@ export class Renderer {
       brushVertex,
       solidFragment,
       solidVertex,
+      object3DFragment,
+      object3DVertex,
       postProcessFragment,
       postProcessVertex,
       texturedFragment,
@@ -179,6 +191,8 @@ export class Renderer {
       loadShaderSource("/glsl/brush.vert.glsl"),
       loadShaderSource("/glsl/solid.frag.glsl"),
       loadShaderSource("/glsl/solid.vert.glsl"),
+      loadShaderSource("/glsl/object3d.frag.glsl"),
+      loadShaderSource("/glsl/object3d.vert.glsl"),
       loadShaderSource("/glsl/postprocess.frag.glsl"),
       loadShaderSource("/glsl/postprocess.vert.glsl"),
       loadShaderSource("/glsl/textured.frag.glsl"),
@@ -195,6 +209,8 @@ export class Renderer {
         checkerboardVertex,
         solidFragment,
         solidVertex,
+        object3DFragment,
+        object3DVertex,
         postProcessFragment,
         postProcessVertex,
         texturedFragment,
@@ -214,7 +230,7 @@ export class Renderer {
     const gl = canvas.getContext("webgl", {
       alpha: options.alpha ?? false,
       antialias: true,
-      depth: false,
+      depth: true,
       premultipliedAlpha: options.premultipliedAlpha ?? true,
       preserveDrawingBuffer: options.preserveDrawingBuffer ?? false,
       stencil: false
@@ -249,6 +265,11 @@ export class Renderer {
       gl,
       shaderSources.texturedVertex,
       shaderSources.texturedFragment
+    );
+    this.object3DShaderProgram = new Object3DShaderProgram(
+      gl,
+      shaderSources.object3DVertex,
+      shaderSources.object3DFragment
     );
     this.textureManager = new TextureManager(gl);
     this.fontLoader = fontLoader;
@@ -525,6 +546,11 @@ export class Renderer {
       this.gl.deleteTexture(texture);
     }
     this.selectionClipMaskTextures.clear();
+    for (const mesh of this.object3DMeshCache.values()) {
+      mesh.dispose();
+    }
+    this.object3DMeshCache.clear();
+    this.object3DShaderProgram.dispose();
     this.texturedShaderProgram.dispose();
     this.postProcessShaderProgram.dispose();
     this.checkerboardShaderProgram.dispose();
@@ -670,10 +696,11 @@ export class Renderer {
   }
 
   private createRenderTarget(width: number, height: number): RenderTarget {
+    const depthBuffer = this.gl.createRenderbuffer();
     const framebuffer = this.gl.createFramebuffer();
     const texture = this.gl.createTexture();
 
-    if (!framebuffer || !texture) {
+    if (!depthBuffer || !framebuffer || !texture) {
       throw new Error("Unable to create WebGL post-process render target.");
     }
 
@@ -702,8 +729,17 @@ export class Renderer {
       texture,
       0
     );
+    this.gl.bindRenderbuffer(this.gl.RENDERBUFFER, depthBuffer);
+    this.gl.renderbufferStorage(this.gl.RENDERBUFFER, this.gl.DEPTH_COMPONENT16, width, height);
+    this.gl.framebufferRenderbuffer(
+      this.gl.FRAMEBUFFER,
+      this.gl.DEPTH_ATTACHMENT,
+      this.gl.RENDERBUFFER,
+      depthBuffer
+    );
 
     if (this.gl.checkFramebufferStatus(this.gl.FRAMEBUFFER) !== this.gl.FRAMEBUFFER_COMPLETE) {
+      this.gl.deleteRenderbuffer(depthBuffer);
       this.gl.deleteFramebuffer(framebuffer);
       this.gl.deleteTexture(texture);
       throw new Error("WebGL post-process framebuffer is incomplete.");
@@ -711,7 +747,7 @@ export class Renderer {
 
     this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
 
-    return { framebuffer, height, texture, width };
+    return { depthBuffer, framebuffer, height, texture, width };
   }
 
   private disposeRenderTarget(renderTarget: RenderTarget | null) {
@@ -720,6 +756,7 @@ export class Renderer {
     }
 
     this.gl.deleteFramebuffer(renderTarget.framebuffer);
+    this.gl.deleteRenderbuffer(renderTarget.depthBuffer);
     this.gl.deleteTexture(renderTarget.texture);
   }
 
@@ -766,7 +803,11 @@ export class Renderer {
 
   private bindMask(
     layer: Layer,
-    shaderProgram: BrushShaderProgram | SolidColorShaderProgram | TexturedShaderProgram
+    shaderProgram:
+      | BrushShaderProgram
+      | Object3DShaderProgram
+      | SolidColorShaderProgram
+      | TexturedShaderProgram
   ) {
     const mask = layer.mask;
     const isMaskEnabled = Boolean(mask?.enabled);
@@ -788,7 +829,11 @@ export class Renderer {
   ) {
     this.bindMask(
       layer,
-      shaderProgram as BrushShaderProgram | SolidColorShaderProgram | TexturedShaderProgram
+      shaderProgram as
+        | BrushShaderProgram
+        | Object3DShaderProgram
+        | SolidColorShaderProgram
+        | TexturedShaderProgram
     );
   }
 
@@ -925,9 +970,11 @@ export class Renderer {
     if (layer instanceof ShapeLayer) {
       renderShapeLayer(
         {
+          gl: this.gl,
           ellipseMesh: this.ellipseMesh,
           quad: this.quad,
           solidColorShaderProgram: this.solidColorShaderProgram,
+          textureManager: this.textureManager,
           bindMask: this.bindMaskToProgram.bind(this),
           drawLayerLocalLine: this.drawLayerLocalLine.bind(this),
           drawLayerLocalPolygon: this.drawLayerLocalPolygon.bind(this),
@@ -967,6 +1014,24 @@ export class Renderer {
           textureManager: this.textureManager,
           bindMask: this.bindMaskToProgram.bind(this),
           getLayerModelMatrix: this.getLayerModelMatrix.bind(this),
+          renderColorOverride: this.renderColorOverride
+        },
+        layer,
+        camera,
+        filters
+      );
+    }
+
+    if (layer instanceof Object3DLayer) {
+      renderObject3DLayer(
+        {
+          gl: this.gl,
+          object3DShaderProgram: this.object3DShaderProgram,
+          solidColorShaderProgram: this.solidColorShaderProgram,
+          bindMask: this.bindMaskToProgram.bind(this),
+          drawLayerLocalEllipse: this.drawLayerLocalEllipse.bind(this),
+          getLayerModelMatrix: this.getLayerModelMatrix.bind(this),
+          getObject3DMesh: this.getObject3DMesh.bind(this),
           renderColorOverride: this.renderColorOverride
         },
         layer,
@@ -1132,6 +1197,18 @@ export class Renderer {
     drawLayerLocalCirclePrimitive(this.getPrimitiveRendererContext(), layer, center, radius);
   }
 
+  private drawLayerLocalEllipse(
+    layer: Layer,
+    rectangle: {
+      height: number;
+      width: number;
+      x: number;
+      y: number;
+    }
+  ) {
+    drawLayerLocalEllipsePrimitive(this.getPrimitiveRendererContext(), layer, rectangle);
+  }
+
   private drawLayerLocalTriangles(layer: Layer, points: Array<{ x: number; y: number }>) {
     drawLayerLocalTrianglesPrimitive(this.getPrimitiveRendererContext(), layer, points);
   }
@@ -1166,6 +1243,20 @@ export class Renderer {
       localRectangleTexCoordBuffer: this.localRectangleTexCoordBuffer,
       getLayerModelMatrix: this.getLayerModelMatrix.bind(this)
     };
+  }
+
+  private getObject3DMesh(layer: Object3DLayer) {
+    const cachedMesh = this.object3DMeshCache.get(layer.objectKind);
+
+    if (cachedMesh) {
+      return cachedMesh;
+    }
+
+    const mesh = createObject3DMesh(this.gl, layer.objectKind);
+
+    this.object3DMeshCache.set(layer.objectKind, mesh);
+
+    return mesh;
   }
 
   private drawTextureQuad(

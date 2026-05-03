@@ -7,6 +7,7 @@ import { getPolygonShapePoints } from "../renderingHelpers";
 import { Quad } from "../geometry/Quad";
 import { SolidColorShaderProgram } from "../shaders/SolidColorShaderProgram";
 import type { BitmapTextRect } from "../text/BitmapText";
+import { TextureManager } from "../textures/TextureManager";
 
 type MaskShaderProgram = {
   setMaskEnabled(enabled: boolean): void;
@@ -14,9 +15,11 @@ type MaskShaderProgram = {
 };
 
 type ShapeLayerRendererContext = {
+  gl: WebGLRenderingContext;
   ellipseMesh: EllipseMesh;
   quad: Quad;
   solidColorShaderProgram: SolidColorShaderProgram;
+  textureManager: TextureManager;
   bindMask: (layer: Layer, shaderProgram: MaskShaderProgram) => void;
   drawLayerLocalLine: (
     layer: Layer,
@@ -84,6 +87,8 @@ function drawPolygonShape(
     context.solidColorShaderProgram.setColor(
       context.getRenderColor(layer.fillColor, layer.opacity * opacityMultiplier)
     );
+    context.solidColorShaderProgram.setLayerTexture(layer.texture);
+    bindShapeImportedTexture(context, layer);
     context.bindMask(layer, context.solidColorShaderProgram);
     context.drawLayerLocalPolygon(layer, points);
   }
@@ -117,6 +122,8 @@ function drawRectangleShape(
     context.solidColorShaderProgram.setColor(
       context.getRenderColor(layer.fillColor, layer.opacity * opacityMultiplier)
     );
+    context.solidColorShaderProgram.setLayerTexture(layer.texture);
+    bindShapeImportedTexture(context, layer);
     context.solidColorShaderProgram.setModel(context.getLayerModelMatrix(layer));
     context.bindMask(layer, context.solidColorShaderProgram);
     context.quad.drawTextured(context.solidColorShaderProgram);
@@ -205,6 +212,8 @@ function drawEllipseShape(
     context.solidColorShaderProgram.setColor(
       context.getRenderColor(layer.fillColor, layer.opacity * opacityMultiplier)
     );
+    context.solidColorShaderProgram.setLayerTexture(layer.texture);
+    bindShapeImportedTexture(context, layer);
     context.solidColorShaderProgram.setModel(context.getLayerModelMatrix(layer));
     context.bindMask(layer, context.solidColorShaderProgram);
     context.ellipseMesh.drawFill(context.solidColorShaderProgram);
@@ -224,5 +233,21 @@ function drawEllipseShape(
     Math.max(1, layer.strokeWidth),
     layer.width * layer.scaleX,
     layer.height * layer.scaleY
+  );
+}
+
+function bindShapeImportedTexture(context: ShapeLayerRendererContext, layer: ShapeLayer) {
+  const enabled = Boolean(layer.textureImage && layer.texture.kind === "image");
+
+  context.solidColorShaderProgram.setImportedTexture(enabled, 2, layer.texture.blend);
+
+  if (!enabled || !layer.textureImage) {
+    return;
+  }
+
+  context.gl.activeTexture(context.gl.TEXTURE2);
+  context.gl.bindTexture(
+    context.gl.TEXTURE_2D,
+    context.textureManager.getImportedTexture(layer.textureImage)
   );
 }

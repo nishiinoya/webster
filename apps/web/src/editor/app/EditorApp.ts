@@ -108,6 +108,7 @@ export type ImageLayerCommand =
 
 export type LayerCommand =
   | { type: "add-adjustment" }
+  | { type: "add-object3d" }
   | { type: "delete"; layerId: string }
   | { type: "duplicate"; layerId: string }
   | { type: "group"; layerIds: string[]; name?: string }
@@ -1561,6 +1562,8 @@ function getLayerCommandLabel(scene: Scene, command: LayerCommand) {
   switch (command.type) {
     case "add-adjustment":
       return "Add adjustment layer";
+    case "add-object3d":
+      return "Add 3D object layer";
     case "delete":
       return `Delete ${layerName}`;
     case "duplicate":

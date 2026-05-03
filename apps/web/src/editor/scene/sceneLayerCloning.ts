@@ -2,6 +2,7 @@ import { AdjustmentLayer } from "../layers/AdjustmentLayer";
 import { GroupLayer } from "../layers/GroupLayer";
 import { cloneImageLayerGeometry, ImageLayer } from "../layers/ImageLayer";
 import { Layer } from "../layers/Layer";
+import { Object3DLayer } from "../layers/Object3DLayer";
 import { ShapeLayer } from "../layers/ShapeLayer";
 import { StrokeLayer } from "../layers/StrokeLayer";
 import { TextLayer } from "../layers/TextLayer";
@@ -53,7 +54,27 @@ export function cloneLayer(
       fillColor: [...layer.fillColor],
       shape: layer.shape,
       strokeColor: [...layer.strokeColor],
-      strokeWidth: layer.strokeWidth
+      strokeWidth: layer.strokeWidth,
+      texture: { ...layer.texture, color: [...layer.texture.color] }
+    });
+  }
+
+  if (layer instanceof Object3DLayer) {
+    return new Object3DLayer({
+      ...options,
+      ambient: layer.ambient,
+      lightIntensity: layer.lightIntensity,
+      lightX: layer.lightX,
+      lightY: layer.lightY,
+      lightZ: layer.lightZ,
+      materialColor: [...layer.materialColor],
+      materialTexture: { ...layer.materialTexture, color: [...layer.materialTexture.color] },
+      objectKind: layer.objectKind,
+      rotationX: layer.rotationX,
+      rotationY: layer.rotationY,
+      rotationZ: layer.rotationZ,
+      shadowOpacity: layer.shadowOpacity,
+      shadowSoftness: layer.shadowSoftness
     });
   }
 

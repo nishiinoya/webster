@@ -1,6 +1,10 @@
 /** Solid-color geometry shader program wrapper. */
 import { ShaderProgram } from "./ShaderProgram";
-import type { LayerFilterAdjustment, LayerFilterSettings } from "../../layers/Layer";
+import type {
+  LayerFilterAdjustment,
+  LayerFilterSettings,
+  LayerTextureSettings
+} from "../../layers/Layer";
 
 const maxAdjustmentFilters = 4;
 
@@ -9,6 +13,9 @@ export class SolidColorShaderProgram extends ShaderProgram {
   private readonly modelUniformLocation: WebGLUniformLocation;
   private readonly projectionUniformLocation: WebGLUniformLocation;
   private readonly colorUniformLocation: WebGLUniformLocation;
+  private readonly importedTextureBlendUniformLocation: WebGLUniformLocation;
+  private readonly importedTextureEnabledUniformLocation: WebGLUniformLocation;
+  private readonly importedTextureUniformLocation: WebGLUniformLocation;
   private readonly filterBrightnessUniformLocation: WebGLUniformLocation;
   private readonly filterBlurUniformLocation: WebGLUniformLocation;
   private readonly filterContrastUniformLocation: WebGLUniformLocation;
@@ -33,6 +40,11 @@ export class SolidColorShaderProgram extends ShaderProgram {
   private readonly maskEdgeWorldToScreenScaleUniformLocation: WebGLUniformLocation;
   private readonly maskInvertedUniformLocation: WebGLUniformLocation;
   private readonly maskUniformLocation: WebGLUniformLocation;
+  private readonly textureBlendUniformLocation: WebGLUniformLocation;
+  private readonly textureColorUniformLocation: WebGLUniformLocation;
+  private readonly textureContrastUniformLocation: WebGLUniformLocation;
+  private readonly textureKindUniformLocation: WebGLUniformLocation;
+  private readonly textureScaleUniformLocation: WebGLUniformLocation;
 
   constructor(gl: WebGLRenderingContext, vertexShaderSource: string, fragmentShaderSource: string) {
     super(gl, vertexShaderSource, fragmentShaderSource);
@@ -41,6 +53,9 @@ export class SolidColorShaderProgram extends ShaderProgram {
     this.modelUniformLocation = this.getUniformLocation("u_model");
     this.projectionUniformLocation = this.getUniformLocation("u_projection");
     this.colorUniformLocation = this.getUniformLocation("u_color");
+    this.importedTextureBlendUniformLocation = this.getUniformLocation("u_importedTextureBlend");
+    this.importedTextureEnabledUniformLocation = this.getUniformLocation("u_importedTextureEnabled");
+    this.importedTextureUniformLocation = this.getUniformLocation("u_importedTexture");
     this.filterBrightnessUniformLocation = this.getUniformLocation("u_filterBrightness");
     this.filterBlurUniformLocation = this.getUniformLocation("u_filterBlur");
     this.filterContrastUniformLocation = this.getUniformLocation("u_filterContrast");
@@ -79,6 +94,11 @@ export class SolidColorShaderProgram extends ShaderProgram {
     );
     this.maskInvertedUniformLocation = this.getUniformLocation("u_maskInverted");
     this.maskUniformLocation = this.getUniformLocation("u_mask");
+    this.textureBlendUniformLocation = this.getUniformLocation("u_textureBlend");
+    this.textureColorUniformLocation = this.getUniformLocation("u_textureColor");
+    this.textureContrastUniformLocation = this.getUniformLocation("u_textureContrast");
+    this.textureKindUniformLocation = this.getUniformLocation("u_textureKind");
+    this.textureScaleUniformLocation = this.getUniformLocation("u_textureScale");
 
     if (this.texCoordAttributeLocation < 0) {
       throw new Error("WebGL texture coordinate attribute is unavailable.");
@@ -95,6 +115,24 @@ export class SolidColorShaderProgram extends ShaderProgram {
 
   setColor(color: [number, number, number, number]) {
     this.gl.uniform4fv(this.colorUniformLocation, color);
+    this.setLayerTexture(null);
+    this.setImportedTexture(false);
+  }
+
+  setImportedTexture(enabled: boolean, textureUnit = 2, blend = 0) {
+    this.gl.uniform1i(this.importedTextureEnabledUniformLocation, enabled ? 1 : 0);
+    this.gl.uniform1i(this.importedTextureUniformLocation, textureUnit);
+    this.gl.uniform1f(this.importedTextureBlendUniformLocation, enabled ? blend : 0);
+  }
+
+  setLayerTexture(texture: LayerTextureSettings | null) {
+    const textureKind = getTextureKindUniform(texture?.kind ?? "none");
+
+    this.gl.uniform1i(this.textureKindUniformLocation, textureKind);
+    this.gl.uniform1f(this.textureBlendUniformLocation, textureKind === 0 ? 0 : texture?.blend ?? 0);
+    this.gl.uniform4fv(this.textureColorUniformLocation, texture?.color ?? [1, 1, 1, 1]);
+    this.gl.uniform1f(this.textureContrastUniformLocation, texture?.contrast ?? 0);
+    this.gl.uniform1f(this.textureScaleUniformLocation, texture?.scale ?? 16);
   }
 
   setFilters(filters: LayerFilterSettings) {
@@ -186,5 +224,22 @@ export class SolidColorShaderProgram extends ShaderProgram {
     return Array.from({ length: count }, (_, index) =>
       this.getUniformLocation(`${name}[${index}]`)
     );
+  }
+}
+
+function getTextureKindUniform(kind: LayerTextureSettings["kind"]) {
+  switch (kind) {
+    case "checkerboard":
+      return 1;
+    case "stripes":
+      return 2;
+    case "dots":
+      return 3;
+    case "grain":
+      return 4;
+    case "image":
+      return 5;
+    case "none":
+      return 0;
   }
 }
