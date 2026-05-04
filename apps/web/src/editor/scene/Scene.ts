@@ -2,7 +2,7 @@ import { AdjustmentLayer } from "../layers/AdjustmentLayer";
 import { getLayerCorners } from "../geometry/TransformGeometry";
 import { GroupLayer } from "../layers/GroupLayer";
 import { Layer } from "../layers/Layer";
-import type { LayerFilterSettings, SerializedLayer } from "../layers/Layer";
+import type { LayerFilterSettings, Object3DKind, SerializedLayer } from "../layers/Layer";
 import { Object3DLayer } from "../layers/Object3DLayer";
 import { ShapeLayer } from "../layers/ShapeLayer";
 import { SelectionManager } from "../selection/SelectionManager";
@@ -124,7 +124,7 @@ export class Scene {
   /**
    * Appends a layer to the scene and makes it the active selection.
    */
-  addLayer(layer: Layer) {
+  addLayer<T extends Layer>(layer: T) {
     this.layers.push(layer);
     this.setSelectedLayerIds([layer.id]);
 
@@ -150,7 +150,7 @@ export class Scene {
   /**
    * Creates a default isolated 3D object layer in the middle of the document.
    */
-  addObject3DLayer() {
+  addObject3DLayer(objectKind: Object3DKind = "cube") {
     const size = Math.min(this.document.width, this.document.height, 280);
 
     return this.addLayer(
@@ -164,7 +164,8 @@ export class Scene {
           kind: "checkerboard",
           scale: 14
         },
-        name: "3D object",
+        name: getObject3DLayerName(objectKind),
+        objectKind,
         width: size,
         x: this.document.x + (this.document.width - size) / 2,
         y: this.document.y + (this.document.height - size) / 2
@@ -1017,6 +1018,19 @@ export class Scene {
     this.layers.splice(nextIndex, 0, ...block);
 
     return group;
+  }
+}
+
+function getObject3DLayerName(objectKind: Object3DKind) {
+  switch (objectKind) {
+    case "sphere":
+      return "3D sphere";
+    case "pyramid":
+      return "3D pyramid";
+    case "imported":
+      return "3D model";
+    default:
+      return "3D cube";
   }
 }
 

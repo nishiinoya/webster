@@ -43,7 +43,11 @@ export async function createImageDocumentFromFile(file: File) {
 /**
  * Imports an image file into the current scene with a reasonable initial on-canvas scale.
  */
-export async function addImageFileToScene(scene: Scene, file: File) {
+export async function addImageFileToScene(
+  scene: Scene,
+  file: File,
+  options: { center?: { x: number; y: number } } = {}
+) {
   const image = await loadImageElement(file);
   const width = image.naturalWidth || image.width;
   const height = image.naturalHeight || image.height;
@@ -57,8 +61,8 @@ export async function addImageFileToScene(scene: Scene, file: File) {
     image,
     mimeType: file.type || "image/png",
     objectUrl: image.src,
-    x: (-width * scale) / 2,
-    y: (-height * scale) / 2,
+    x: (options.center?.x ?? 0) - (width * scale) / 2,
+    y: (options.center?.y ?? 0) - (height * scale) / 2,
     width,
     height,
     scaleX: scale,

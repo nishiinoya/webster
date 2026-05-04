@@ -13,6 +13,7 @@ type Point = {
 export class ShapeTool {
   private dragLayer: ShapeLayer | null = null;
   private dragStart: Point | null = null;
+  private customWorldPoints: Point[] = [];
   private shape: ShapeKind = "rectangle";
 
   constructor(
@@ -44,6 +45,7 @@ export class ShapeTool {
       width: 1,
       height: this.shape === "line" ? getDefaultStrokeWidth() : 1,
       shape: this.shape,
+      customPath: this.shape === "custom" ? [{ x: 0, y: 0 }] : null,
       fillColor: this.shape === "line" ? [0.18, 0.49, 0.44, 0] : [0.18, 0.49, 0.44, 1],
       strokeColor: [0.07, 0.08, 0.09, 1],
       strokeWidth: this.shape === "line" ? getDefaultStrokeWidth() : 0
@@ -51,6 +53,7 @@ export class ShapeTool {
 
     this.dragStart = point;
     this.dragLayer = layer;
+    this.customWorldPoints = this.shape === "custom" ? [point] : [];
     this.scene.addLayer(layer);
 
     return true;
@@ -61,7 +64,14 @@ export class ShapeTool {
       return false;
     }
 
-    this.updateDragLayer(this.clientToWorld(event.clientX, event.clientY), false);
+    const point = this.clientToWorld(event.clientX, event.clientY);
+
+    if (this.dragLayer.shape === "custom") {
+      this.updateCustomLayer(point);
+      return true;
+    }
+
+    this.updateDragLayer(point, false);
 
     return true;
   }
@@ -73,6 +83,18 @@ export class ShapeTool {
 
     const didCreate = true;
 
+    if (this.dragLayer.shape === "custom") {
+      if (this.customWorldPoints.length < 3 || this.dragLayer.width < 2 || this.dragLayer.height < 2) {
+        this.scene.removeLayer(this.dragLayer.id);
+      }
+
+      this.dragLayer = null;
+      this.dragStart = null;
+      this.customWorldPoints = [];
+
+      return didCreate;
+    }
+
     if (
       (this.dragLayer.shape === "line" && this.dragLayer.width < 2) ||
       (this.dragLayer.shape !== "line" && this.dragLayer.width < 2 && this.dragLayer.height < 2)
@@ -82,6 +104,7 @@ export class ShapeTool {
 
     this.dragLayer = null;
     this.dragStart = null;
+    this.customWorldPoints = [];
 
     return didCreate;
   }
@@ -89,6 +112,7 @@ export class ShapeTool {
   cancel() {
     this.dragLayer = null;
     this.dragStart = null;
+    this.customWorldPoints = [];
   }
 
   getCursor() {
@@ -151,6 +175,39 @@ export class ShapeTool {
     layer.scaleY = 1;
   }
 
+  private updateCustomLayer(point: Point) {
+    const layer = this.dragLayer;
+
+    if (!layer) {
+      return;
+    }
+
+    const previousPoint = this.customWorldPoints.at(-1);
+    const minDistance = 1 / Math.max(this.camera.zoom, 1e-6);
+
+    if (
+      previousPoint &&
+      Math.hypot(point.x - previousPoint.x, point.y - previousPoint.y) < minDistance
+    ) {
+      return;
+    }
+
+    this.customWorldPoints.push(point);
+
+    const bounds = getPointBounds(this.customWorldPoints);
+
+    layer.x = bounds.x;
+    layer.y = bounds.y;
+    layer.width = bounds.width;
+    layer.height = bounds.height;
+    layer.scaleX = 1;
+    layer.scaleY = 1;
+    layer.customPath = this.customWorldPoints.map((worldPoint) => ({
+      x: worldPoint.x - bounds.x,
+      y: worldPoint.y - bounds.y
+    }));
+  }
+
   private applyDefaultSize() {
     if (!this.dragStart) {
       return;
@@ -176,6 +233,8 @@ function getShapeName(shape: ShapeKind) {
       return "Arrow";
     case "circle":
       return "Circle";
+    case "custom":
+      return "Custom shape";
     case "diamond":
       return "Diamond";
     case "line":
@@ -189,4 +248,18 @@ function getShapeName(shape: ShapeKind) {
 
 function normalizeRotation(rotation: number) {
   return ((rotation % 360) + 360) % 360;
+}
+
+function getPointBounds(points: Point[]) {
+  const minX = Math.min(...points.map((point) => point.x));
+  const minY = Math.min(...points.map((point) => point.y));
+  const maxX = Math.max(...points.map((point) => point.x));
+  const maxY = Math.max(...points.map((point) => point.y));
+
+  return {
+    height: Math.max(1, maxY - minY),
+    width: Math.max(1, maxX - minX),
+    x: minX,
+    y: minY
+  };
 }

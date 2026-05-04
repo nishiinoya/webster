@@ -1028,6 +1028,7 @@ export class Renderer {
           gl: this.gl,
           object3DShaderProgram: this.object3DShaderProgram,
           solidColorShaderProgram: this.solidColorShaderProgram,
+          textureManager: this.textureManager,
           bindMask: this.bindMaskToProgram.bind(this),
           drawLayerLocalEllipse: this.drawLayerLocalEllipse.bind(this),
           getLayerModelMatrix: this.getLayerModelMatrix.bind(this),
@@ -1246,15 +1247,24 @@ export class Renderer {
   }
 
   private getObject3DMesh(layer: Object3DLayer) {
-    const cachedMesh = this.object3DMeshCache.get(layer.objectKind);
+    const cacheKey =
+      layer.objectKind === "imported"
+        ? `imported:${layer.id}:${layer.modelRevision}:${layer.importedModel?.name ?? layer.modelSource ?? ""}`
+        : layer.objectKind;
+    const cachedMesh = this.object3DMeshCache.get(cacheKey);
 
     if (cachedMesh) {
       return cachedMesh;
     }
 
-    const mesh = createObject3DMesh(this.gl, layer.objectKind);
+    const mesh = createObject3DMesh(
+      this.gl,
+      layer.objectKind,
+      layer.modelSource,
+      layer.importedModel
+    );
 
-    this.object3DMeshCache.set(layer.objectKind, mesh);
+    this.object3DMeshCache.set(cacheKey, mesh);
 
     return mesh;
   }

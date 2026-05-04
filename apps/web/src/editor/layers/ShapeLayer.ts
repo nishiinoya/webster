@@ -7,9 +7,19 @@ import type {
   SerializedShapeLayer
 } from "./Layer";
 
-export type ShapeKind = "rectangle" | "circle" | "line" | "triangle" | "diamond" | "arrow";
+export type ShapePathPoint = { x: number; y: number };
+
+export type ShapeKind =
+  | "rectangle"
+  | "circle"
+  | "line"
+  | "triangle"
+  | "diamond"
+  | "arrow"
+  | "custom";
 
 export type ShapeLayerOptions = Omit<LayerOptions, "type"> & {
+  customPath?: ShapePathPoint[] | null;
   fillColor?: [number, number, number, number];
   shape?: ShapeKind;
   strokeColor?: [number, number, number, number];
@@ -19,6 +29,7 @@ export type ShapeLayerOptions = Omit<LayerOptions, "type"> & {
 };
 
 export class ShapeLayer extends Layer {
+  customPath: ShapePathPoint[];
   fillColor: [number, number, number, number];
   shape: ShapeKind;
   strokeColor: [number, number, number, number];
@@ -32,6 +43,7 @@ export class ShapeLayer extends Layer {
       type: "shape"
     });
 
+    this.customPath = normalizeCustomPath(options.customPath);
     this.fillColor = options.fillColor ?? [0.18, 0.49, 0.44, 1];
     this.shape = options.shape ?? "rectangle";
     this.strokeColor = options.strokeColor ?? [0.07, 0.08, 0.09, 1];
@@ -44,6 +56,7 @@ export class ShapeLayer extends Layer {
   toJSON(): SerializedShapeLayer {
     return {
       ...this.toJSONBase(),
+      customPath: this.shape === "custom" ? this.customPath.map((point) => ({ ...point })) : null,
       fillColor: this.fillColor,
       shape: this.shape,
       strokeColor: this.strokeColor,
@@ -53,4 +66,17 @@ export class ShapeLayer extends Layer {
       type: "shape"
     };
   }
+}
+
+function normalizeCustomPath(points?: ShapePathPoint[] | null) {
+  if (!Array.isArray(points)) {
+    return [];
+  }
+
+  return points
+    .map((point) => ({
+      x: Number.isFinite(point.x) ? point.x : 0,
+      y: Number.isFinite(point.y) ? point.y : 0
+    }))
+    .filter((point) => point.x >= -1e6 && point.x <= 1e6 && point.y >= -1e6 && point.y <= 1e6);
 }

@@ -15,7 +15,7 @@ export function applyLayerCommandToScene(scene: Scene, command: LayerCommand) {
     case "add-adjustment":
       return scene.addAdjustmentLayer();
     case "add-object3d":
-      return scene.addObject3DLayer();
+      return scene.addObject3DLayer(command.objectKind);
     case "delete":
       return scene.removeLayer(command.layerId);
     case "duplicate":

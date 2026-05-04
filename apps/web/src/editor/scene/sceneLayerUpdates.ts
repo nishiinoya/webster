@@ -10,6 +10,7 @@ import { ImageLayer, normalizeImageLayerGeometry } from "../layers/ImageLayer";
 import { Layer } from "../layers/Layer";
 import { Object3DLayer, normalizeObject3DKind, normalizeRotation as normalize3DRotation } from "../layers/Object3DLayer";
 import { ShapeLayer } from "../layers/ShapeLayer";
+import type { ShapeKind } from "../layers/ShapeLayer";
 import { StrokeLayer } from "../layers/StrokeLayer";
 import { TextLayer } from "../layers/TextLayer";
 import { clamp, normalizeRotation } from "./sceneResize";
@@ -36,12 +37,13 @@ export type SceneLayerUpdates = Partial<{
   materialTexture: Partial<LayerTextureSettings>;
   name: string;
   objectKind: Object3DKind;
+  objectZoom: number;
   opacity: number;
   rotation: number;
   rotationX: number;
   rotationY: number;
   rotationZ: number;
-  shape: "rectangle" | "circle" | "line" | "triangle" | "diamond" | "arrow";
+  shape: ShapeKind;
   shadowOpacity: number;
   shadowSoftness: number;
   strokeColor: [number, number, number, number];
@@ -146,7 +148,9 @@ export function applySceneLayerUpdates(layer: Layer, updates: SceneLayerUpdates)
 
   if (layer instanceof Object3DLayer && !layer.locked) {
     if (updates.objectKind !== undefined) {
-      layer.objectKind = normalizeObject3DKind(updates.objectKind);
+      const objectKind = normalizeObject3DKind(updates.objectKind);
+
+      layer.objectKind = objectKind === "imported" && !layer.modelSource ? layer.objectKind : objectKind;
     }
 
     if (updates.materialColor !== undefined) {
@@ -158,6 +162,10 @@ export function applySceneLayerUpdates(layer: Layer, updates: SceneLayerUpdates)
         ...layer.materialTexture,
         ...updates.materialTexture
       });
+    }
+
+    if (updates.objectZoom !== undefined) {
+      layer.objectZoom = clamp(updates.objectZoom, 0.2, 4);
     }
 
     if (updates.rotationX !== undefined) {

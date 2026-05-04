@@ -9,13 +9,16 @@ import type {
   ImageExportBackground,
   ImageExportFormat,
   ImageLayerCommand,
+  LayerAssetCommand,
   LayerCommand,
   LayerSummary,
   SelectionCommand
 } from "@/editor/app/EditorApp";
+import type { Imported3DModel } from "../import3d/Imported3DModel";
 import type { MaskBrushOptions } from "../tools/mask-brush/MaskBrushTypes";
 import type { ShapeKind } from "../layers/ShapeLayer";
 import type { StrokeStyle } from "../layers/StrokeLayer";
+import type { Object3DKind } from "../layers/Layer";
 import type { SelectionMode } from "../selection/SelectionManager";
 import {
   canPickProjectFileHandle,
@@ -40,11 +43,15 @@ import type { SaveStatus } from "./hooks/useProjectFileActions";
 import { CanvasView } from "./CanvasView";
 import { cn } from "./classNames";
 import type { EditorDocumentTab, NewDocumentSize } from "./editorDocuments";
-import type { ImageLayerCommandPendingState } from "./hooks/useEditorSceneRequests";
+import type {
+  ImageLayerCommandPendingState,
+  LayerAssetCommandPendingState
+} from "./hooks/useEditorSceneRequests";
 import { HistoryPanel } from "./panels/HistoryPanel";
 import { LayersPanel } from "./panels/LayersPanel";
 import { ExportImageDialog } from "./dialogs/ExportImageDialog";
 import { NewDocumentDialog } from "./dialogs/NewDocumentDialog";
+import { Object3DImportDialog } from "./dialogs/Object3DImportDialog";
 import { ResizeCanvasDialog } from "./dialogs/ResizeCanvasDialog";
 import { ResizeImageDialog } from "./dialogs/ResizeImageDialog";
 import { PropertiesPanel } from "./panels/PropertiesPanel";
@@ -99,7 +106,7 @@ const editorTools: ToolDefinition[] = [
     value: "Draw"
   },
   {
-    description: "Draw rectangles, circles, arrows, and polygons.",
+    description: "Draw rectangles, circles, arrows, and custom shapes.",
     icon: "S",
     label: "Shape",
     value: "Shape"
@@ -196,10 +203,13 @@ export function EditorPage() {
   const [tabs, setTabs] = useState<EditorDocumentTab[]>(initialTabs);
   const [isExportImageDialogOpen, setIsExportImageDialogOpen] = useState(false);
   const [isNewDocumentDialogOpen, setIsNewDocumentDialogOpen] = useState(false);
+  const [isObject3DImportDialogOpen, setIsObject3DImportDialogOpen] = useState(false);
   const [isResizeCanvasDialogOpen, setIsResizeCanvasDialogOpen] = useState(false);
   const [isResizeImageDialogOpen, setIsResizeImageDialogOpen] = useState(false);
   const [imageLayerCommandPendingState, setImageLayerCommandPendingState] =
     useState<ImageLayerCommandPendingState | null>(null);
+  const [layerAssetCommandPendingState, setLayerAssetCommandPendingState] =
+    useState<LayerAssetCommandPendingState | null>(null);
   const [recentProjects, setRecentProjects] = useState<RecentProjectHandle[]>([]);
   const [recentProjectError, setRecentProjectError] = useState<string | null>(null);
   const [userTemplates, setUserTemplates] = useState<UserProjectTemplateSummary[]>([]);
@@ -217,6 +227,10 @@ export function EditorPage() {
   } | null>(null);
   const [layerCommandRequest, setLayerCommandRequest] = useState<{
     command: LayerCommand;
+    id: number;
+  } | null>(null);
+  const [layerAssetCommandRequest, setLayerAssetCommandRequest] = useState<{
+    command: LayerAssetCommand;
     id: number;
   } | null>(null);
   const [imageLayerCommandRequest, setImageLayerCommandRequest] = useState<{
@@ -297,6 +311,7 @@ export function EditorPage() {
     .map((layer) => layer.id);
   const canGroupSelectedLayers = groupableSelectedLayerIds.length > 1;
   const selectedImageLayer = isImageLayerSummary(selectedLayer) ? selectedLayer : null;
+  const selectedObject3DLayer = isObject3DLayerSummary(selectedLayer) ? selectedLayer : null;
   const activeDocument = tabs.find((tab) => tab.isActive) ?? tabs[0] ?? null;
   const activeHistoryState = activeDocument ? historyState : emptyHistoryState;
   const strokeLayers = layers.filter((layer) => layer.type === "stroke");
@@ -342,6 +357,31 @@ export function EditorPage() {
 
   function runLayerCommand(command: LayerCommand) {
     setLayerCommandRequest({ command, id: Date.now() });
+  }
+
+  function runLayerAssetCommand(command: LayerAssetCommand) {
+    setLayerAssetCommandRequest({ command, id: Date.now() });
+  }
+
+  function addBasicObject3DLayer(objectKind: Exclude<Object3DKind, "imported">) {
+    runLayerCommand({ objectKind, type: "add-object3d" });
+    setLayerAssetCommandPendingState(null);
+    setIsObject3DImportDialogOpen(false);
+  }
+
+  function useLoadedObject3DModel(model: Imported3DModel) {
+    if (selectedObject3DLayer && !selectedObject3DLayer.locked) {
+      runLayerAssetCommand({
+        layerId: selectedObject3DLayer.id,
+        model,
+        type: "replace-loaded-3d-model"
+      });
+    } else {
+      runLayerAssetCommand({ model, type: "create-loaded-3d-model-layer" });
+    }
+
+    setLayerAssetCommandPendingState(null);
+    setIsObject3DImportDialogOpen(false);
   }
 
   function runClipboardCommand(command: EditorClipboardCommand) {
@@ -833,7 +873,10 @@ export function EditorPage() {
         onExportTemplate={exportCurrentProjectAsTemplate}
         onSaveTemplate={saveCurrentProjectAsTemplate}
         onAddAdjustmentLayer={() => runLayerCommand({ type: "add-adjustment" })}
-        onAddObject3DLayer={() => runLayerCommand({ type: "add-object3d" })}
+        onAddObject3DLayer={() => {
+          setLayerAssetCommandPendingState(null);
+          setIsObject3DImportDialogOpen(true);
+        }}
         onSelectionCommand={(command) => setSelectionCommandRequest({ command, id: Date.now() })}
         onSelectionModeChange={setSelectedSelectionMode}
         onSelectTool={setSelectedTool}
@@ -922,6 +965,7 @@ export function EditorPage() {
               historyCommandRequest={historyCommandRequest}
               imageDocumentRequest={imageDocumentRequest}
               imageLayerCommandRequest={imageLayerCommandRequest}
+              layerAssetCommandRequest={layerAssetCommandRequest}
               layerCommandRequest={layerCommandRequest}
               maskBrushOptions={maskBrushOptions}
               magicSelectionTolerance={magicSelectionTolerance}
@@ -943,6 +987,11 @@ export function EditorPage() {
               onLayerCommandRequestHandled={(requestId) =>
                 setLayerCommandRequest((request) => (request?.id === requestId ? null : request))
               }
+              onLayerAssetCommandRequestHandled={(requestId) =>
+                setLayerAssetCommandRequest((request) =>
+                  request?.id === requestId ? null : request
+                )
+              }
               onDocumentCommandRequestHandled={(requestId) =>
                 setDocumentCommandRequest((request) =>
                   request?.id === requestId ? null : request
@@ -957,6 +1006,7 @@ export function EditorPage() {
                 )
               }
               onImageLayerCommandPendingChange={setImageLayerCommandPendingState}
+              onLayerAssetCommandPendingChange={setLayerAssetCommandPendingState}
               onProjectFileRequestHandled={(requestId) =>
                 setProjectFileRequest((request) => (request?.id === requestId ? null : request))
               }
@@ -1174,6 +1224,11 @@ export function EditorPage() {
             <PropertiesPanel
               isCollapsed={collapsedSidePanels.properties}
               onGroupSelectedLayers={groupSelectedLayers}
+              onChangeObject3DModel={() => {
+                setLayerAssetCommandPendingState(null);
+                setIsObject3DImportDialogOpen(true);
+              }}
+              onLayerAssetCommand={runLayerAssetCommand}
               onLayerCommand={runLayerCommand}
               onToggleCollapsed={() => toggleSidePanelCollapsed("properties")}
               selectedLayer={selectedLayer}
@@ -1214,6 +1269,20 @@ export function EditorPage() {
           onRenameUserTemplate={(template, name) => void renameUserTemplate(template, name)}
           canInsertUserTemplate={Boolean(activeDocument)}
           userTemplates={userTemplates}
+        />
+      ) : null}
+      {isObject3DImportDialogOpen ? (
+        <Object3DImportDialog
+          onClose={() => {
+            setIsObject3DImportDialogOpen(false);
+            setLayerAssetCommandPendingState(null);
+          }}
+          onUseModel={useLoadedObject3DModel}
+          replaceLayerName={
+            selectedObject3DLayer && !selectedObject3DLayer.locked
+              ? selectedObject3DLayer.name
+              : null
+          }
         />
       ) : null}
       {isResizeCanvasDialogOpen && activeDocument ? (
@@ -1332,6 +1401,10 @@ function isImageLayerSummary(
   originalImagePixelWidth: number;
 } {
   return Boolean(layer && layer.type === "image" && "imagePixelWidth" in layer);
+}
+
+function isObject3DLayerSummary(layer: LayerSummary | null) {
+  return Boolean(layer && layer.type === "object3d");
 }
 
 function hasSelectedAncestorLayer(

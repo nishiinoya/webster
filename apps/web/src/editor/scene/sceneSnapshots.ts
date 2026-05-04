@@ -1,7 +1,10 @@
 import { AdjustmentLayer } from "../layers/AdjustmentLayer";
 import { GroupLayer } from "../layers/GroupLayer";
 import { cloneImageLayerGeometry, ImageLayer } from "../layers/ImageLayer";
+import type { Imported3DModel } from "../import3d/Imported3DModel";
+import { cloneImported3DModel, serializeImported3DModel } from "../import3d/Imported3DModel";
 import { Layer } from "../layers/Layer";
+import type { ImportedLayerTexture } from "../layers/Layer";
 import { LayerMask } from "../masks/LayerMask";
 import type { SelectionManagerState } from "../selection/SelectionManager";
 import type { SelectionMask, SelectionPoint } from "../selection/SelectionManager";
@@ -145,16 +148,18 @@ function cloneLayerForSnapshot(layer: Layer) {
   if (layer instanceof ShapeLayer) {
     return new ShapeLayer({
       ...baseOptions,
+      customPath: layer.customPath.map((point) => ({ ...point })),
       fillColor: [...layer.fillColor],
       shape: layer.shape,
       strokeColor: [...layer.strokeColor],
       strokeWidth: layer.strokeWidth,
-      texture: { ...layer.texture, color: [...layer.texture.color] }
+      texture: { ...layer.texture, color: [...layer.texture.color] },
+      textureImage: cloneImportedLayerTexture(layer.textureImage)
     });
   }
 
   if (layer instanceof Object3DLayer) {
-    return new Object3DLayer({
+    const copy = new Object3DLayer({
       ...baseOptions,
       ambient: layer.ambient,
       lightIntensity: layer.lightIntensity,
@@ -163,13 +168,28 @@ function cloneLayerForSnapshot(layer: Layer) {
       lightZ: layer.lightZ,
       materialColor: [...layer.materialColor],
       materialTexture: { ...layer.materialTexture, color: [...layer.materialTexture.color] },
+      materialTextureImage: cloneImportedLayerTexture(layer.materialTextureImage),
+      importedModel: cloneImported3DModel(layer.importedModel),
+      modelMaterials: layer.modelMaterials.map((material) => ({
+        diffuseColor: material.diffuseColor ? [...material.diffuseColor] : null,
+        name: material.name,
+        textureImage: cloneImportedLayerTexture(material.textureImage),
+        texturePath: material.texturePath
+      })),
+      modelName: layer.modelName,
+      modelSource: layer.modelSource,
       objectKind: layer.objectKind,
+      objectZoom: layer.objectZoom,
       rotationX: layer.rotationX,
       rotationY: layer.rotationY,
       rotationZ: layer.rotationZ,
       shadowOpacity: layer.shadowOpacity,
       shadowSoftness: layer.shadowSoftness
     });
+
+    copy.modelRevision = layer.modelRevision;
+
+    return copy;
   }
 
   if (layer instanceof ImageLayer) {
@@ -275,6 +295,27 @@ function cloneMaskForSnapshot(mask: LayerMask | null) {
   return copy;
 }
 
+function cloneImportedLayerTexture(
+  texture: ImportedLayerTexture | null
+): ImportedLayerTexture | null {
+  return texture ? { ...texture } : null;
+}
+
+function areImported3DModelsEqual(
+  left: Imported3DModel | null,
+  right: Imported3DModel | null
+) {
+  if (left === right) {
+    return true;
+  }
+
+  if (!left || !right) {
+    return false;
+  }
+
+  return JSON.stringify(serializeImported3DModel(left)) === JSON.stringify(serializeImported3DModel(right));
+}
+
 function areLayersEqual(left: Layer, right: Layer) {
   if (
     left.type !== right.type ||
@@ -301,9 +342,11 @@ function areLayersEqual(left: Layer, right: Layer) {
     return (
       left.shape === right.shape &&
       left.strokeWidth === right.strokeWidth &&
+      areShapePathsEqual(left.customPath, right.customPath) &&
       areColorArraysEqual(left.fillColor, right.fillColor) &&
       areColorArraysEqual(left.strokeColor, right.strokeColor) &&
-      areLayerTexturesEqual(left.texture, right.texture)
+      areLayerTexturesEqual(left.texture, right.texture) &&
+      areImportedLayerTexturesEqual(left.textureImage, right.textureImage)
     );
   }
 
@@ -314,14 +357,20 @@ function areLayersEqual(left: Layer, right: Layer) {
       left.lightX === right.lightX &&
       left.lightY === right.lightY &&
       left.lightZ === right.lightZ &&
+      left.modelName === right.modelName &&
+      left.modelRevision === right.modelRevision &&
+      left.modelSource === right.modelSource &&
       left.objectKind === right.objectKind &&
+      left.objectZoom === right.objectZoom &&
       left.rotationX === right.rotationX &&
       left.rotationY === right.rotationY &&
       left.rotationZ === right.rotationZ &&
       left.shadowOpacity === right.shadowOpacity &&
       left.shadowSoftness === right.shadowSoftness &&
       areColorArraysEqual(left.materialColor, right.materialColor) &&
-      areLayerTexturesEqual(left.materialTexture, right.materialTexture)
+      areLayerTexturesEqual(left.materialTexture, right.materialTexture) &&
+      areImportedLayerTexturesEqual(left.materialTextureImage, right.materialTextureImage) &&
+      areImported3DModelsEqual(left.importedModel, right.importedModel)
     );
   }
 
@@ -480,6 +529,39 @@ function areLayerTexturesEqual(
     left.contrast === right.contrast &&
     areColorArraysEqual(left.color, right.color)
   );
+}
+
+function areImportedLayerTexturesEqual(
+  left: ImportedLayerTexture | null,
+  right: ImportedLayerTexture | null
+) {
+  if (left === right) {
+    return true;
+  }
+
+  if (!left || !right) {
+    return false;
+  }
+
+  return (
+    left.id === right.id &&
+    left.dataUrl === right.dataUrl &&
+    left.height === right.height &&
+    left.mimeType === right.mimeType &&
+    left.name === right.name &&
+    left.width === right.width
+  );
+}
+
+function areShapePathsEqual(
+  left: Array<{ x: number; y: number }>,
+  right: Array<{ x: number; y: number }>
+) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((point, index) => point.x === right[index].x && point.y === right[index].y);
 }
 
 function areColorArraysEqual(

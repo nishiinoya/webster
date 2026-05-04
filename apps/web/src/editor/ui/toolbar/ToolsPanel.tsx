@@ -131,6 +131,7 @@ function ToolGroup({
                   <option value="triangle">Triangle</option>
                   <option value="diamond">Diamond</option>
                   <option value="arrow">Arrow</option>
+                  <option value="custom">Custom</option>
                 </select>
               </label>
             ) : null}
@@ -147,7 +148,8 @@ function toShapeKind(value: string): ShapeKind {
     value === "line" ||
     value === "triangle" ||
     value === "diamond" ||
-    value === "arrow"
+    value === "arrow" ||
+    value === "custom"
   ) {
     return value;
   }

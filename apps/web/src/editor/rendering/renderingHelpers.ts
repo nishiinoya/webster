@@ -52,6 +52,10 @@ export function getPolygonShapePoints(layer: ShapeLayer) {
   const width = layer.width;
   const height = layer.height;
 
+  if (layer.shape === "custom") {
+    return layer.customPath.map((point) => ({ ...point }));
+  }
+
   if (layer.shape === "triangle") {
     return [
       { x: width / 2, y: height },

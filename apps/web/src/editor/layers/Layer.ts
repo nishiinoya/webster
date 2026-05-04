@@ -1,6 +1,9 @@
 /** Base layer model shared by all editable scene layer types. */
+import type { SerializedImported3DModel } from "../import3d/Imported3DModel";
+import { deserializeImported3DModel } from "../import3d/Imported3DModel";
 import { LayerMask } from "../masks/LayerMask";
 import type { SerializedLayerMask } from "../masks/LayerMask";
+import type { Object3DMaterialSlot } from "./Object3DLayer";
 
 import type { StrokePath, StrokePoint, StrokeStyle } from "./StrokeLayer";
 
@@ -43,11 +46,13 @@ export type SerializedImportedLayerTexture = Omit<ImportedLayerTexture, "image">
 
 export type Object3DKind = "cube" | "sphere" | "pyramid" | "imported";
 
-export type SerializedObject3DModel = {
+export type SerializedLegacyObject3DModel = {
   format: "obj";
   name: string;
   source: string;
 };
+
+export type SerializedObject3DModel = SerializedLegacyObject3DModel | SerializedImported3DModel;
 
 export type LayerFilterSettings = {
   brightness: number;
@@ -131,13 +136,29 @@ export type SerializedLayerBase = {
 };
 
 export type SerializedShapeLayer = SerializedLayerBase & {
+  customPath?: Array<{ x: number; y: number }> | null;
   fillColor: [number, number, number, number];
-  shape: "rectangle" | "circle" | "ellipse" | "line" | "triangle" | "diamond" | "arrow";
+  shape:
+    | "rectangle"
+    | "circle"
+    | "ellipse"
+    | "line"
+    | "triangle"
+    | "diamond"
+    | "arrow"
+    | "custom";
   strokeColor:[number, number, number, number];
   strokeWidth: number;
   texture?: Partial<LayerTextureSettings> | null;
   textureImage?: SerializedImportedLayerTexture | null;
   type: "shape";
+};
+
+export type SerializedObject3DMaterialSlot = {
+  diffuseColor: [number, number, number] | null;
+  name: string;
+  textureImage: SerializedImportedLayerTexture | null;
+  texturePath: string | null;
 };
 
 export type SerializedObject3DLayer = SerializedLayerBase & {
@@ -149,8 +170,10 @@ export type SerializedObject3DLayer = SerializedLayerBase & {
   materialColor: [number, number, number, number];
   materialTexture?: Partial<LayerTextureSettings> | null;
   materialTextureImage?: SerializedImportedLayerTexture | null;
+  modelMaterials?: SerializedObject3DMaterialSlot[];
   model?: SerializedObject3DModel | null;
   objectKind: Object3DKind;
+  objectZoom?: number;
   rotationX: number;
   rotationY: number;
   rotationZ: number;
@@ -283,6 +306,7 @@ export abstract class Layer {
         shape: data.shape === "ellipse" ? "circle" : data.shape ?? "rectangle",
         strokeColor: data.strokeColor ?? [0.07, 0.08, 0.09, 1],
         strokeWidth: data.strokeWidth ?? 0,
+        customPath: data.customPath,
         texture: data.texture,
         textureImage: data.textureImage
           ? await loadImportedLayerTexture(data.textureImage)
@@ -305,9 +329,25 @@ export abstract class Layer {
         materialTextureImage: data.materialTextureImage
           ? await loadImportedLayerTexture(data.materialTextureImage)
           : null,
+        importedModel: "version" in (data.model ?? {})
+          ? await deserializeImported3DModel(data.model as SerializedImported3DModel)
+          : null,
         modelName: data.model?.name,
-        modelSource: data.model?.source,
+        modelSource: data.model && "source" in data.model ? data.model.source : null,
+        modelMaterials: data.modelMaterials
+          ? await Promise.all(
+              data.modelMaterials.map(async (material) => ({
+                diffuseColor: material.diffuseColor,
+                name: material.name,
+                textureImage: material.textureImage
+                  ? await loadImportedLayerTexture(material.textureImage)
+                  : null,
+                texturePath: material.texturePath
+              }))
+            )
+          : [],
         objectKind: data.objectKind,
+        objectZoom: data.objectZoom,
         rotationX: data.rotationX,
         rotationY: data.rotationY,
         rotationZ: data.rotationZ,

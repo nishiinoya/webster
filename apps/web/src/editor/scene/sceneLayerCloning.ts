@@ -51,16 +51,18 @@ export function cloneLayer(
   if (layer instanceof ShapeLayer) {
     return new ShapeLayer({
       ...options,
+      customPath: layer.customPath.map((point) => ({ ...point })),
       fillColor: [...layer.fillColor],
       shape: layer.shape,
       strokeColor: [...layer.strokeColor],
       strokeWidth: layer.strokeWidth,
-      texture: { ...layer.texture, color: [...layer.texture.color] }
+      texture: { ...layer.texture, color: [...layer.texture.color] },
+      textureImage: layer.textureImage ? { ...layer.textureImage } : null
     });
   }
 
   if (layer instanceof Object3DLayer) {
-    return new Object3DLayer({
+    const copy = new Object3DLayer({
       ...options,
       ambient: layer.ambient,
       lightIntensity: layer.lightIntensity,
@@ -69,13 +71,28 @@ export function cloneLayer(
       lightZ: layer.lightZ,
       materialColor: [...layer.materialColor],
       materialTexture: { ...layer.materialTexture, color: [...layer.materialTexture.color] },
+      materialTextureImage: layer.materialTextureImage ? { ...layer.materialTextureImage } : null,
+      importedModel: layer.importedModel,
+      modelMaterials: layer.modelMaterials.map((material) => ({
+        diffuseColor: material.diffuseColor ? [...material.diffuseColor] : null,
+        name: material.name,
+        textureImage: material.textureImage ? { ...material.textureImage } : null,
+        texturePath: material.texturePath
+      })),
+      modelName: layer.modelName,
+      modelSource: layer.modelSource,
       objectKind: layer.objectKind,
+      objectZoom: layer.objectZoom,
       rotationX: layer.rotationX,
       rotationY: layer.rotationY,
       rotationZ: layer.rotationZ,
       shadowOpacity: layer.shadowOpacity,
       shadowSoftness: layer.shadowSoftness
     });
+
+    copy.modelRevision = layer.modelRevision;
+
+    return copy;
   }
 
   if (layer instanceof ImageLayer) {

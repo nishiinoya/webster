@@ -9,12 +9,36 @@ uniform float u_filterInvert;
 uniform float u_filterSaturation;
 uniform float u_filterSepia;
 uniform float u_filterShadow;
+uniform sampler2D u_importedTexture;
+uniform float u_importedTextureBlend;
+uniform bool u_importedTextureEnabled;
+uniform sampler2D u_baseColorTexture;
+uniform bool u_baseColorTextureEnabled;
+uniform vec3 u_emissiveColor;
+uniform sampler2D u_emissiveTexture;
+uniform bool u_emissiveTextureEnabled;
+uniform bool u_glossinessTextureEnabled;
 uniform float u_lightIntensity;
 uniform vec3 u_lightPosition;
+uniform int u_materialAlphaMode;
+uniform float u_materialMetallic;
+uniform float u_materialRoughness;
+uniform float u_materialShininess;
+uniform vec3 u_materialSpecularColor;
+uniform sampler2D u_metallicTexture;
+uniform int u_metallicTextureChannel;
+uniform bool u_metallicTextureEnabled;
 uniform sampler2D u_mask;
 uniform bool u_maskEnabled;
 uniform vec4 u_materialColor;
+uniform sampler2D u_normalTexture;
+uniform bool u_normalTextureEnabled;
 uniform float u_opacity;
+uniform sampler2D u_roughnessTexture;
+uniform int u_roughnessTextureChannel;
+uniform bool u_roughnessTextureEnabled;
+uniform sampler2D u_specularTexture;
+uniform bool u_specularTextureEnabled;
 uniform float u_textureBlend;
 uniform vec4 u_textureColor;
 uniform float u_textureContrast;
@@ -28,8 +52,10 @@ uniform mat3 u_adjustmentInverseMatrix[4];
 uniform vec2 u_adjustmentSize[4];
 
 varying vec2 v_layerTexCoord;
+varying vec4 v_color;
 varying vec3 v_normal;
 varying vec3 v_position3D;
+varying vec3 v_tangent;
 varying vec2 v_texCoord;
 varying vec2 v_worldCoord;
 
@@ -131,16 +157,66 @@ float texturePattern(vec2 texCoord) {
   return fract(sin(dot(grainCell, vec2(12.9898, 78.233))) * 43758.5453);
 }
 
-vec3 applyTexture(vec3 color) {
-  if (u_textureKind <= 0 || u_textureBlend <= 0.001) {
-    return color;
+float sampleTextureChannel(sampler2D textureSampler, vec2 texCoord, int channel) {
+  vec4 value = texture2D(textureSampler, texCoord);
+
+  if (channel == 1) {
+    return value.g;
+  }
+
+  if (channel == 2) {
+    return value.b;
+  }
+
+  if (channel == 3) {
+    return value.a;
+  }
+
+  return value.r;
+}
+
+vec4 applyTexture(vec4 color) {
+  vec4 material = color;
+
+  if (u_baseColorTextureEnabled) {
+    material *= texture2D(u_baseColorTexture, v_texCoord);
+  }
+
+  if (u_importedTextureEnabled) {
+    vec4 importedColor = texture2D(u_importedTexture, v_texCoord);
+    vec4 texturedColor = vec4(material.rgb * importedColor.rgb, material.a * importedColor.a);
+
+    material = mix(material, texturedColor, u_importedTextureBlend);
+  }
+
+  if (u_textureKind <= 0 || u_textureBlend <= 0.001 || u_textureKind == 5) {
+    return material;
   }
 
   float pattern = texturePattern(v_texCoord);
   float contrastedPattern = clamp(0.5 + (pattern - 0.5) * (1.0 + u_textureContrast * 2.0), 0.0, 1.0);
-  vec3 texturedColor = mix(color, u_textureColor.rgb, contrastedPattern * u_textureColor.a);
+  vec3 texturedColor = mix(material.rgb, u_textureColor.rgb, contrastedPattern * u_textureColor.a);
 
-  return mix(color, texturedColor, u_textureBlend);
+  material.rgb = mix(material.rgb, texturedColor, u_textureBlend);
+
+  return material;
+}
+
+vec3 getSurfaceNormal(vec3 normal) {
+  if (!u_normalTextureEnabled) {
+    return normal;
+  }
+
+  vec3 tangent = normalize(v_tangent - normal * dot(normal, v_tangent));
+
+  if (length(tangent) < 0.001) {
+    return normal;
+  }
+
+  vec3 bitangent = normalize(cross(normal, tangent));
+  vec3 mappedNormal = texture2D(u_normalTexture, v_texCoord).xyz * 2.0 - 1.0;
+
+  return normalize(mat3(tangent, bitangent, normal) * mappedNormal);
 }
 
 float sampleMaskValue(vec2 texCoord) {
@@ -172,16 +248,51 @@ void main() {
     discard;
   }
 
-  vec3 normal = normalize(v_normal);
+  vec3 normal = getSurfaceNormal(normalize(v_normal));
   vec3 lightDirection = normalize(u_lightPosition - v_position3D);
   vec3 viewDirection = normalize(vec3(0.0, 0.0, 5.0) - v_position3D);
   vec3 halfDirection = normalize(lightDirection + viewDirection);
   float diffuse = max(dot(normal, lightDirection), 0.0);
-  float specular = pow(max(dot(normal, halfDirection), 0.0), 32.0) * 0.28 * u_lightIntensity;
-  float rim = pow(1.0 - max(dot(normal, viewDirection), 0.0), 2.4) * 0.2;
-  vec3 material = applyTexture(u_materialColor.rgb);
-  vec3 lit = material * clamp(u_ambient + diffuse * u_lightIntensity, 0.0, 1.8);
+  float roughness = clamp(u_materialRoughness, 0.02, 1.0);
+  float metallic = clamp(u_materialMetallic, 0.0, 1.0);
 
-  lit += vec3(specular + rim);
-  gl_FragColor = vec4(applyFilters(lit), u_materialColor.a * u_opacity * maskValue);
+  if (u_roughnessTextureEnabled) {
+    roughness *= sampleTextureChannel(u_roughnessTexture, v_texCoord, u_roughnessTextureChannel);
+    roughness = clamp(roughness, 0.02, 1.0);
+  }
+
+  if (u_glossinessTextureEnabled) {
+    roughness = clamp(1.0 - texture2D(u_roughnessTexture, v_texCoord).r, 0.02, 1.0);
+  }
+
+  if (u_metallicTextureEnabled) {
+    metallic *= sampleTextureChannel(u_metallicTexture, v_texCoord, u_metallicTextureChannel);
+    metallic = clamp(metallic, 0.0, 1.0);
+  }
+
+  vec3 specularColor = u_materialSpecularColor;
+
+  if (u_specularTextureEnabled) {
+    specularColor *= texture2D(u_specularTexture, v_texCoord).rgb;
+  }
+
+  float specularPower = max(2.0, u_materialShininess > 0.0 ? u_materialShininess : mix(96.0, 8.0, roughness));
+  float specularStrength = mix(max(max(specularColor.r, specularColor.g), specularColor.b), 0.72, metallic);
+  float specular = pow(max(dot(normal, halfDirection), 0.0), specularPower) * specularStrength * u_lightIntensity;
+  float rim = pow(1.0 - max(dot(normal, viewDirection), 0.0), 2.4) * 0.2;
+  vec4 material = applyTexture(u_materialColor * v_color);
+
+  if (u_materialAlphaMode == 1 && material.a < 0.5) {
+    discard;
+  }
+
+  vec3 lit = material.rgb * clamp(u_ambient + diffuse * u_lightIntensity, 0.0, 1.8);
+  vec3 emission = u_emissiveColor;
+
+  if (u_emissiveTextureEnabled) {
+    emission += texture2D(u_emissiveTexture, v_texCoord).rgb;
+  }
+
+  lit += specularColor * specular + vec3(rim) + emission;
+  gl_FragColor = vec4(applyFilters(lit), material.a * u_opacity * maskValue);
 }

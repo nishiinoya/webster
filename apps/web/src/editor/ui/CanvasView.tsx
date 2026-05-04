@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import type {
+  DragEvent as ReactDragEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent
+} from "react";
 import type {
   DocumentCommand,
   EditorClipboardCommand,
@@ -9,6 +13,7 @@ import type {
   ImageExportBackground,
   ImageExportFormat,
   ImageLayerCommand,
+  LayerAssetCommand,
   LayerCommand,
   LayerSummary,
   SelectionCommand
@@ -19,7 +24,10 @@ import { useCanvasWheelZoom } from "./canvas/useCanvasWheelZoom";
 import { useEditorDocumentTabs } from "./hooks/useEditorDocumentTabs";
 import { useEditorApp } from "./canvas/useEditorApp";
 import { useEditorSceneRequests } from "./hooks/useEditorSceneRequests";
-import type { ImageLayerCommandPendingState } from "./hooks/useEditorSceneRequests";
+import type {
+  ImageLayerCommandPendingState,
+  LayerAssetCommandPendingState
+} from "./hooks/useEditorSceneRequests";
 import { useProjectFileActions } from "./hooks/useProjectFileActions";
 import type { SaveStatus } from "./hooks/useProjectFileActions";
 import { saveUserProjectTemplate } from "../projects/projectTemplates";
@@ -49,6 +57,7 @@ type CanvasViewProps = {
     tabId: string;
   } | null;
   imageLayerCommandRequest: { command: ImageLayerCommand; id: number } | null;
+  layerAssetCommandRequest: { command: LayerAssetCommand; id: number } | null;
   layerCommandRequest: { command: LayerCommand; id: number } | null;
   maskBrushOptions: MaskBrushOptions;
   magicSelectionTolerance: number;
@@ -61,6 +70,8 @@ type CanvasViewProps = {
   onImageDocumentRequestHandled: (requestId: number) => void;
   onImageLayerCommandRequestHandled: (requestId: number) => void;
   onImageLayerCommandPendingChange: (state: ImageLayerCommandPendingState | null) => void;
+  onLayerAssetCommandPendingChange: (state: LayerAssetCommandPendingState | null) => void;
+  onLayerAssetCommandRequestHandled: (requestId: number) => void;
   onLayerCommandRequestHandled: (requestId: number) => void;
   onImageExportRequestHandled: (requestId: number) => void;
   onProjectFileRequestHandled: (requestId: number) => void;
@@ -108,6 +119,7 @@ export function CanvasView({
   imageExportRequest,
   imageDocumentRequest,
   imageLayerCommandRequest,
+  layerAssetCommandRequest,
   layerCommandRequest,
   maskBrushOptions,
   magicSelectionTolerance,
@@ -120,6 +132,8 @@ export function CanvasView({
   onImageDocumentRequestHandled,
   onImageLayerCommandRequestHandled,
   onImageLayerCommandPendingChange,
+  onLayerAssetCommandPendingChange,
+  onLayerAssetCommandRequestHandled,
   onLayerCommandRequestHandled,
   onImageExportRequestHandled,
   onProjectFileRequestHandled,
@@ -196,11 +210,14 @@ export function CanvasView({
     editorAppRef,
     imageDocumentRequest,
     imageLayerCommandRequest,
+    layerAssetCommandRequest,
     layerCommandRequest,
     onLayersChange,
     onImageDocumentRequestHandled,
     onImageLayerCommandRequestHandled,
     onImageLayerCommandPendingChange,
+    onLayerAssetCommandPendingChange,
+    onLayerAssetCommandRequestHandled,
     onLayerCommandRequestHandled,
     onSceneChange: rememberActiveScene,
     onSelectLayerRequestHandled,
@@ -490,6 +507,45 @@ export function CanvasView({
     return true;
   }
 
+  function handleCanvasDragOver(event: ReactDragEvent<HTMLCanvasElement>) {
+    if (!hasDroppableAsset(event.dataTransfer)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  }
+
+  function handleCanvasDrop(event: ReactDragEvent<HTMLCanvasElement>) {
+    if (!editorAppRef.current || !hasDroppableAsset(event.dataTransfer)) {
+      return;
+    }
+
+    event.preventDefault();
+    const dropPoint = { clientX: event.clientX, clientY: event.clientY };
+    const files = Array.from(event.dataTransfer.files).filter(isDroppableAssetFile);
+
+    if (files.length === 0) {
+      return;
+    }
+
+    async function importFiles() {
+      try {
+        await editorAppRef.current?.importDroppedFiles(files, dropPoint.clientX, dropPoint.clientY);
+
+        if (editorAppRef.current) {
+          onLayersChange(editorAppRef.current.getLayerSummaries());
+          rememberActiveScene();
+          setWebglError(null);
+        }
+      } catch (error) {
+        setWebglError(error instanceof Error ? error.message : "Unable to import dropped file.");
+      }
+    }
+
+    void importFiles();
+  }
+
   async function handleTextKeyDown(event: ReactKeyboardEvent<HTMLCanvasElement>) {
     if (selectedTool !== "Text" || !editorAppRef.current) {
       return;
@@ -658,6 +714,8 @@ export function CanvasView({
                 selectedTool === "Pan" && "cursor-grab"
               )}
               onKeyDown={handleTextKeyDown}
+              onDragOver={handleCanvasDragOver}
+              onDrop={handleCanvasDrop}
               tabIndex={0}
               style={{ cursor: getCanvasCursorStyle(canvasCursor) }}
               {...pointerHandlers}
@@ -721,4 +779,12 @@ function getProjectExportFilename(title: string) {
   const safeTitle = (title.trim() || "template").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-");
 
   return safeTitle.toLowerCase().endsWith(".webster") ? safeTitle : `${safeTitle}.webster`;
+}
+
+function hasDroppableAsset(dataTransfer: DataTransfer) {
+  return Array.from(dataTransfer.items).some((item) => item.kind === "file");
+}
+
+function isDroppableAssetFile(file: File) {
+  return file.type.startsWith("image/") || /\.(obj|mtl|zip)$/iu.test(file.name);
 }

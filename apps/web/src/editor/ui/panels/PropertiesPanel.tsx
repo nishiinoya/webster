@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import type { LayerCommand, LayerSummary } from "../../app/EditorApp";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { LayerAssetCommand, LayerCommand, LayerSummary } from "../../app/EditorApp";
 import type {
   LayerFilterSettings,
   LayerTextureKind,
@@ -14,7 +14,9 @@ import { cn } from "../classNames";
 
 type PropertiesPanelProps = {
   isCollapsed: boolean;
+  onChangeObject3DModel: () => void;
   onGroupSelectedLayers: () => void;
+  onLayerAssetCommand: (command: LayerAssetCommand) => void;
   onLayerCommand: (command: LayerCommand) => void;
   onToggleCollapsed: () => void;
   selectedLayer: LayerSummary | null;
@@ -36,11 +38,13 @@ type TextLayerSummary = LayerSummary & {
 };
 
 type ShapeLayerSummary = LayerSummary & {
+  customPath: Array<{ x: number; y: number }>;
   fillColor: [number, number, number, number];
-  shape: "rectangle" | "circle" | "line" | "triangle" | "diamond" | "arrow";
+  shape: "rectangle" | "circle" | "line" | "triangle" | "diamond" | "arrow" | "custom";
   strokeColor: [number, number, number, number];
   strokeWidth: number;
   texture: LayerTextureSettings;
+  textureImage: ImportedTextureSummary | null;
 };
 
 type Object3DLayerSummary = LayerSummary & {
@@ -51,12 +55,38 @@ type Object3DLayerSummary = LayerSummary & {
   lightZ: number;
   materialColor: [number, number, number, number];
   materialTexture: LayerTextureSettings;
+  materialTextureImage: ImportedTextureSummary | null;
+  modelFormat: string | null;
+  modelName: string | null;
+  modelStats: {
+    assignedTextureCount: number;
+    materialCount: number;
+    partCount: number;
+    textureCount: number;
+    triangleCount: number;
+    vertexCount: number;
+  } | null;
+  modelSummary: {
+    assignedTextureMaps: string[];
+    guessedTextureMaps: string[];
+    loadedTextureNames: string[];
+    materialNames: string[];
+    unassignedTextureNames: string[];
+  } | null;
+  modelWarnings: string[];
   objectKind: Object3DKind;
+  objectZoom: number;
   rotationX: number;
   rotationY: number;
   rotationZ: number;
   shadowOpacity: number;
   shadowSoftness: number;
+};
+
+type ImportedTextureSummary = {
+  height: number;
+  name: string;
+  width: number;
 };
 
 type ImageLayerSummary = LayerSummary & {
@@ -67,13 +97,18 @@ type ImageGeometryCornerId = keyof ImageLayerGeometry["corners"];
 
 export function PropertiesPanel({
   isCollapsed,
+  onChangeObject3DModel,
   onGroupSelectedLayers,
+  onLayerAssetCommand,
   onLayerCommand,
   onToggleCollapsed,
   selectedLayer,
   selectedLayers,
   selectedTool
 }: PropertiesPanelProps) {
+  const objectMaterialTextureInputRef = useRef<HTMLInputElement | null>(null);
+  const objectModelInputRef = useRef<HTMLInputElement | null>(null);
+  const shapeTextureInputRef = useRef<HTMLInputElement | null>(null);
   const [compiledFontFamilies, setCompiledFontFamilies] = useState<string[]>([]);
   const fontFamilies = useMemo(
     () => getFontFamilyOptions(compiledFontFamilies, selectedLayer),
@@ -457,44 +492,133 @@ export function PropertiesPanel({
               onChange={(texture) => updateSelectedLayer({ texture })}
               texture={selectedLayer.texture}
             />
+            <div className={propertyRowClass}>
+              <span className={propertyLabelClass}>Image texture</span>
+              <span className="flex min-w-0 justify-end gap-2">
+                <button
+                  className={propertyToggleClass}
+                  disabled={selectedLayer.locked}
+                  onClick={() => shapeTextureInputRef.current?.click()}
+                  type="button"
+                >
+                  Import...
+                </button>
+                <button
+                  className={propertyToggleClass}
+                  disabled={selectedLayer.locked || !selectedLayer.textureImage}
+                  onClick={() =>
+                    onLayerAssetCommand({
+                      layerId: selectedLayer.id,
+                      type: "clear-shape-texture"
+                    })
+                  }
+                  type="button"
+                >
+                  Remove
+                </button>
+              </span>
+            </div>
+            {selectedLayer.textureImage ? (
+              <div className={propertyRowClass}>
+                <span className={propertyLabelClass}>Imported</span>
+                <strong className={propertyValueClass}>
+                  {formatImportedAsset(selectedLayer.textureImage)}
+                </strong>
+              </div>
+            ) : null}
+            <input
+              ref={shapeTextureInputRef}
+              accept="image/*"
+              className="absolute h-px w-px overflow-hidden whitespace-nowrap [clip:rect(0_0_0_0)]"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+
+                if (file) {
+                  onLayerAssetCommand({
+                    file,
+                    layerId: selectedLayer.id,
+                    type: "import-shape-texture"
+                  });
+                  event.target.value = "";
+                }
+              }}
+              type="file"
+            />
           </div>
         ) : null}
         {isObject3DLayerSummary(selectedLayer) ? (
           <div className={propertySectionClass}>
             <h3 className={propertySectionTitleClass}>3D object</h3>
-            <label className={propertyRowClass}>
-              <span className={propertyLabelClass}>Object</span>
-              <select
-                className={propertyInputClass}
-                disabled={selectedLayer.locked}
-                onChange={(event) =>
-                  updateSelectedLayer({ objectKind: toObject3DKind(event.target.value) })
-                }
-                value={selectedLayer.objectKind}
-              >
-                <option value="cube">Cube</option>
-                <option value="sphere">Sphere</option>
-                <option value="pyramid">Pyramid</option>
-              </select>
-            </label>
-            <label className={propertyRowClass}>
-              <span className={propertyLabelClass}>Material</span>
-              <input
-                className={propertyInputClass}
-                disabled={selectedLayer.locked}
-                onChange={(event) =>
-                  updateSelectedLayer({
-                    materialColor: hexToColor(event.target.value, selectedLayer.materialColor[3])
-                  })
-                }
-                type="color"
-                value={colorToHex(selectedLayer.materialColor)}
-              />
-            </label>
-            <TextureControls
+            <div className={propertyRowClass}>
+              <span className={propertyLabelClass}>Model</span>
+              <span className="flex min-w-0 justify-end gap-2">
+                <button
+                  className={propertyToggleClass}
+                  disabled={selectedLayer.locked}
+                  onClick={onChangeObject3DModel}
+                  type="button"
+                >
+                  Change model...
+                </button>
+              </span>
+            </div>
+            <ReadOnlyRow label="Imported" value={selectedLayer.modelName ?? "Legacy fallback"} />
+            <ReadOnlyRow
+              label="Format"
+              value={selectedLayer.modelFormat?.toUpperCase() ?? selectedLayer.objectKind}
+            />
+            {selectedLayer.modelStats ? (
+              <>
+                <ReadOnlyRow
+                  label="Mesh"
+                  value={`${selectedLayer.modelStats.partCount} parts, ${selectedLayer.modelStats.vertexCount} vertices`}
+                />
+                <ReadOnlyRow
+                  label="Materials"
+                  value={`${selectedLayer.modelStats.materialCount} materials, ${selectedLayer.modelStats.textureCount} textures`}
+                />
+              </>
+            ) : null}
+            {selectedLayer.modelSummary ? (
+              <div className="grid gap-2 rounded-md border border-[#30353d] bg-[#111317] p-2">
+                <ReadOnlyChipList
+                  emptyLabel="No imported material names"
+                  names={selectedLayer.modelSummary.materialNames}
+                  title="Materials"
+                />
+                <ReadOnlyChipList
+                  emptyLabel="No imported texture files"
+                  names={selectedLayer.modelSummary.loadedTextureNames}
+                  title="Textures"
+                />
+                <ReadOnlyChipList
+                  emptyLabel="No assigned texture maps"
+                  names={selectedLayer.modelSummary.assignedTextureMaps}
+                  title="Assigned maps"
+                />
+                {selectedLayer.modelSummary.unassignedTextureNames.length > 0 ? (
+                  <ReadOnlyChipList
+                    emptyLabel=""
+                    names={selectedLayer.modelSummary.unassignedTextureNames}
+                    title="Unassigned"
+                  />
+                ) : null}
+                {selectedLayer.modelWarnings.length > 0 ? (
+                  <ReadOnlyChipList
+                    emptyLabel=""
+                    names={selectedLayer.modelWarnings}
+                    title="Warnings"
+                  />
+                ) : null}
+              </div>
+            ) : null}
+            <FilterSlider
               disabled={selectedLayer.locked}
-              onChange={(materialTexture) => updateSelectedLayer({ materialTexture })}
-              texture={selectedLayer.materialTexture}
+              label="Object zoom"
+              max={400}
+              min={20}
+              onChange={(value) => updateSelectedLayer({ objectZoom: Number(value) / 100 })}
+              value={Math.round(selectedLayer.objectZoom * 100)}
             />
             <FilterSlider
               disabled={selectedLayer.locked}
@@ -899,6 +1023,53 @@ function FilterSlider({
   );
 }
 
+function ReadOnlyRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className={propertyRowClass}>
+      <span className={propertyLabelClass}>{label}</span>
+      <strong className={propertyValueClass}>{value}</strong>
+    </div>
+  );
+}
+
+function ReadOnlyChipList({
+  emptyLabel,
+  names,
+  title
+}: {
+  emptyLabel: string;
+  names: string[];
+  title: string;
+}) {
+  return (
+    <div className="grid gap-1">
+      <strong className="text-[11px] font-extrabold uppercase text-[#8b929b]">
+        {title}
+      </strong>
+      {names.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {names.slice(0, 14).map((name, index) => (
+            <span
+              className="max-w-[260px] truncate rounded-md border border-[#30353d] bg-[#171a1f] px-2 py-1 text-[11px] font-bold text-[#c9cdd2]"
+              key={`${title}-${name}-${index}`}
+              title={name}
+            >
+              {name}
+            </span>
+          ))}
+          {names.length > 14 ? (
+            <span className="rounded-md border border-[#30353d] bg-[#171a1f] px-2 py-1 text-[11px] font-bold text-[#8b929b]">
+              +{names.length - 14}
+            </span>
+          ) : null}
+        </div>
+      ) : (
+        <span className="text-[12px] font-bold text-[#6f7680]">{emptyLabel}</span>
+      )}
+    </div>
+  );
+}
+
 function TextureControls({
   disabled,
   onChange,
@@ -930,6 +1101,7 @@ function TextureControls({
           <option value="stripes">Stripes</option>
           <option value="dots">Dots</option>
           <option value="grain">Grain</option>
+          <option value="image">Image</option>
         </select>
       </label>
       {texture.kind !== "none" ? (
@@ -1038,7 +1210,7 @@ function isLegacyBrowserFont(fontFamily: string) {
 }
 
 function toObject3DKind(value: string): Object3DKind {
-  if (value === "sphere" || value === "pyramid") {
+  if (value === "sphere" || value === "pyramid" || value === "imported") {
     return value;
   }
 
@@ -1050,7 +1222,8 @@ function toLayerTextureKind(value: string): LayerTextureKind {
     value === "checkerboard" ||
     value === "stripes" ||
     value === "dots" ||
-    value === "grain"
+    value === "grain" ||
+    value === "image"
   ) {
     return value;
   }
@@ -1060,6 +1233,10 @@ function toLayerTextureKind(value: string): LayerTextureKind {
 
 function roundTenth(value: number) {
   return Math.round(value * 10) / 10;
+}
+
+function formatImportedAsset(asset: ImportedTextureSummary) {
+  return `${asset.name} (${asset.width} x ${asset.height})`;
 }
 
 function colorToHex(color: [number, number, number, number]) {

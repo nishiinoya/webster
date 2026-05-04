@@ -6,6 +6,9 @@ import type { ToolPointerEvent } from "../tools/move/MoveTool";
 import { Camera2D } from "../geometry/Camera2D";
 import { getLayerCorners, getModelMatrix } from "../geometry/TransformGeometry";
 import { invert3x3, transformPoint3x3 } from "../geometry/Matrix3";
+import type { Imported3DModel } from "../import3d/Imported3DModel";
+import { summarizeImported3DModel } from "../import3d/Imported3DModel";
+import { import3DModelPackage } from "../import3d/import3DModel";
 import { Scene } from "../scene/Scene";
 import type { SceneSnapshot } from "../scene/sceneSnapshots";
 import {
@@ -18,9 +21,12 @@ import type { DocumentResizeAnchor, LayerMaskAction, LayerStackPlacement } from 
 import type { LayerClipboardSnapshot } from "../scene/Scene";
 import { exportScenePackage, importScenePackage } from "../projects/ProjectPackage";
 import { ImageLayer } from "../layers/ImageLayer";
+import { Object3DLayer } from "../layers/Object3DLayer";
+import { ShapeLayer } from "../layers/ShapeLayer";
 import { TextLayer } from "../layers/TextLayer";
 import type { ShapeKind } from "../layers/ShapeLayer";
-import type { Layer } from "../layers/Layer";
+import { normalizeLayerTexture } from "../layers/Layer";
+import type { ImportedLayerTexture, Layer, Object3DKind } from "../layers/Layer";
 import type { SelectionMode } from "../selection/SelectionManager";
 import { getSelectionAlpha } from "../selection/SelectionManager";
 import type { Selection, SelectionBounds } from "../selection/SelectionManager";
@@ -43,7 +49,7 @@ import {
   resampleImageLayerInScene,
   restoreOriginalImageLayerInScene
 } from "./image/imageLayerOperations";
-import { loadImageElementFromBlob } from "./image/imageFileUtils";
+import { loadImageElement, loadImageElementFromBlob } from "./image/imageFileUtils";
 import {
   applyDocumentCommandToScene,
   applyImageLayerCommandToScene,
@@ -94,6 +100,8 @@ export type DocumentCommand = {
   width: number;
 };
 
+
+
 export type ImageLayerCommand =
   | {
       height: number;
@@ -108,7 +116,7 @@ export type ImageLayerCommand =
 
 export type LayerCommand =
   | { type: "add-adjustment" }
-  | { type: "add-object3d" }
+  | { objectKind?: Object3DKind; type: "add-object3d" }
   | { type: "delete"; layerId: string }
   | { type: "duplicate"; layerId: string }
   | { type: "group"; layerIds: string[]; name?: string }
@@ -124,6 +132,16 @@ export type LayerCommand =
   | { type: "remove-from-group"; layerIds: string[] }
   | { type: "select"; layerId: string }
   | { type: "update"; layerId: string; updates: LayerUpdate };
+
+export type LayerAssetCommand =
+  | { type: "clear-3d-material-texture"; layerId: string }
+  | { type: "clear-shape-texture"; layerId: string }
+  | { type: "create-3d-model-layer"; files: File[] }
+  | { type: "create-loaded-3d-model-layer"; model: Imported3DModel }
+  | { type: "import-3d-material-texture"; file: File; layerId: string }
+  | { type: "import-3d-model"; files: File[]; layerId: string }
+  | { type: "replace-loaded-3d-model"; layerId: string; model: Imported3DModel }
+  | { type: "import-shape-texture"; file: File; layerId: string };
 
 export type SelectionCommand =
   | "clear"
@@ -916,6 +934,115 @@ export class EditorApp {
   }
 
   /**
+   * Imports texture/model assets into shape and 3D layers.
+   */
+  async applyLayerAssetCommand(command: LayerAssetCommand) {
+    const before = this.captureAppSnapshot();
+    const result = await this.applyLayerAssetCommandToScene(command);
+
+    this.recordHistoryAction(
+      this.createHistoryAction({
+        kind: "command",
+        label: getLayerAssetCommandLabel(this.scene, command),
+        payload: getLayerAssetCommandPayload(command),
+        scope: "layer"
+      }),
+      before,
+      "scene"
+    );
+
+    return result;
+  }
+
+  async importDroppedFiles(files: File[], clientX: number, clientY: number) {
+    const worldPoint = this.getClientWorldPoint(clientX, clientY);
+    const hitLayer = this.scene.hitTestLayer(worldPoint.x, worldPoint.y);
+    const assetFiles = files.filter(isSupportedDroppedAssetFile);
+
+    if (assetFiles.length === 0) {
+      throw new Error("Drop an image file, model file, material file, or .zip model package.");
+    }
+
+    if (assetFiles.some(isModelAssetFile)) {
+      const before = this.captureAppSnapshot();
+      const targetLayer =
+        hitLayer instanceof Object3DLayer && !hitLayer.locked
+          ? hitLayer
+          : new Object3DLayer({
+              height: 260,
+              id: crypto.randomUUID(),
+              name: "3D object",
+              width: 260,
+              x: worldPoint.x - 130,
+              y: worldPoint.y - 130
+            });
+
+      if (targetLayer !== hitLayer) {
+        this.scene.addLayer(targetLayer);
+      }
+
+      const result = await importModelAssetsIntoLayer(targetLayer, assetFiles);
+      this.recordHistoryAction(
+        this.createHistoryAction({
+          kind: "scene",
+          label: `Import ${targetLayer.modelName ?? "3D model"}`,
+          operation: "drop-3d-model",
+          payload: {
+            filenames: assetFiles.map((file) => file.name),
+            layerId: targetLayer.id
+          }
+        }),
+        before,
+        "scene"
+      );
+
+      return result.layer;
+    }
+
+    const imageFiles = assetFiles.filter(isImageFile);
+
+    if (imageFiles.length === 0) {
+      throw new Error("Drop an image file, model file, material file, or .zip model package.");
+    }
+
+    if (hitLayer instanceof ShapeLayer && !hitLayer.locked) {
+      const before = this.captureAppSnapshot();
+
+      await importTextureIntoShapeLayer(hitLayer, imageFiles[0]);
+      this.recordHistoryAction(
+        this.createHistoryAction({
+          kind: "scene",
+          label: `Texture ${hitLayer.name}`,
+          operation: "drop-shape-texture",
+          payload: {
+            filename: imageFiles[0].name,
+            layerId: hitLayer.id
+          }
+        }),
+        before,
+        "scene"
+      );
+
+      return hitLayer;
+    }
+
+    let lastLayer: ImageLayer | null = null;
+
+    for (const [index, file] of imageFiles.entries()) {
+      lastLayer = await this.addImageFile(file, {
+        x: worldPoint.x + index * 18,
+        y: worldPoint.y - index * 18
+      });
+    }
+
+    return lastLayer;
+  }
+
+  async importDroppedFile(file: File, clientX: number, clientY: number) {
+    return this.importDroppedFiles([file], clientX, clientY);
+  }
+
+  /**
    * Applies a selection command against the active scene selection.
    */
   applySelectionCommand(command: SelectionCommand) {
@@ -1286,9 +1413,9 @@ export class EditorApp {
     return true;
   }
 
-  async addImageFile(file: File) {
+  async addImageFile(file: File, center?: { x: number; y: number }) {
     const before = this.captureAppSnapshot();
-    const result = await addImageFileToScene(this.scene, file);
+    const result = await addImageFileToScene(this.scene, file, { center });
 
     this.recordHistoryAction(
       this.createHistoryAction({
@@ -1304,6 +1431,100 @@ export class EditorApp {
     );
 
     return result;
+  }
+
+  private async applyLayerAssetCommandToScene(command: LayerAssetCommand) {
+    if (command.type === "create-loaded-3d-model-layer") {
+      const layer = this.scene.addObject3DLayer("imported");
+
+      layer.replaceImportedModel(command.model);
+      layer.materialTextureImage = null;
+      layer.materialTexture = normalizeLayerTexture({
+        ...layer.materialTexture,
+        blend: 0,
+        kind: "none"
+      });
+
+      return {
+        layer,
+        ...summarizeImported3DModel(command.model)
+      };
+    }
+
+    if (command.type === "create-3d-model-layer") {
+      const layer = this.scene.addObject3DLayer();
+
+      return importModelAssetsIntoLayer(layer, command.files);
+    }
+
+    const layer = this.scene.getLayer(command.layerId);
+
+    if (command.type === "import-shape-texture") {
+      if (!(layer instanceof ShapeLayer) || layer.locked) {
+        return null;
+      }
+
+      return importTextureIntoShapeLayer(layer, command.file);
+    }
+
+    if (command.type === "clear-shape-texture") {
+      if (!(layer instanceof ShapeLayer) || layer.locked) {
+        return null;
+      }
+
+      layer.textureImage = null;
+      if (layer.texture.kind === "image") {
+        layer.texture = normalizeLayerTexture({ ...layer.texture, blend: 0, kind: "none" });
+      }
+
+      return layer;
+    }
+
+    if (command.type === "import-3d-material-texture") {
+      if (!(layer instanceof Object3DLayer) || layer.locked) {
+        return null;
+      }
+
+      return importMaterialTextureIntoObjectLayer(layer, command.file);
+    }
+
+    if (command.type === "clear-3d-material-texture") {
+      if (!(layer instanceof Object3DLayer) || layer.locked) {
+        return null;
+      }
+
+      layer.materialTextureImage = null;
+      if (layer.materialTexture.kind === "image") {
+        layer.materialTexture = normalizeLayerTexture({
+          ...layer.materialTexture,
+          blend: 0,
+          kind: "none"
+        });
+      }
+
+      return layer;
+    }
+
+    if (!(layer instanceof Object3DLayer) || layer.locked) {
+      return null;
+    }
+
+    if (command.type === "replace-loaded-3d-model") {
+      layer.replaceImportedModel(command.model);
+      layer.materialTextureImage = null;
+      layer.materialTexture = normalizeLayerTexture({
+        ...layer.materialTexture,
+        blend: 0,
+        kind: "none"
+      });
+
+      return {
+        layer,
+        ...summarizeImported3DModel(command.model)
+      };
+    }
+
+    return importModelAssetsIntoLayer(layer, command.files);
   }
 
   private async resampleImageLayer(layerId: string, width: number, height: number) {
@@ -1421,6 +1642,12 @@ export class EditorApp {
       x: clientX - bounds.left,
       y: clientY - bounds.top
     };
+  }
+
+  private getClientWorldPoint(clientX: number, clientY: number) {
+    const point = this.getCanvasPoint(clientX, clientY);
+
+    return this.camera.screenToWorld(point.x, point.y);
   }
 
   private notifyCameraChange() {
@@ -1600,6 +1827,58 @@ function getImageLayerCommandLabel(scene: Scene, command: ImageLayerCommand) {
   return command.type === "resample" ? `Resample ${layerName}` : `Restore ${layerName}`;
 }
 
+function getLayerAssetCommandLabel(scene: Scene, command: LayerAssetCommand) {
+  const layerName = "layerId" in command ? getLayerName(scene, command.layerId) : "3D object";
+
+  switch (command.type) {
+    case "clear-3d-material-texture":
+      return `Clear ${layerName} material texture`;
+    case "clear-shape-texture":
+      return `Clear ${layerName} texture`;
+    case "create-3d-model-layer":
+      return "Import 3D model";
+    case "create-loaded-3d-model-layer":
+      return `Add ${command.model.name}`;
+    case "import-3d-material-texture":
+      return `Texture ${layerName}`;
+    case "import-3d-model":
+      return `Import model into ${layerName}`;
+    case "replace-loaded-3d-model":
+      return `Replace ${layerName} model`;
+    case "import-shape-texture":
+      return `Texture ${layerName}`;
+  }
+}
+
+function getLayerAssetCommandPayload(command: LayerAssetCommand) {
+  if ("model" in command) {
+    return {
+      layerId: "layerId" in command ? command.layerId : null,
+      modelName: command.model.name,
+      sourceFormat: command.model.sourceFormat,
+      type: command.type
+    };
+  }
+
+  if ("files" in command) {
+    return {
+      filenames: command.files.map((file) => file.name),
+      layerId: "layerId" in command ? command.layerId : null,
+      type: command.type
+    };
+  }
+
+  if ("file" in command) {
+    return {
+      filename: command.file.name,
+      layerId: command.layerId,
+      type: command.type
+    };
+  }
+
+  return command;
+}
+
 function getSelectionCommandLabel(command: SelectionCommand) {
   if (typeof command !== "string") {
     if (command.type === "feather") {
@@ -1655,6 +1934,598 @@ function getMaskActionLabel(layerName: string, action: LayerMaskAction) {
 
 function getLayerName(scene: Scene, layerId: string) {
   return scene.getLayer(layerId)?.name ?? "Layer";
+}
+
+async function importTextureIntoShapeLayer(layer: ShapeLayer, file: File) {
+  layer.textureImage = await createImportedLayerTexture(file);
+  layer.texture = normalizeLayerTexture({
+    ...layer.texture,
+    blend: Math.max(layer.texture.blend, 0.85),
+    kind: "image",
+    scale: layer.texture.scale || 16
+  });
+
+  return layer;
+}
+
+async function importMaterialTextureIntoObjectLayer(layer: Object3DLayer, file: File) {
+  layer.materialTextureImage = await createImportedLayerTexture(file);
+  layer.materialTexture = normalizeLayerTexture({
+    ...layer.materialTexture,
+    blend: Math.max(layer.materialTexture.blend, 0.85),
+    kind: "image",
+    scale: layer.materialTexture.scale || 16
+  });
+
+  return layer;
+}
+
+type ModelAssetFile = {
+  file: File;
+  path: string;
+};
+
+type MtlMaterial = {
+  diffuseColor: [number, number, number] | null;
+  name: string;
+  texturePath: string | null;
+};
+
+type ResolvedModelMaterial = {
+  diffuseColor: [number, number, number] | null;
+  material: MtlMaterial;
+  textureAsset: ModelAssetFile | null;
+};
+
+type ModelMaterialResolution = {
+  appliedTextureNames: string[];
+  materialCount: number;
+  materials: ResolvedModelMaterial[];
+  textureCount: number;
+  textureNames: string[];
+};
+
+async function importModelAssetsIntoLayer(layer: Object3DLayer, files: File[]) {
+  const model = await import3DModelPackage(files);
+
+  layer.replaceImportedModel(model);
+  layer.materialTextureImage = null;
+  layer.materialTexture = normalizeLayerTexture({
+    ...layer.materialTexture,
+    blend: 0,
+    kind: "none"
+  });
+
+  return {
+    layer,
+    ...summarizeImported3DModel(model)
+  };
+}
+
+async function expandModelAssetFiles(files: File[]): Promise<ModelAssetFile[]> {
+  const expanded: ModelAssetFile[] = [];
+
+  for (const file of files) {
+    if (isZipFile(file)) {
+      expanded.push(...(await extractZipModelAssets(file)));
+      continue;
+    }
+
+    expanded.push({
+      file,
+      path: normalizeAssetPath(file.webkitRelativePath || file.name)
+    });
+  }
+
+  return expanded.filter((asset) => isSupportedModelPackageFile(asset.file));
+}
+
+function chooseObjAsset(assets: ModelAssetFile[]) {
+  return assets
+    .filter((asset) => isObjFile(asset.file))
+    .sort((left, right) => left.path.split("/").length - right.path.split("/").length)[0] ?? null;
+}
+
+async function resolveObjMaterials(
+  objSource: string,
+  objPath: string,
+  assets: ModelAssetFile[]
+): Promise<ModelMaterialResolution> {
+  const hints = parseObjMaterialHints(objSource);
+  const objDirectory = getAssetDirectory(objPath);
+
+  const mtlAsset =
+    findReferencedAsset(assets, objDirectory, hints.mtlNames, isMtlFile) ??
+    findFirstAsset(assets, objDirectory, isMtlFile);
+
+  const materials = mtlAsset ? parseMtlMaterials(await mtlAsset.file.text()) : [];
+  const mtlDirectory = getAssetDirectory(mtlAsset?.path ?? objPath);
+
+  const usedMaterialNames = new Set(
+    hints.usedMaterials.map((name) => name.toLowerCase())
+  );
+
+  const relevantMaterials =
+    usedMaterialNames.size > 0
+      ? materials.filter((material) =>
+          usedMaterialNames.has(material.name.toLowerCase())
+        )
+      : materials;
+
+  const resolvedMaterials = relevantMaterials.map((material) => {
+    const textureAsset = material.texturePath
+      ? findReferencedAsset(assets, mtlDirectory, [material.texturePath], isImageFile)
+      : null;
+
+    return {
+      diffuseColor: material.diffuseColor,
+      material,
+      textureAsset
+    };
+  });
+
+  const textureAssets = assets.filter((asset) => isImageFile(asset.file));
+
+  const appliedTextureNames = [
+    ...new Set(
+      resolvedMaterials
+        .map((material) => material.textureAsset?.file.name)
+        .filter((name): name is string => Boolean(name))
+    )
+  ];
+
+  return {
+    appliedTextureNames,
+    materialCount: materials.length,
+    materials: resolvedMaterials,
+    textureCount: textureAssets.length,
+    textureNames: textureAssets.map((asset) => asset.file.name)
+  };
+}
+
+function parseObjMaterialHints(source: string) {
+  const mtlNames: string[] = [];
+  const usedMaterials: string[] = [];
+
+  for (const rawLine of source.split(/\r?\n/u)) {
+    const line = rawLine.trim();
+
+    if (!line || line.startsWith("#")) {
+      continue;
+    }
+
+    const [keyword] = line.split(/\s+/u);
+    const lowerKeyword = keyword.toLowerCase();
+
+    if (lowerKeyword === "mtllib") {
+      const value = line.slice(keyword.length).trim();
+
+      if (value) {
+        pushAssetReferences(mtlNames, value);
+      }
+    } else if (lowerKeyword === "usemtl") {
+      const value = line.slice(keyword.length).trim();
+
+      if (value) {
+        usedMaterials.push(stripAssetReferenceQuotes(value));
+      }
+    }
+  }
+
+  return { mtlNames, usedMaterials };
+}
+
+function parseMtlMaterials(source: string) {
+  const materials: MtlMaterial[] = [];
+  let current: MtlMaterial | null = null;
+
+  for (const rawLine of source.split(/\r?\n/u)) {
+    const line = rawLine.trim();
+
+    if (!line || line.startsWith("#")) {
+      continue;
+    }
+
+    const [keyword] = line.split(/\s+/u);
+    const lowerKeyword = keyword.toLowerCase();
+
+    if (lowerKeyword === "newmtl") {
+      current = {
+        diffuseColor: null,
+        name: stripAssetReferenceQuotes(line.slice(keyword.length).trim()),
+        texturePath: null
+      };
+      materials.push(current);
+      continue;
+    }
+
+    if (!current) {
+      continue;
+    }
+
+    if (lowerKeyword === "kd") {
+      const channels = line.slice(keyword.length).trim().split(/\s+/u).slice(0, 3).map(Number);
+
+      if (channels.length === 3 && channels.every(Number.isFinite)) {
+        current.diffuseColor = [
+          clampUnit(channels[0]),
+          clampUnit(channels[1]),
+          clampUnit(channels[2])
+        ];
+      }
+      continue;
+    }
+
+    if (
+      lowerKeyword === "map_kd" ||
+      lowerKeyword === "map_ka" ||
+      lowerKeyword === "map_basecolor"
+    ) {
+      current.texturePath = parseMtlTexturePath(line);
+    }
+  }
+
+  return materials;
+}
+
+function chooseMtlMaterial(materials: MtlMaterial[], usedMaterials: string[]) {
+  for (const usedMaterial of usedMaterials) {
+    const material = materials.find(
+      (candidate) => candidate.name.toLowerCase() === usedMaterial.toLowerCase()
+    );
+
+    if (material?.texturePath || material?.diffuseColor) {
+      return material;
+    }
+  }
+
+  return (
+    materials.find((material) => material.texturePath) ??
+    materials.find((material) => material.diffuseColor) ??
+    null
+  );
+}
+
+function parseMtlTexturePath(line: string) {
+  const [, ...tokens] = line.split(/\s+/u);
+  const pathTokens: string[] = [];
+  const optionValueCounts: Record<string, number> = {
+    "-blendu": 1,
+    "-blendv": 1,
+    "-bm": 1,
+    "-boost": 1,
+    "-cc": 1,
+    "-clamp": 1,
+    "-imfchan": 1,
+    "-mm": 2,
+    "-o": 3,
+    "-s": 3,
+    "-t": 3,
+    "-texres": 1
+  };
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+
+    if (token.startsWith("-")) {
+      index += optionValueCounts[token] ?? 0;
+      continue;
+    }
+
+    pathTokens.push(token);
+  }
+
+  return stripAssetReferenceQuotes(pathTokens.join(" ").trim() || (tokens.at(-1) ?? ""));
+}
+
+function findReferencedAsset(
+  assets: ModelAssetFile[],
+  baseDirectory: string,
+  references: string[],
+  predicate: (file: File) => boolean
+) {
+  for (const reference of references) {
+    const cleanReference = stripAssetReferenceQuotes(reference);
+    if (!cleanReference) {
+      continue;
+    }
+
+    const resolvedPath = normalizeAssetPath(`${baseDirectory}/${cleanReference}`);
+    const normalizedReference = normalizeAssetPath(cleanReference);
+    const referenceName = getAssetBasename(normalizedReference);
+    const exact = assets.find(
+      (asset) =>
+        predicate(asset.file) &&
+        normalizeAssetPath(asset.path).toLowerCase() === resolvedPath.toLowerCase()
+    );
+
+    if (exact) {
+      return exact;
+    }
+
+    const loose = assets.find(
+      (asset) =>
+        predicate(asset.file) &&
+        (normalizeAssetPath(asset.path).toLowerCase().endsWith(`/${normalizedReference}`.toLowerCase()) ||
+          getAssetBasename(asset.path).toLowerCase() === referenceName.toLowerCase())
+    );
+
+    if (loose) {
+      return loose;
+    }
+  }
+
+  return null;
+}
+
+function findFirstAsset(
+  assets: ModelAssetFile[],
+  preferredDirectory: string,
+  predicate: (file: File) => boolean
+) {
+  const candidates = assets.filter((asset) => predicate(asset.file));
+
+  return (
+    candidates.find((asset) => getAssetDirectory(asset.path) === preferredDirectory) ??
+    candidates[0] ??
+    null
+  );
+}
+
+function findFirstImageAsset(assets: ModelAssetFile[], preferredDirectory: string) {
+  return findFirstAsset(assets, preferredDirectory, isImageFile);
+}
+
+function pushAssetReferences(references: string[], value: string) {
+  const cleanValue = stripAssetReferenceQuotes(value);
+
+  if (cleanValue) {
+    references.push(cleanValue);
+  }
+
+  for (const token of value.split(/\s+/u)) {
+    const cleanToken = stripAssetReferenceQuotes(token);
+
+    if (cleanToken && !references.includes(cleanToken)) {
+      references.push(cleanToken);
+    }
+  }
+}
+
+function stripAssetReferenceQuotes(reference: string) {
+  return reference.trim().replace(/^["']|["']$/gu, "");
+}
+
+async function createImportedLayerTexture(file: File): Promise<ImportedLayerTexture> {
+  if (!isImageFile(file)) {
+    throw new Error("Choose an image file for the texture.");
+  }
+
+  const [dataUrl, image] = await Promise.all([fileToDataUrl(file), loadImageElement(file)]);
+
+  return {
+    dataUrl,
+    height: image.naturalHeight || image.height,
+    id: crypto.randomUUID(),
+    image,
+    mimeType: file.type || "image/png",
+    name: file.name || "Texture",
+    width: image.naturalWidth || image.width
+  };
+}
+
+function fileToDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+        return;
+      }
+
+      reject(new Error("Unable to read texture file."));
+    };
+    reader.onerror = () => reject(new Error("Unable to read texture file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function isImageFile(file: File) {
+  return file.type.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|svg)$/iu.test(file.name);
+}
+
+function isMtlFile(file: File) {
+  return /\.mtl$/iu.test(file.name);
+}
+
+function isObjFile(file: File) {
+  return /\.obj$/iu.test(file.name);
+}
+
+function isZipFile(file: File) {
+  return file.type === "application/zip" || /\.zip$/iu.test(file.name);
+}
+
+function isModelAssetFile(file: File) {
+  return /\.(obj|mtl|zip|glb|gltf|bin|stl|ply|fbx|dae|3ds)$/iu.test(file.name) || isZipFile(file);
+}
+
+function isSupportedDroppedAssetFile(file: File) {
+  return isImageFile(file) || isSupportedModelPackageFile(file);
+}
+
+function isSupportedModelPackageFile(file: File) {
+  return (
+    /\.(obj|mtl|zip|glb|gltf|bin|stl|ply|fbx|dae|3ds)$/iu.test(file.name) ||
+    isZipFile(file) ||
+    isImageFile(file)
+  );
+}
+
+async function extractZipModelAssets(file: File): Promise<ModelAssetFile[]> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const eocdOffset = findEndOfCentralDirectory(view);
+
+  if (eocdOffset < 0) {
+    throw new Error(`Unable to read ${file.name}. The zip directory was not found.`);
+  }
+
+  const centralDirectoryOffset = view.getUint32(eocdOffset + 16, true);
+  const entryCount = view.getUint16(eocdOffset + 10, true);
+  const entries: ModelAssetFile[] = [];
+  let offset = centralDirectoryOffset;
+
+  for (let index = 0; index < entryCount; index += 1) {
+    if (view.getUint32(offset, true) !== 0x02014b50) {
+      break;
+    }
+
+    const compressionMethod = view.getUint16(offset + 10, true);
+    const compressedSize = view.getUint32(offset + 20, true);
+    const fileNameLength = view.getUint16(offset + 28, true);
+    const extraLength = view.getUint16(offset + 30, true);
+    const commentLength = view.getUint16(offset + 32, true);
+    const localHeaderOffset = view.getUint32(offset + 42, true);
+    const path = normalizeAssetPath(
+      decodeZipString(bytes.subarray(offset + 46, offset + 46 + fileNameLength))
+    );
+
+    offset += 46 + fileNameLength + extraLength + commentLength;
+
+    if (!path || path.endsWith("/")) {
+      continue;
+    }
+
+    const fileName = getAssetBasename(path);
+
+    if (!isSupportedModelPackageName(fileName)) {
+      continue;
+    }
+
+    const localFileNameLength = view.getUint16(localHeaderOffset + 26, true);
+    const localExtraLength = view.getUint16(localHeaderOffset + 28, true);
+    const dataOffset = localHeaderOffset + 30 + localFileNameLength + localExtraLength;
+    const compressed = bytes.subarray(dataOffset, dataOffset + compressedSize);
+    const data = await inflateZipEntry(compressed, compressionMethod);
+    const extractedFile = new File([copyBytesToArrayBuffer(data)], fileName, {
+      type: getMimeTypeFromFilename(fileName)
+    });
+
+    entries.push({ file: extractedFile, path });
+  }
+
+  return entries;
+}
+
+function findEndOfCentralDirectory(view: DataView) {
+  const minimumOffset = Math.max(0, view.byteLength - 66_000);
+
+  for (let offset = view.byteLength - 22; offset >= minimumOffset; offset -= 1) {
+    if (view.getUint32(offset, true) === 0x06054b50) {
+      return offset;
+    }
+  }
+
+  return -1;
+}
+
+async function inflateZipEntry(bytes: Uint8Array, compressionMethod: number) {
+  if (compressionMethod === 0) {
+    return bytes;
+  }
+
+  if (compressionMethod !== 8 || typeof DecompressionStream === "undefined") {
+    throw new Error("This zip uses a compression method the browser cannot read.");
+  }
+
+  const stream = new Blob([copyBytesToArrayBuffer(bytes)])
+    .stream()
+    .pipeThrough(new DecompressionStream("deflate-raw"));
+  const buffer = await new Response(stream).arrayBuffer();
+
+  return new Uint8Array(buffer);
+}
+
+function copyBytesToArrayBuffer(bytes: Uint8Array) {
+  const copy = new Uint8Array(bytes.byteLength);
+
+  copy.set(bytes);
+
+  return copy.buffer;
+}
+
+function decodeZipString(bytes: Uint8Array) {
+  return new TextDecoder("utf-8").decode(bytes);
+}
+
+function normalizeAssetPath(path: string) {
+  const parts: string[] = [];
+
+  for (const part of path.replace(/\\/gu, "/").replace(/^\/+/u, "").split("/")) {
+    if (!part || part === ".") {
+      continue;
+    }
+
+    if (part === "..") {
+      parts.pop();
+      continue;
+    }
+
+    parts.push(part);
+  }
+
+  return parts.join("/");
+}
+
+function getAssetDirectory(path: string) {
+  const normalizedPath = normalizeAssetPath(path);
+  const slashIndex = normalizedPath.lastIndexOf("/");
+
+  return slashIndex >= 0 ? normalizedPath.slice(0, slashIndex) : "";
+}
+
+function getAssetBasename(path: string) {
+  return normalizeAssetPath(path).split("/").pop() || path;
+}
+
+function isSupportedModelPackageName(name: string) {
+  return /\.(obj|mtl|glb|gltf|bin|stl|ply|fbx|dae|3ds|png|jpe?g|gif|webp|bmp|svg)$/iu.test(name);
+}
+
+function getMimeTypeFromFilename(name: string) {
+  const lowerName = name.toLowerCase();
+
+  if (lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg")) {
+    return "image/jpeg";
+  }
+
+  if (lowerName.endsWith(".png")) {
+    return "image/png";
+  }
+
+  if (lowerName.endsWith(".webp")) {
+    return "image/webp";
+  }
+
+  if (lowerName.endsWith(".gif")) {
+    return "image/gif";
+  }
+
+  if (lowerName.endsWith(".bmp")) {
+    return "image/bmp";
+  }
+
+  if (lowerName.endsWith(".svg")) {
+    return "image/svg+xml";
+  }
+
+  return "text/plain";
+}
+
+function clampUnit(value: number) {
+  return Math.min(Math.max(Number.isFinite(value) ? value : 0, 0), 1);
 }
 
 async function copySelectedScenePixels(

@@ -1,5 +1,6 @@
 import { ImageLayer } from "../../layers/ImageLayer";
 /** WebGL texture lifetime management for images and layer masks. */
+import type { Imported3DTexture } from "../../import3d/Imported3DModel";
 import type { ImportedLayerTexture } from "../../layers/Layer";
 import { LayerMask } from "../../masks/LayerMask";
 
@@ -48,7 +49,22 @@ export class TextureManager {
   }
 
   getImportedTexture(textureImage: ImportedLayerTexture) {
-    const key = `imported-texture:${textureImage.id}`;
+    return this.getImageBackedTexture(
+      `imported-texture:${textureImage.id}`,
+      textureImage.image,
+      true
+    );
+  }
+
+  getImported3DTexture(textureImage: Imported3DTexture) {
+    return this.getImageBackedTexture(
+      `imported-3d-texture:${textureImage.id}:${textureImage.flipY ? "flip" : "noflip"}`,
+      textureImage.image,
+      textureImage.flipY ?? true
+    );
+  }
+
+  private getImageBackedTexture(key: string, image: HTMLImageElement, flipY: boolean) {
     const existingTexture = this.textures.get(key);
 
     if (existingTexture) {
@@ -62,7 +78,7 @@ export class TextureManager {
     }
 
     this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
-    this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, true);
+    this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, flipY);
     this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
     this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
     this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR);
@@ -73,7 +89,7 @@ export class TextureManager {
       this.gl.RGBA,
       this.gl.RGBA,
       this.gl.UNSIGNED_BYTE,
-      textureImage.image
+      image
     );
 
     this.textures.set(key, texture);

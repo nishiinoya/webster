@@ -45,11 +45,19 @@ export function getLayerSummary(
   if (layer instanceof ShapeLayer) {
     return {
       ...baseSummary,
+      customPath: layer.customPath.map((point) => ({ ...point })),
       fillColor: layer.fillColor,
       shape: layer.shape,
       strokeColor: layer.strokeColor,
       strokeWidth: layer.strokeWidth,
-      texture: layer.texture
+      texture: layer.texture,
+      textureImage: layer.textureImage
+        ? {
+            height: layer.textureImage.height,
+            name: layer.textureImage.name,
+            width: layer.textureImage.width
+          }
+        : null
     };
   }
 
@@ -63,7 +71,20 @@ export function getLayerSummary(
       lightZ: layer.lightZ,
       materialColor: layer.materialColor,
       materialTexture: layer.materialTexture,
+      materialTextureImage: layer.materialTextureImage
+        ? {
+            height: layer.materialTextureImage.height,
+            name: layer.materialTextureImage.name,
+            width: layer.materialTextureImage.width
+          }
+        : null,
+      modelFormat: layer.importedModel?.sourceFormat ?? (layer.modelSource ? "obj" : null),
+      modelName: layer.modelName,
+      modelStats: layer.importedModel?.stats ?? null,
+      modelSummary: layer.importedModel?.summary ?? null,
+      modelWarnings: layer.importedModel?.warnings ?? [],
       objectKind: layer.objectKind,
+      objectZoom: layer.objectZoom,
       rotationX: layer.rotationX,
       rotationY: layer.rotationY,
       rotationZ: layer.rotationZ,
