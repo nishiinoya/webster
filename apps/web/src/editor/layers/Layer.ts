@@ -177,6 +177,7 @@ export type SerializedObject3DLayer = SerializedLayerBase & {
   rotationX: number;
   rotationY: number;
   rotationZ: number;
+  shadowDistance?: number;
   shadowOpacity: number;
   shadowSoftness: number;
   type: "object3d";
@@ -351,6 +352,7 @@ export abstract class Layer {
         rotationX: data.rotationX,
         rotationY: data.rotationY,
         rotationZ: data.rotationZ,
+        shadowDistance: data.shadowDistance,
         shadowOpacity: data.shadowOpacity,
         shadowSoftness: data.shadowSoftness
       });

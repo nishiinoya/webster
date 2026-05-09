@@ -183,6 +183,7 @@ function cloneLayerForSnapshot(layer: Layer) {
       rotationX: layer.rotationX,
       rotationY: layer.rotationY,
       rotationZ: layer.rotationZ,
+      shadowDistance: layer.shadowDistance,
       shadowOpacity: layer.shadowOpacity,
       shadowSoftness: layer.shadowSoftness
     });
@@ -313,6 +314,10 @@ function areImported3DModelsEqual(
     return false;
   }
 
+  if (left.id && right.id && left.id === right.id) {
+    return true;
+  }
+
   return JSON.stringify(serializeImported3DModel(left)) === JSON.stringify(serializeImported3DModel(right));
 }
 
@@ -365,6 +370,7 @@ function areLayersEqual(left: Layer, right: Layer) {
       left.rotationX === right.rotationX &&
       left.rotationY === right.rotationY &&
       left.rotationZ === right.rotationZ &&
+      left.shadowDistance === right.shadowDistance &&
       left.shadowOpacity === right.shadowOpacity &&
       left.shadowSoftness === right.shadowSoftness &&
       areColorArraysEqual(left.materialColor, right.materialColor) &&

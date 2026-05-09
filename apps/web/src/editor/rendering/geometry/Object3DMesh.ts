@@ -1,5 +1,6 @@
 import type { Imported3DModel } from "../../import3d/Imported3DModel";
 import type { Object3DKind } from "../../layers/Layer";
+import type { Object3DLayer } from "../../layers/Object3DLayer";
 import { ShaderProgram } from "../shaders/ShaderProgram";
 import type { Object3DShaderProgram } from "../shaders/Object3DShaderProgram";
 
@@ -13,13 +14,16 @@ type Object3DDrawableProgram = ShaderProgram &
   >;
 
 type MeshSubmeshRange = {
+  firstIndex: number;
   firstVertex: number;
+  indexCount: number;
   materialName: string | null;
   vertexCount: number;
 };
 
 type MeshArrays = {
   colors: Float32Array;
+  indices: Uint16Array | Uint32Array | null;
   normals: Float32Array;
   submeshes: MeshSubmeshRange[];
   tangents: Float32Array;
@@ -33,15 +37,20 @@ type ObjFaceVertex = {
   texCoordIndex: number | null;
 };
 
+const importedModelCacheKeys = new WeakMap<Imported3DModel, string>();
+
 /**
  * WebGL mesh for built-in and imported 3D objects.
  *
- * Imported OBJ models are split into submesh ranges by `usemtl`,
- * so the renderer can bind a different material/texture before each draw call.
+ * Imported glTF/GLB indices are preserved and rendered with drawElements.
+ * OBJ and fallback meshes are indexed once during preparation so regular
+ * transforms only update uniforms.
  */
 export class Object3DMesh {
-  private readonly normalBuffer: WebGLBuffer;
   private readonly colorBuffer: WebGLBuffer;
+  private readonly indexBuffer: WebGLBuffer | null;
+  private readonly indexType: number | null;
+  private readonly normalBuffer: WebGLBuffer;
   private readonly submeshes: MeshSubmeshRange[];
   private readonly tangentBuffer: WebGLBuffer;
   private readonly texCoordBuffer: WebGLBuffer;
@@ -52,38 +61,65 @@ export class Object3DMesh {
     private readonly gl: WebGLRenderingContext,
     arrays: MeshArrays
   ) {
+    const canUseUint32Indices = Boolean(gl.getExtension("OES_element_index_uint"));
+    const preparedArrays =
+      arrays.indices instanceof Uint32Array && !canUseUint32Indices
+        ? flattenIndexedMeshArrays(arrays)
+        : arrays;
     const normalBuffer = gl.createBuffer();
     const colorBuffer = gl.createBuffer();
     const tangentBuffer = gl.createBuffer();
     const texCoordBuffer = gl.createBuffer();
     const vertexBuffer = gl.createBuffer();
+    const indexBuffer = preparedArrays.indices ? gl.createBuffer() : null;
 
-    if (!normalBuffer || !colorBuffer || !tangentBuffer || !texCoordBuffer || !vertexBuffer) {
+    if (
+      !normalBuffer ||
+      !colorBuffer ||
+      !tangentBuffer ||
+      !texCoordBuffer ||
+      !vertexBuffer ||
+      (preparedArrays.indices && !indexBuffer)
+    ) {
       throw new Error("Unable to create 3D mesh buffers.");
     }
 
     this.colorBuffer = colorBuffer;
+    this.indexBuffer = indexBuffer;
+    this.indexType =
+      preparedArrays.indices instanceof Uint32Array
+        ? gl.UNSIGNED_INT
+        : preparedArrays.indices
+          ? gl.UNSIGNED_SHORT
+          : null;
     this.normalBuffer = normalBuffer;
+    this.submeshes =
+      preparedArrays.submeshes.length > 0
+        ? preparedArrays.submeshes
+        : [
+            {
+              firstIndex: 0,
+              firstVertex: 0,
+              indexCount: preparedArrays.indices?.length ?? 0,
+              materialName: null,
+              vertexCount: preparedArrays.vertices.length / 3
+            }
+          ];
     this.tangentBuffer = tangentBuffer;
     this.texCoordBuffer = texCoordBuffer;
     this.vertexBuffer = vertexBuffer;
-    this.vertexCount = arrays.vertices.length / 3;
-    this.submeshes =
-      arrays.submeshes.length > 0
-        ? arrays.submeshes
-        : [
-            {
-              firstVertex: 0,
-              materialName: null,
-              vertexCount: this.vertexCount
-            }
-          ];
+    this.vertexCount = preparedArrays.vertices.length / 3;
 
-    this.uploadBuffer(this.vertexBuffer, arrays.vertices);
-    this.uploadBuffer(this.normalBuffer, arrays.normals);
-    this.uploadBuffer(this.tangentBuffer, arrays.tangents);
-    this.uploadBuffer(this.texCoordBuffer, arrays.texCoords);
-    this.uploadBuffer(this.colorBuffer, arrays.colors);
+    this.uploadFloatBuffer(this.vertexBuffer, preparedArrays.vertices);
+    this.uploadFloatBuffer(this.normalBuffer, preparedArrays.normals);
+    this.uploadFloatBuffer(this.tangentBuffer, preparedArrays.tangents);
+    this.uploadFloatBuffer(this.texCoordBuffer, preparedArrays.texCoords);
+    this.uploadFloatBuffer(this.colorBuffer, preparedArrays.colors);
+
+    if (this.indexBuffer && preparedArrays.indices) {
+      this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
+      this.gl.bufferData(this.gl.ELEMENT_ARRAY_BUFFER, preparedArrays.indices, this.gl.STATIC_DRAW);
+    }
   }
 
   draw(
@@ -92,6 +128,42 @@ export class Object3DMesh {
       beforeSubmesh?: (materialName: string | null) => void;
     } = {}
   ) {
+    this.bindAttributes(program);
+
+    if (this.indexBuffer && this.indexType !== null) {
+      this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
+
+      for (const submesh of this.submeshes) {
+        options.beforeSubmesh?.(submesh.materialName);
+        this.gl.drawElements(
+          this.gl.TRIANGLES,
+          submesh.indexCount,
+          this.indexType,
+          submesh.firstIndex * getIndexElementSize(this.indexType, this.gl)
+        );
+      }
+
+      return;
+    }
+
+    for (const submesh of this.submeshes) {
+      options.beforeSubmesh?.(submesh.materialName);
+      this.gl.drawArrays(this.gl.TRIANGLES, submesh.firstVertex, submesh.vertexCount);
+    }
+  }
+
+  dispose() {
+    this.gl.deleteBuffer(this.colorBuffer);
+    if (this.indexBuffer) {
+      this.gl.deleteBuffer(this.indexBuffer);
+    }
+    this.gl.deleteBuffer(this.normalBuffer);
+    this.gl.deleteBuffer(this.tangentBuffer);
+    this.gl.deleteBuffer(this.texCoordBuffer);
+    this.gl.deleteBuffer(this.vertexBuffer);
+  }
+
+  private bindAttributes(program: Object3DDrawableProgram) {
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.vertexBuffer);
     this.gl.enableVertexAttribArray(program.positionAttributeLocation);
     this.gl.vertexAttribPointer(
@@ -146,22 +218,9 @@ export class Object3DMesh {
       0,
       0
     );
-
-    for (const submesh of this.submeshes) {
-      options.beforeSubmesh?.(submesh.materialName);
-      this.gl.drawArrays(this.gl.TRIANGLES, submesh.firstVertex, submesh.vertexCount);
-    }
   }
 
-  dispose() {
-    this.gl.deleteBuffer(this.colorBuffer);
-    this.gl.deleteBuffer(this.normalBuffer);
-    this.gl.deleteBuffer(this.tangentBuffer);
-    this.gl.deleteBuffer(this.texCoordBuffer);
-    this.gl.deleteBuffer(this.vertexBuffer);
-  }
-
-  private uploadBuffer(buffer: WebGLBuffer, data: Float32Array) {
+  private uploadFloatBuffer(buffer: WebGLBuffer, data: Float32Array) {
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, buffer);
     this.gl.bufferData(this.gl.ARRAY_BUFFER, data, this.gl.STATIC_DRAW);
   }
@@ -174,6 +233,38 @@ export function createObject3DMesh(
   importedModel?: Imported3DModel | null
 ) {
   return new Object3DMesh(gl, createObject3DMeshArrays(kind, source, importedModel));
+}
+
+export function getObject3DMeshCacheKey(layer: Object3DLayer) {
+  if (layer.objectKind !== "imported") {
+    return `builtin:${layer.objectKind}`;
+  }
+
+  if (layer.importedModel) {
+    return `imported-model:${getImportedModelCacheKey(layer.importedModel)}`;
+  }
+
+  if (layer.modelSource) {
+    return `legacy-obj:${hashString(layer.modelSource)}`;
+  }
+
+  return "builtin:cube";
+}
+
+function getImportedModelCacheKey(model: Imported3DModel) {
+  const cachedKey = importedModelCacheKeys.get(model);
+
+  if (cachedKey) {
+    return cachedKey;
+  }
+
+  const key =
+    model.id ||
+    `${model.sourceFormat}:${model.name}:${model.stats.vertexCount}:${model.stats.triangleCount}:${model.parts.length}`;
+
+  importedModelCacheKeys.set(model, key);
+
+  return key;
 }
 
 function createObject3DMeshArrays(
@@ -206,11 +297,15 @@ function createImportedModelMeshArrays(model: Imported3DModel): MeshArrays {
   const texCoords: number[] = [];
   const tangents: number[] = [];
   const colors: number[] = [];
+  const indices: number[] = [];
   const submeshes: MeshSubmeshRange[] = [];
+  let maxIndex = 0;
 
   for (const part of model.parts) {
+    const firstIndex = indices.length;
     const firstVertex = vertices.length / 3;
     const vertexCount = part.vertices.length / 3;
+    const partIndices = part.indices ?? createSequentialIndices(vertexCount);
 
     appendFloatArray(vertices, part.vertices);
     appendFloatArray(normals, part.normals);
@@ -219,21 +314,26 @@ function createImportedModelMeshArrays(model: Imported3DModel): MeshArrays {
     if (part.tangents && part.tangents.length === vertexCount * 3) {
       appendFloatArray(tangents, part.tangents);
     } else {
-      for (let index = 0; index < vertexCount; index += 1) {
-        tangents.push(1, 0, 0);
-      }
+      appendDefaultTangents(tangents, vertexCount);
     }
 
     if (part.colors && part.colors.length === vertexCount * 4) {
       appendFloatArray(colors, part.colors);
     } else {
-      for (let index = 0; index < vertexCount; index += 1) {
-        colors.push(1, 1, 1, 1);
-      }
+      appendDefaultColors(colors, vertexCount);
+    }
+
+    for (let index = 0; index < partIndices.length; index += 1) {
+      const nextIndex = firstVertex + partIndices[index];
+
+      indices.push(nextIndex);
+      maxIndex = Math.max(maxIndex, nextIndex);
     }
 
     submeshes.push({
+      firstIndex,
       firstVertex,
+      indexCount: partIndices.length,
       materialName: part.materialName,
       vertexCount
     });
@@ -241,6 +341,7 @@ function createImportedModelMeshArrays(model: Imported3DModel): MeshArrays {
 
   return {
     colors: new Float32Array(colors),
+    indices: createIndexArray(indices, maxIndex),
     normals: new Float32Array(normals),
     submeshes,
     tangents: new Float32Array(tangents),
@@ -252,6 +353,18 @@ function createImportedModelMeshArrays(model: Imported3DModel): MeshArrays {
 function appendFloatArray(target: number[], source: Float32Array) {
   for (let index = 0; index < source.length; index += 1) {
     target.push(source[index]);
+  }
+}
+
+function appendDefaultTangents(target: number[], vertexCount: number) {
+  for (let index = 0; index < vertexCount; index += 1) {
+    target.push(1, 0, 0);
+  }
+}
+
+function appendDefaultColors(target: number[], vertexCount: number) {
+  for (let index = 0; index < vertexCount; index += 1) {
+    target.push(1, 1, 1, 1);
   }
 }
 
@@ -279,7 +392,9 @@ function createObjMeshArrays(source: string): MeshArrays {
 
     if (vertexCount > 0) {
       submeshes.push({
+        firstIndex: currentSubmeshStart,
         firstVertex: currentSubmeshStart,
+        indexCount: vertexCount,
         materialName: currentMaterialName,
         vertexCount
       });
@@ -335,9 +450,6 @@ function createObjMeshArrays(source: string): MeshArrays {
       const texCoord = values.slice(0, 2).map(Number);
 
       if (texCoord.every(Number.isFinite)) {
-        // OBJ UVs often need V flipped for WebGL image textures.
-        // If textures appear upside down, change this to:
-        // sourceTexCoords.push([texCoord[0], texCoord[1]]);
         sourceTexCoords.push([texCoord[0], 1 - texCoord[1]]);
       }
 
@@ -371,8 +483,6 @@ function createObjMeshArrays(source: string): MeshArrays {
 
     ensureSubmesh();
 
-    // Fan triangulation:
-    // f a b c d -> a b c, a c d
     for (let index = 1; index < face.length - 1; index += 1) {
       pushObjTriangle(
         vertices,
@@ -398,74 +508,68 @@ function createObjMeshArrays(source: string): MeshArrays {
 }
 
 function createCubeMeshArrays(): MeshArrays {
-  const faces = [
-    {
-      normal: [0, 0, 1],
-      points: [
-        [-1, -1, 1],
-        [1, -1, 1],
-        [1, 1, 1],
-        [-1, 1, 1]
-      ]
-    },
-    {
-      normal: [0, 0, -1],
-      points: [
-        [1, -1, -1],
-        [-1, -1, -1],
-        [-1, 1, -1],
-        [1, 1, -1]
-      ]
-    },
-    {
-      normal: [1, 0, 0],
-      points: [
-        [1, -1, 1],
-        [1, -1, -1],
-        [1, 1, -1],
-        [1, 1, 1]
-      ]
-    },
-    {
-      normal: [-1, 0, 0],
-      points: [
-        [-1, -1, -1],
-        [-1, -1, 1],
-        [-1, 1, 1],
-        [-1, 1, -1]
-      ]
-    },
-    {
-      normal: [0, 1, 0],
-      points: [
-        [-1, 1, 1],
-        [1, 1, 1],
-        [1, 1, -1],
-        [-1, 1, -1]
-      ]
-    },
-    {
-      normal: [0, -1, 0],
-      points: [
-        [-1, -1, -1],
-        [1, -1, -1],
-        [1, -1, 1],
-        [-1, -1, 1]
-      ]
-    }
+  const positions = [
+    [-1, -1, 1],
+    [1, -1, 1],
+    [1, 1, 1],
+    [-1, 1, 1],
+    [1, -1, -1],
+    [-1, -1, -1],
+    [-1, 1, -1],
+    [1, 1, -1],
+    [1, -1, 1],
+    [1, -1, -1],
+    [1, 1, -1],
+    [1, 1, 1],
+    [-1, -1, -1],
+    [-1, -1, 1],
+    [-1, 1, 1],
+    [-1, 1, -1],
+    [-1, 1, 1],
+    [1, 1, 1],
+    [1, 1, -1],
+    [-1, 1, -1],
+    [-1, -1, -1],
+    [1, -1, -1],
+    [1, -1, 1],
+    [-1, -1, 1]
   ];
-
+  const normalsByFace = [
+    [0, 0, 1],
+    [0, 0, -1],
+    [1, 0, 0],
+    [-1, 0, 0],
+    [0, 1, 0],
+    [0, -1, 0]
+  ];
+  const indices = [
+    0, 1, 2, 0, 2, 3,
+    4, 5, 6, 4, 6, 7,
+    8, 9, 10, 8, 10, 11,
+    12, 13, 14, 12, 14, 15,
+    16, 17, 18, 16, 18, 19,
+    20, 21, 22, 20, 22, 23
+  ];
   const vertices: number[] = [];
   const normals: number[] = [];
   const texCoords: number[] = [];
 
-  for (const face of faces) {
-    pushFace(vertices, normals, texCoords, face.points, face.normal);
+  for (const [faceIndex, faceNormal] of normalsByFace.entries()) {
+    for (let corner = 0; corner < 4; corner += 1) {
+      const point = positions[faceIndex * 4 + corner];
+      const uv = getQuadTexCoord(corner);
+
+      vertices.push(point[0], point[1], point[2]);
+      normals.push(faceNormal[0], faceNormal[1], faceNormal[2]);
+      texCoords.push(uv[0], uv[1]);
+    }
   }
 
-  return toMeshArrays(vertices, normals, texCoords, [
+  return toIndexedMeshArrays(vertices, normals, texCoords, indices, [
     {
+      firstIndex: 0,
       firstVertex: 0,
+      indexCount: indices.length,
       materialName: null,
       vertexCount: vertices.length / 3
     }
@@ -476,6 +580,7 @@ function createPyramidMeshArrays(): MeshArrays {
   const vertices: number[] = [];
   const normals: number[] = [];
   const texCoords: number[] = [];
+  const indices: number[] = [];
 
   const apex = [0, 1.25, 0];
   const base = [
@@ -485,23 +590,25 @@ function createPyramidMeshArrays(): MeshArrays {
     [-1, -1, -1]
   ];
 
-  pushFace(vertices, normals, texCoords, [base[0], base[1], base[2], base[3]], [0, -1, 0]);
+  pushIndexedFace(vertices, normals, texCoords, indices, [base[0], base[1], base[2], base[3]], [0, -1, 0]);
 
   for (let index = 0; index < base.length; index += 1) {
     const nextIndex = (index + 1) % base.length;
     const triangle = [base[index], base[nextIndex], apex];
     const normal = getFaceNormal(triangle[0], triangle[1], triangle[2]);
 
-    pushTriangle(vertices, normals, texCoords, triangle, normal, [
+    pushIndexedTriangle(vertices, normals, texCoords, indices, triangle, normal, [
       [0, 0],
       [1, 0],
       [0.5, 1]
     ]);
   }
 
-  return toMeshArrays(vertices, normals, texCoords, [
+  return toIndexedMeshArrays(vertices, normals, texCoords, indices, [
     {
+      firstIndex: 0,
       firstVertex: 0,
+      indexCount: indices.length,
       materialName: null,
       vertexCount: vertices.length / 3
     }
@@ -512,78 +619,83 @@ function createSphereMeshArrays(): MeshArrays {
   const vertices: number[] = [];
   const normals: number[] = [];
   const texCoords: number[] = [];
+  const indices: number[] = [];
 
   const rows = 16;
   const columns = 32;
 
-  for (let row = 0; row < rows; row += 1) {
-    const v0 = row / rows;
-    const v1 = (row + 1) / rows;
-    const theta0 = v0 * Math.PI;
-    const theta1 = v1 * Math.PI;
+  for (let row = 0; row <= rows; row += 1) {
+    const v = row / rows;
+    const theta = v * Math.PI;
 
-    for (let column = 0; column < columns; column += 1) {
-      const u0 = column / columns;
-      const u1 = (column + 1) / columns;
-      const phi0 = u0 * Math.PI * 2;
-      const phi1 = u1 * Math.PI * 2;
+    for (let column = 0; column <= columns; column += 1) {
+      const u = column / columns;
+      const phi = u * Math.PI * 2;
+      const point = sphericalPoint(theta, phi);
 
-      const p00 = sphericalPoint(theta0, phi0);
-      const p10 = sphericalPoint(theta0, phi1);
-      const p01 = sphericalPoint(theta1, phi0);
-      const p11 = sphericalPoint(theta1, phi1);
-
-      pushTriangle(vertices, normals, texCoords, [p00, p01, p10], [p00, p01, p10], [
-        [u0, 1 - v0],
-        [u0, 1 - v1],
-        [u1, 1 - v0]
-      ]);
-
-      pushTriangle(vertices, normals, texCoords, [p10, p01, p11], [p10, p01, p11], [
-        [u1, 1 - v0],
-        [u0, 1 - v1],
-        [u1, 1 - v1]
-      ]);
+      vertices.push(point[0], point[1], point[2]);
+      normals.push(point[0], point[1], point[2]);
+      texCoords.push(u, 1 - v);
     }
   }
 
-  return toMeshArrays(vertices, normals, texCoords, [
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      const rowStart = row * (columns + 1);
+      const nextRowStart = (row + 1) * (columns + 1);
+      const p00 = rowStart + column;
+      const p10 = rowStart + column + 1;
+      const p01 = nextRowStart + column;
+      const p11 = nextRowStart + column + 1;
+
+      indices.push(p00, p01, p10, p10, p01, p11);
+    }
+  }
+
+  return toIndexedMeshArrays(vertices, normals, texCoords, indices, [
     {
+      firstIndex: 0,
       firstVertex: 0,
+      indexCount: indices.length,
       materialName: null,
       vertexCount: vertices.length / 3
     }
   ]);
 }
 
-function pushFace(
+function pushIndexedFace(
   vertices: number[],
   normals: number[],
   texCoords: number[],
+  indices: number[],
   points: number[][],
   normal: number[]
 ) {
-  pushTriangle(vertices, normals, texCoords, [points[0], points[1], points[2]], normal, [
-    [0, 0],
-    [1, 0],
-    [1, 1]
-  ]);
+  const start = vertices.length / 3;
 
-  pushTriangle(vertices, normals, texCoords, [points[0], points[2], points[3]], normal, [
-    [0, 0],
-    [1, 1],
-    [0, 1]
-  ]);
+  for (let index = 0; index < points.length; index += 1) {
+    const point = points[index];
+    const uv = getQuadTexCoord(index);
+
+    vertices.push(point[0], point[1], point[2]);
+    normals.push(normal[0], normal[1], normal[2]);
+    texCoords.push(uv[0], uv[1]);
+  }
+
+  indices.push(start, start + 1, start + 2, start, start + 2, start + 3);
 }
 
-function pushTriangle(
+function pushIndexedTriangle(
   vertices: number[],
   normals: number[],
   texCoords: number[],
+  indices: number[],
   points: number[][],
   normalOrNormals: number[] | number[][],
   uvs: number[][]
 ) {
+  const start = vertices.length / 3;
+
   for (let index = 0; index < 3; index += 1) {
     const point = points[index];
     const normal = Array.isArray(normalOrNormals[0])
@@ -595,6 +707,8 @@ function pushTriangle(
     normals.push(normal[0], normal[1], normal[2]);
     texCoords.push(uv[0], uv[1]);
   }
+
+  indices.push(start, start + 1, start + 2);
 }
 
 function pushObjTriangle(
@@ -671,8 +785,6 @@ function resolveObjIndex(value: string | undefined, count: number) {
     return null;
   }
 
-  // OBJ indices are 1-based.
-  // Negative indices are relative to the current list end.
   const index = parsed > 0 ? parsed - 1 : count + parsed;
 
   return index >= 0 && index < count ? index : null;
@@ -753,8 +865,34 @@ function toMeshArrays(
   texCoords: number[],
   submeshes: MeshSubmeshRange[]
 ): MeshArrays {
+  const vertexCount = vertices.length / 3;
+  const indices = createSequentialIndices(vertexCount);
+
+  return {
+    colors: createDefaultColors(vertexCount),
+    indices,
+    normals: new Float32Array(normals),
+    submeshes: submeshes.map((submesh) => ({
+      ...submesh,
+      firstIndex: submesh.firstVertex,
+      indexCount: submesh.vertexCount
+    })),
+    tangents: createDefaultTangents(vertexCount),
+    texCoords: new Float32Array(texCoords),
+    vertices: new Float32Array(vertices)
+  };
+}
+
+function toIndexedMeshArrays(
+  vertices: number[],
+  normals: number[],
+  texCoords: number[],
+  indices: number[],
+  submeshes: MeshSubmeshRange[]
+): MeshArrays {
   return {
     colors: createDefaultColors(vertices.length / 3),
+    indices: createIndexArray(indices, vertices.length / 3 - 1),
     normals: new Float32Array(normals),
     submeshes,
     tangents: createDefaultTangents(vertices.length / 3),
@@ -784,6 +922,97 @@ function createDefaultColors(vertexCount: number) {
   }
 
   return colors;
+}
+
+function createSequentialIndices(vertexCount: number) {
+  const indices = new Array<number>(vertexCount);
+
+  for (let index = 0; index < vertexCount; index += 1) {
+    indices[index] = index;
+  }
+
+  return createIndexArray(indices, vertexCount - 1);
+}
+
+function createIndexArray(indices: number[], maxIndex: number) {
+  return maxIndex > 65535 ? new Uint32Array(indices) : new Uint16Array(indices);
+}
+
+function flattenIndexedMeshArrays(arrays: MeshArrays): MeshArrays {
+  if (!arrays.indices) {
+    return arrays;
+  }
+
+  const vertices = new Float32Array(arrays.indices.length * 3);
+  const normals = new Float32Array(arrays.indices.length * 3);
+  const tangents = new Float32Array(arrays.indices.length * 3);
+  const texCoords = new Float32Array(arrays.indices.length * 2);
+  const colors = new Float32Array(arrays.indices.length * 4);
+
+  for (let outputIndex = 0; outputIndex < arrays.indices.length; outputIndex += 1) {
+    const sourceIndex = arrays.indices[outputIndex];
+
+    copyComponents(arrays.vertices, vertices, sourceIndex, outputIndex, 3);
+    copyComponents(arrays.normals, normals, sourceIndex, outputIndex, 3);
+    copyComponents(arrays.tangents, tangents, sourceIndex, outputIndex, 3);
+    copyComponents(arrays.texCoords, texCoords, sourceIndex, outputIndex, 2);
+    copyComponents(arrays.colors, colors, sourceIndex, outputIndex, 4);
+  }
+
+  return {
+    colors,
+    indices: null,
+    normals,
+    submeshes: arrays.submeshes.map((submesh) => ({
+      ...submesh,
+      firstVertex: submesh.firstIndex,
+      vertexCount: submesh.indexCount
+    })),
+    tangents,
+    texCoords,
+    vertices
+  };
+}
+
+function copyComponents(
+  source: Float32Array,
+  target: Float32Array,
+  sourceIndex: number,
+  targetIndex: number,
+  componentCount: number
+) {
+  for (let component = 0; component < componentCount; component += 1) {
+    target[targetIndex * componentCount + component] =
+      source[sourceIndex * componentCount + component] ?? 0;
+  }
+}
+
+function getIndexElementSize(indexType: number, gl: WebGLRenderingContext) {
+  return indexType === gl.UNSIGNED_INT ? 4 : 2;
+}
+
+function getQuadTexCoord(index: number) {
+  switch (index) {
+    case 1:
+      return [1, 0];
+    case 2:
+      return [1, 1];
+    case 3:
+      return [0, 1];
+    default:
+      return [0, 0];
+  }
+}
+
+function hashString(value: string) {
+  let hash = 2166136261;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0).toString(36);
 }
 
 function stripAssetReferenceQuotes(reference: string) {

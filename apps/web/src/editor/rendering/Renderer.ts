@@ -58,7 +58,11 @@ import { getAdjustmentLayerBlurRegion, getFullscreenBlurRegion } from "./blur/bl
 import { getDropShadowPasses } from "./renderingHelpers";
 import { buildStrokePathGeometry } from "./strokes/strokeGeometry";
 import type { CachedStrokePathGeometry } from "./strokes/strokeGeometry";
-import { createObject3DMesh, Object3DMesh } from "./geometry/Object3DMesh";
+import {
+  createObject3DMesh,
+  getObject3DMeshCacheKey,
+  Object3DMesh
+} from "./geometry/Object3DMesh";
 export type RendererShaderSources = {
   brushFragment: string;
   brushVertex: string;
@@ -365,6 +369,7 @@ export class Renderer {
 
   private renderScene(scene: Scene, camera: Camera2D, options: RenderOptions) {
     this.bindRenderTarget(null);
+    this.pruneObject3DMeshCache(scene);
 
     if (hasAdjustmentBlur(scene.layers)) {
       this.renderArtworkWithStackPostProcess(scene, camera, options);
@@ -399,6 +404,10 @@ export class Renderer {
       }
 
       if (layer instanceof AdjustmentLayer) {
+        continue;
+      }
+
+      if (this.isLayerOutsideViewport(layer, camera, effectiveFilters[layerIndex].filters)) {
         continue;
       }
 
@@ -491,6 +500,10 @@ export class Renderer {
         continue;
       }
 
+      if (this.isLayerOutsideViewport(layer, camera, effectiveFilters[layerIndex].filters)) {
+        continue;
+      }
+
       this.drawLayerDropShadow(
         layer,
         camera,
@@ -522,6 +535,10 @@ export class Renderer {
         layer instanceof AdjustmentLayer ||
         layer instanceof GroupLayer
       ) {
+        continue;
+      }
+
+      if (this.isLayerOutsideViewport(layer, camera, effectiveFilters[layerIndex].filters)) {
         continue;
       }
 
@@ -1246,11 +1263,12 @@ export class Renderer {
     };
   }
 
+  prepareObject3DLayer(layer: Object3DLayer) {
+    this.getObject3DMesh(layer);
+  }
+
   private getObject3DMesh(layer: Object3DLayer) {
-    const cacheKey =
-      layer.objectKind === "imported"
-        ? `imported:${layer.id}:${layer.modelRevision}:${layer.importedModel?.name ?? layer.modelSource ?? ""}`
-        : layer.objectKind;
+    const cacheKey = getObject3DMeshCacheKey(layer);
     const cachedMesh = this.object3DMeshCache.get(cacheKey);
 
     if (cachedMesh) {
@@ -1267,6 +1285,73 @@ export class Renderer {
     this.object3DMeshCache.set(cacheKey, mesh);
 
     return mesh;
+  }
+
+  private pruneObject3DMeshCache(scene: Scene) {
+    if (this.object3DMeshCache.size === 0) {
+      return;
+    }
+
+    const activeKeys = new Set<string>();
+
+    for (const layer of scene.layers) {
+      if (layer instanceof Object3DLayer) {
+        activeKeys.add(getObject3DMeshCacheKey(layer));
+      }
+    }
+
+    for (const [cacheKey, mesh] of this.object3DMeshCache) {
+      if (!activeKeys.has(cacheKey) && !cacheKey.startsWith("builtin:")) {
+        mesh.dispose();
+        this.object3DMeshCache.delete(cacheKey);
+      }
+    }
+  }
+
+  private isLayerOutsideViewport(
+    layer: Layer,
+    camera: Camera2D,
+    filters: LayerFilterSettings
+  ) {
+    const topLeft = camera.screenToWorld(0, 0);
+    const bottomRight = camera.screenToWorld(this.cssWidth, this.cssHeight);
+    const viewportLeft = Math.min(topLeft.x, bottomRight.x);
+    const viewportRight = Math.max(topLeft.x, bottomRight.x);
+    const viewportBottom = Math.min(topLeft.y, bottomRight.y);
+    const viewportTop = Math.max(topLeft.y, bottomRight.y);
+    const corners = getLayerCorners(layer);
+    const xs = [
+      corners.bottomLeft.x,
+      corners.bottomRight.x,
+      corners.topLeft.x,
+      corners.topRight.x
+    ];
+    const ys = [
+      corners.bottomLeft.y,
+      corners.bottomRight.y,
+      corners.topLeft.y,
+      corners.topRight.y
+    ];
+    const shadowPadding =
+      Math.max(
+        Math.abs(filters.dropShadowOffsetX),
+        Math.abs(filters.dropShadowOffsetY),
+        filters.dropShadowBlur,
+        layer instanceof Object3DLayer
+          ? Math.max(layer.shadowSoftness, layer.shadowDistance * Math.max(layer.width, layer.height) * 0.28)
+          : 0
+      ) + 12 / Math.max(camera.zoom, 0.001);
+    const layerLeft = Math.min(...xs) - shadowPadding;
+    const layerRight = Math.max(...xs) + shadowPadding;
+    const layerBottom = Math.min(...ys) - shadowPadding;
+    const layerTop = Math.max(...ys) + shadowPadding;
+
+    return (
+      layerRight < viewportLeft ||
+      layerLeft > viewportRight ||
+      layerTop < viewportBottom ||
+      layerBottom > viewportTop
+    );
   }
 
   private drawTextureQuad(

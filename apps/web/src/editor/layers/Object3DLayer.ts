@@ -35,6 +35,7 @@ export type Object3DLayerOptions = Omit<LayerOptions, "type"> & {
   rotationX?: number;
   rotationY?: number;
   rotationZ?: number;
+  shadowDistance?: number;
   shadowOpacity?: number;
   shadowSoftness?: number;
 };
@@ -57,6 +58,7 @@ export class Object3DLayer extends Layer {
   rotationX: number;
   rotationY: number;
   rotationZ: number;
+  shadowDistance: number;
   shadowOpacity: number;
   shadowSoftness: number;
   modelMaterials: Object3DMaterialSlot[];
@@ -90,6 +92,7 @@ export class Object3DLayer extends Layer {
     this.rotationX = normalizeRotation(options.rotationX ?? -18);
     this.rotationY = normalizeRotation(options.rotationY ?? 34);
     this.rotationZ = normalizeRotation(options.rotationZ ?? 0);
+    this.shadowDistance = clamp(options.shadowDistance ?? 0.72, 0, 1.5);
     this.shadowOpacity = clamp(options.shadowOpacity ?? 0.34, 0, 1);
     this.shadowSoftness = clamp(options.shadowSoftness ?? 22, 0, 64);
     this.modelMaterials = normalizeObject3DMaterials(options.modelMaterials ?? []);
@@ -127,6 +130,7 @@ export class Object3DLayer extends Layer {
       rotationX: this.rotationX,
       rotationY: this.rotationY,
       rotationZ: this.rotationZ,
+      shadowDistance: this.shadowDistance,
       shadowOpacity: this.shadowOpacity,
       shadowSoftness: this.shadowSoftness,
       type: "object3d",

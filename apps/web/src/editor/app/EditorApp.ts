@@ -939,6 +939,7 @@ export class EditorApp {
   async applyLayerAssetCommand(command: LayerAssetCommand) {
     const before = this.captureAppSnapshot();
     const result = await this.applyLayerAssetCommandToScene(command);
+    await this.prepareImportedObjectLayer(result);
 
     this.recordHistoryAction(
       this.createHistoryAction({
@@ -1527,6 +1528,20 @@ export class EditorApp {
     return importModelAssetsIntoLayer(layer, command.files);
   }
 
+  private async prepareImportedObjectLayer(result: unknown) {
+    const layer =
+      result && typeof result === "object" && "layer" in result
+        ? (result as { layer?: unknown }).layer
+        : result;
+
+    if (!(layer instanceof Object3DLayer) || layer.objectKind !== "imported") {
+      return;
+    }
+
+    await waitForBrowserIdle();
+    this.renderer.prepareObject3DLayer(layer);
+  }
+
   private async resampleImageLayer(layerId: string, width: number, height: number) {
     return resampleImageLayerInScene(this.scene, layerId, width, height);
   }
@@ -1691,6 +1706,19 @@ export class EditorApp {
 
 function shouldShowSelectionOutline(tool: string) {
   return tool === "Move" || tool === "Transform" || tool === "Text" || tool === "Crop";
+}
+
+function waitForBrowserIdle() {
+  return new Promise<void>((resolve) => {
+    const scheduleIdle = window.requestIdleCallback;
+
+    if (scheduleIdle) {
+      scheduleIdle(() => resolve(), { timeout: 48 });
+      return;
+    }
+
+    window.setTimeout(resolve, 0);
+  });
 }
 
 function cloneTextEditingState(state: TextEditingState): TextEditingState {

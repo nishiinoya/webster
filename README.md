@@ -436,3 +436,4 @@ This section maps the expected demo requirements to current project status.
 | Save project in additional format | Present | `.webster` native project format. |
 | Share in social networks | Planned | Not implemented. |
 | User-created templates | Present | Implemented. |
+|Import font|Planned|

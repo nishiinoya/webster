@@ -79,6 +79,7 @@ type Object3DLayerSummary = LayerSummary & {
   rotationX: number;
   rotationY: number;
   rotationZ: number;
+  shadowDistance: number;
   shadowOpacity: number;
   shadowSoftness: number;
 };
@@ -694,6 +695,14 @@ export function PropertiesPanel({
               min={0}
               onChange={(value) => updateSelectedLayer({ shadowOpacity: Number(value) / 100 })}
               value={Math.round(selectedLayer.shadowOpacity * 100)}
+            />
+            <FilterSlider
+              disabled={selectedLayer.locked}
+              label="Shadow distance"
+              max={150}
+              min={0}
+              onChange={(value) => updateSelectedLayer({ shadowDistance: Number(value) / 100 })}
+              value={Math.round(selectedLayer.shadowDistance * 100)}
             />
             <FilterSlider
               disabled={selectedLayer.locked}

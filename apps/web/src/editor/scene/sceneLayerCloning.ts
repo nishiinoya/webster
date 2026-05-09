@@ -86,6 +86,7 @@ export function cloneLayer(
       rotationX: layer.rotationX,
       rotationY: layer.rotationY,
       rotationZ: layer.rotationZ,
+      shadowDistance: layer.shadowDistance,
       shadowOpacity: layer.shadowOpacity,
       shadowSoftness: layer.shadowSoftness
     });

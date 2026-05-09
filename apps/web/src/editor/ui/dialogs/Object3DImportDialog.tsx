@@ -1,10 +1,11 @@
 import type { ChangeEvent, DragEvent } from "react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Imported3DModel } from "../../import3d/Imported3DModel";
 import { import3DModelPackage } from "../../import3d/import3DModel";
 import { cn } from "../classNames";
 
 type Object3DImportDialogProps = {
+  initialFiles?: File[];
   onClose: () => void;
   onUseModel: (model: Imported3DModel) => void;
   replaceLayerName?: string | null;
@@ -14,6 +15,7 @@ const acceptedModelFiles =
   ".obj,.mtl,.zip,.glb,.gltf,.bin,.stl,.ply,.fbx,.dae,.3ds,image/*,text/plain,application/zip,model/gltf+json,model/gltf-binary";
 
 export function Object3DImportDialog({
+  initialFiles = [],
   onClose,
   onUseModel,
   replaceLayerName
@@ -27,6 +29,14 @@ export function Object3DImportDialog({
 
   const canLoad = files.length > 0 && !isLoading;
   const canUse = Boolean(loadedModel) && !isLoading;
+
+  useEffect(() => {
+    if (initialFiles.length === 0) {
+      return;
+    }
+
+    handleFiles(initialFiles);
+  }, [initialFiles]);
 
   function handleFiles(nextFiles: FileList | File[]) {
     setFiles(Array.from(nextFiles));

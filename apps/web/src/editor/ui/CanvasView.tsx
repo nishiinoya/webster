@@ -65,6 +65,7 @@ type CanvasViewProps = {
   onClipboardCommandRequestHandled: (requestId: number) => void;
   onHistoryCommandRequestHandled: (requestId: number) => void;
   onLayersChange: (layers: LayerSummary[]) => void;
+  onOpenObject3DImportFiles: (files: File[]) => void;
   onStrokeLayerCreated: (layerId: string) => void;
   onDocumentCommandRequestHandled: (requestId: number) => void;
   onImageDocumentRequestHandled: (requestId: number) => void;
@@ -127,6 +128,7 @@ export function CanvasView({
   onClipboardCommandRequestHandled,
   onHistoryCommandRequestHandled,
   onLayersChange,
+  onOpenObject3DImportFiles,
   onStrokeLayerCreated,
   onDocumentCommandRequestHandled,
   onImageDocumentRequestHandled,
@@ -529,6 +531,11 @@ export function CanvasView({
       return;
     }
 
+    if (files.some(isModelAssetFile)) {
+      onOpenObject3DImportFiles(files);
+      return;
+    }
+
     async function importFiles() {
       try {
         await editorAppRef.current?.importDroppedFiles(files, dropPoint.clientX, dropPoint.clientY);
@@ -786,5 +793,9 @@ function hasDroppableAsset(dataTransfer: DataTransfer) {
 }
 
 function isDroppableAssetFile(file: File) {
-  return file.type.startsWith("image/") || /\.(obj|mtl|zip)$/iu.test(file.name);
+  return file.type.startsWith("image/") || isModelAssetFile(file);
+}
+
+function isModelAssetFile(file: File) {
+  return /\.(obj|mtl|zip|glb|gltf|bin|stl|ply|fbx|dae|3ds)$/iu.test(file.name);
 }

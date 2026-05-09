@@ -252,7 +252,7 @@ async function importObjModel(
     textureByPath,
     warnings
   });
-  const parts = parseObjParts(source, importedMaterials, warnings);
+  const parts = await parseObjParts(source, importedMaterials, warnings);
 
   applyConservativeTextureFallbacks(importedMaterials, textures, warnings);
 
@@ -266,11 +266,11 @@ async function importObjModel(
   });
 }
 
-function parseObjParts(
+async function parseObjParts(
   source: string,
   materials: Imported3DMaterial[],
   warnings: string[]
-): Imported3DPart[] {
+): Promise<Imported3DPart[]> {
   const sourcePositions: number[][] = [];
   const sourceNormals: number[][] = [];
   const sourceTexCoords: number[][] = [];
@@ -302,7 +302,13 @@ function parseObjParts(
     return currentPart!;
   }
 
-  for (const rawLine of source.split(/\r?\n/u)) {
+  const lines = source.split(/\r?\n/u);
+
+  for (const [lineIndex, rawLine] of lines.entries()) {
+    if (lineIndex > 0 && lineIndex % 1600 === 0) {
+      await yieldToMainThread();
+    }
+
     const line = rawLine.split("#")[0].trim();
 
     if (!line) {
@@ -712,7 +718,7 @@ async function importGltfRoot({
 
   applyConservativeTextureFallbacks(materials, textures, warnings);
 
-  const parts = createGltfParts(context, materials);
+  const parts = await createGltfParts(context, materials);
 
   if (parts.length === 0) {
     warnings.push("The glTF scene did not contain readable triangle mesh primitives; fallback geometry was used.");
@@ -920,14 +926,14 @@ function readGltfSpecularExtension(extensions: Record<string, unknown> | undefin
   };
 }
 
-function createGltfParts(
+async function createGltfParts(
   context: GltfImportContext,
   materials: Imported3DMaterial[]
-): Imported3DPart[] {
+): Promise<Imported3DPart[]> {
   const parts: Imported3DPart[] = [];
   const meshReferences = getGltfSceneMeshReferences(context.gltf);
 
-  for (const meshReference of meshReferences) {
+  for (const [meshReferenceIndex, meshReference] of meshReferences.entries()) {
     const mesh = context.gltf.meshes?.[meshReference.meshIndex];
 
     if (!mesh) {
@@ -947,48 +953,140 @@ function createGltfParts(
         continue;
       }
 
-      const positions = readGltfAccessor(context, positionAccessor);
+      const positions = await readGltfAccessor(context, positionAccessor);
       const normals =
-        attributes.NORMAL === undefined ? null : readGltfAccessor(context, attributes.NORMAL);
+        attributes.NORMAL === undefined ? null : await readGltfAccessor(context, attributes.NORMAL);
       const texCoords =
-        attributes.TEXCOORD_0 === undefined ? null : readGltfAccessor(context, attributes.TEXCOORD_0);
+        attributes.TEXCOORD_0 === undefined ? null : await readGltfAccessor(context, attributes.TEXCOORD_0);
       const colors =
-        attributes.COLOR_0 === undefined ? null : readGltfAccessor(context, attributes.COLOR_0);
+        attributes.COLOR_0 === undefined ? null : await readGltfAccessor(context, attributes.COLOR_0);
       const indices =
-        primitive.indices === undefined ? null : readGltfAccessor(context, primitive.indices);
-      const indexValues =
-        indices?.values ?? Array.from({ length: positions.count }, (_, index) => index);
+        primitive.indices === undefined ? null : await readGltfAccessor(context, primitive.indices);
       const material = primitive.material === undefined ? null : materials[primitive.material] ?? null;
-      const builder: PartBuilder = {
-        colors: [],
+      const part = await createGltfPrimitivePart({
+        colors,
+        indices,
         materialName: material?.name ?? null,
+        matrix: meshReference.matrix,
         name: `${mesh.name || "glTF mesh"} ${primitiveIndex + 1}`,
-        normals: [],
-        texCoords: [],
-        vertices: []
-      };
+        normals,
+        positions,
+        texCoords
+      });
 
-      for (let index = 0; index + 2 < indexValues.length; index += 3) {
-        for (const vertexIndex of [indexValues[index], indexValues[index + 1], indexValues[index + 2]]) {
-          pushAccessorVertex(
-            builder,
-            positions,
-            normals,
-            texCoords,
-            colors,
-            vertexIndex,
-            meshReference.matrix
-          );
-        }
+      if (part) {
+        parts.push(part);
       }
 
-      if (builder.vertices.length >= 9) {
-        parts.push(toImportedPart(builder));
+      if ((meshReferenceIndex + primitiveIndex) % 3 === 0) {
+        await yieldToMainThread();
       }
     }
   }
 
   return parts;
+}
+
+async function createGltfPrimitivePart(input: {
+  colors: GltfAccessorData | null;
+  indices: GltfAccessorData | null;
+  materialName: string | null;
+  matrix: number[];
+  name: string;
+  normals: GltfAccessorData | null;
+  positions: GltfAccessorData;
+  texCoords: GltfAccessorData | null;
+}): Promise<Imported3DPart | null> {
+  const vertexCount = input.positions.count;
+
+  if (vertexCount < 3) {
+    return null;
+  }
+
+  const vertices = new Float32Array(vertexCount * 3);
+  const normals = new Float32Array(vertexCount * 3);
+  const texCoords = new Float32Array(vertexCount * 2);
+  const colors =
+    input.colors && input.colors.count === vertexCount
+      ? new Float32Array(vertexCount * 4)
+      : undefined;
+
+  for (let vertexIndex = 0; vertexIndex < vertexCount; vertexIndex += 1) {
+    const positionOffset = vertexIndex * input.positions.componentCount;
+    const position = transformPosition3(input.matrix, [
+      input.positions.values[positionOffset] ?? 0,
+      input.positions.values[positionOffset + 1] ?? 0,
+      input.positions.values[positionOffset + 2] ?? 0
+    ]);
+
+    vertices.set(position, vertexIndex * 3);
+
+    if (input.normals && input.normals.count === vertexCount) {
+      const normalOffset = vertexIndex * input.normals.componentCount;
+      const normal = transformDirection3(input.matrix, [
+        input.normals.values[normalOffset] ?? 0,
+        input.normals.values[normalOffset + 1] ?? 0,
+        input.normals.values[normalOffset + 2] ?? 0
+      ]);
+
+      normals.set(normal, vertexIndex * 3);
+    }
+
+    if (input.texCoords && input.texCoords.count === vertexCount) {
+      const texCoordOffset = vertexIndex * input.texCoords.componentCount;
+
+      texCoords[vertexIndex * 2] = input.texCoords.values[texCoordOffset] ?? 0;
+      texCoords[vertexIndex * 2 + 1] = input.texCoords.values[texCoordOffset + 1] ?? 0;
+    }
+
+    if (colors && input.colors) {
+      const colorOffset = vertexIndex * input.colors.componentCount;
+
+      colors[vertexIndex * 4] = input.colors.values[colorOffset] ?? 1;
+      colors[vertexIndex * 4 + 1] = input.colors.values[colorOffset + 1] ?? 1;
+      colors[vertexIndex * 4 + 2] = input.colors.values[colorOffset + 2] ?? 1;
+      colors[vertexIndex * 4 + 3] =
+        input.colors.componentCount > 3 ? input.colors.values[colorOffset + 3] ?? 1 : 1;
+    }
+
+    if (vertexIndex > 0 && vertexIndex % 12000 === 0) {
+      await yieldToMainThread();
+    }
+  }
+
+  return {
+    colors,
+    indices: input.indices ? createGltfIndexArray(input.indices.values, vertexCount) : undefined,
+    materialName: input.materialName,
+    name: input.name,
+    normals,
+    texCoords,
+    vertices
+  };
+}
+
+function createGltfIndexArray(values: number[], vertexCount: number) {
+  const triangleIndexCount = Math.floor(values.length / 3) * 3;
+
+  if (triangleIndexCount < 3) {
+    return undefined;
+  }
+
+  let maxIndex = 0;
+  const sanitized = new Array<number>(triangleIndexCount);
+
+  for (let index = 0; index < triangleIndexCount; index += 1) {
+    const value = Math.trunc(values[index] ?? -1);
+
+    if (value < 0 || value >= vertexCount) {
+      return undefined;
+    }
+
+    sanitized[index] = value;
+    maxIndex = Math.max(maxIndex, value);
+  }
+
+  return maxIndex > 65535 ? new Uint32Array(sanitized) : new Uint16Array(sanitized);
 }
 
 function getGltfSceneMeshReferences(gltf: GltfRoot) {
@@ -1027,7 +1125,7 @@ function getGltfSceneMeshReferences(gltf: GltfRoot) {
   return meshReferences;
 }
 
-function readGltfAccessor(context: GltfImportContext, accessorIndex: number): GltfAccessorData {
+async function readGltfAccessor(context: GltfImportContext, accessorIndex: number): Promise<GltfAccessorData> {
   const accessor = context.gltf.accessors?.[accessorIndex];
 
   if (!accessor) {
@@ -1070,6 +1168,10 @@ function readGltfAccessor(context: GltfImportContext, accessorIndex: number): Gl
           Boolean(accessor.normalized)
         )
       );
+    }
+
+    if (index > 0 && index % 25000 === 0) {
+      await yieldToMainThread();
     }
   }
 
@@ -1404,13 +1506,17 @@ function finalizeImportedModel(input: {
   }
 
   const vertexCount = parts.reduce((sum, part) => sum + part.vertices.length / 3, 0);
-  const triangleCount = Math.floor(vertexCount / 3);
+  const triangleCount = parts.reduce(
+    (sum, part) => sum + Math.floor((part.indices?.length ?? part.vertices.length / 3) / 3),
+    0
+  );
   const unassignedTextureNames = input.textures
     .map((texture) => texture.name)
     .filter((name) => !assignedTextureNames.has(name));
   const warnings = [...input.warnings, ...visuallyUnsupportedMaps];
 
   return {
+    id: crypto.randomUUID(),
     materials,
     name: input.name || "Imported 3D model",
     parts,
@@ -1899,6 +2005,31 @@ function generateMissingNormals(part: Imported3DPart) {
   }
 
   const normals = new Float32Array(part.vertices.length);
+  const indices = part.indices;
+
+  if (indices) {
+    for (let index = 0; index + 2 < indices.length; index += 3) {
+      const i0 = indices[index];
+      const i1 = indices[index + 1];
+      const i2 = indices[index + 2];
+      const normal = getFaceNormal(
+        readVec3(part.vertices, i0),
+        readVec3(part.vertices, i1),
+        readVec3(part.vertices, i2)
+      );
+
+      addVec3(normals, i0, normal);
+      addVec3(normals, i1, normal);
+      addVec3(normals, i2, normal);
+    }
+
+    for (let vertex = 0; vertex < part.vertices.length / 3; vertex += 1) {
+      normals.set(normalize3(readVec3(normals, vertex)), vertex * 3);
+    }
+
+    part.normals = normals;
+    return;
+  }
 
   for (let index = 0; index + 8 < part.vertices.length; index += 9) {
     const normal = getFaceNormal(
@@ -1918,11 +2049,14 @@ function generateMissingNormals(part: Imported3DPart) {
 function generateTangents(part: Imported3DPart) {
   const vertexCount = part.vertices.length / 3;
   const tangents = new Float32Array(vertexCount * 3);
+  const indices = part.indices;
 
-  for (let vertex = 0; vertex + 2 < vertexCount; vertex += 3) {
-    const i0 = vertex;
-    const i1 = vertex + 1;
-    const i2 = vertex + 2;
+  const triangleCount = indices ? Math.floor(indices.length / 3) : Math.floor(vertexCount / 3);
+
+  for (let triangle = 0; triangle < triangleCount; triangle += 1) {
+    const i0 = indices ? indices[triangle * 3] : triangle * 3;
+    const i1 = indices ? indices[triangle * 3 + 1] : triangle * 3 + 1;
+    const i2 = indices ? indices[triangle * 3 + 2] : triangle * 3 + 2;
     const p0 = readVec3(part.vertices, i0);
     const p1 = readVec3(part.vertices, i1);
     const p2 = readVec3(part.vertices, i2);
@@ -1949,9 +2083,9 @@ function generateTangents(part: Imported3DPart) {
           ])
         : [1, 0, 0];
 
-    tangents.set(tangent, i0 * 3);
-    tangents.set(tangent, i1 * 3);
-    tangents.set(tangent, i2 * 3);
+    addVec3(tangents, i0, tangent);
+    addVec3(tangents, i1, tangent);
+    addVec3(tangents, i2, tangent);
   }
 
   for (let vertex = 0; vertex < vertexCount; vertex += 1) {
@@ -2218,6 +2352,14 @@ function readVec2(values: Float32Array, vertexIndex: number): [number, number] {
   return [values[offset] ?? 0, values[offset + 1] ?? 0];
 }
 
+function addVec3(values: Float32Array, vertexIndex: number, vector: number[]) {
+  const offset = vertexIndex * 3;
+
+  values[offset] += vector[0];
+  values[offset + 1] += vector[1];
+  values[offset + 2] += vector[2];
+}
+
 function getFaceNormal(a: number[], b: number[], c: number[]) {
   const ux = b[0] - a[0];
   const uy = b[1] - a[1];
@@ -2237,6 +2379,24 @@ function normalize3(vector: number[]) {
 
 function dot3(left: number[], right: number[]) {
   return left[0] * right[0] + left[1] * right[1] + left[2] * right[2];
+}
+
+function yieldToMainThread() {
+  return new Promise<void>((resolve) => {
+    if (typeof window === "undefined") {
+      resolve();
+      return;
+    }
+
+    const scheduleIdle = window.requestIdleCallback;
+
+    if (scheduleIdle) {
+      scheduleIdle(() => resolve(), { timeout: 32 });
+      return;
+    }
+
+    window.setTimeout(resolve, 0);
+  });
 }
 
 function identity4() {

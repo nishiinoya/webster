@@ -15,6 +15,7 @@ export type Imported3DTextureChannel = "r" | "g" | "b" | "a";
 
 export type Imported3DPart = {
   colors?: Float32Array;
+  indices?: Uint16Array | Uint32Array;
   materialName: string | null;
   name: string;
   normals: Float32Array;
@@ -79,6 +80,7 @@ export type Imported3DModelSummary = {
 };
 
 export type Imported3DModel = {
+  id: string;
   materials: Imported3DMaterial[];
   name: string;
   parts: Imported3DPart[];
@@ -91,9 +93,10 @@ export type Imported3DModel = {
 
 export type SerializedImported3DPart = Omit<
   Imported3DPart,
-  "colors" | "normals" | "tangents" | "texCoords" | "vertices"
+  "colors" | "indices" | "normals" | "tangents" | "texCoords" | "vertices"
 > & {
   colors?: number[];
+  indices?: number[];
   normals: number[];
   tangents?: number[];
   texCoords: number[];
@@ -119,6 +122,7 @@ export function serializeImported3DModel(
   }
 
   return {
+    id: model.id,
     materials: model.materials.map((material) => ({
       ...material,
       baseColor: [...material.baseColor],
@@ -131,6 +135,7 @@ export function serializeImported3DModel(
     name: model.name,
     parts: model.parts.map((part) => ({
       colors: part.colors ? Array.from(part.colors) : undefined,
+      indices: part.indices ? Array.from(part.indices) : undefined,
       materialName: part.materialName,
       name: part.name,
       normals: Array.from(part.normals),
@@ -170,6 +175,7 @@ export async function deserializeImported3DModel(
   }
 
   return {
+    id: model.id ?? crypto.randomUUID(),
     materials: model.materials.map((material) => ({
       ...material,
       baseColor: [...material.baseColor],
@@ -182,6 +188,7 @@ export async function deserializeImported3DModel(
     name: model.name,
     parts: model.parts.map((part) => ({
       colors: part.colors ? new Float32Array(part.colors) : undefined,
+      indices: part.indices ? createIndexArray(part.indices) : undefined,
       materialName: part.materialName,
       name: part.name,
       normals: new Float32Array(part.normals),
@@ -214,6 +221,7 @@ export function cloneImported3DModel(model: Imported3DModel | null) {
   }
 
   return {
+    id: model.id,
     materials: model.materials.map((material) => ({
       ...material,
       baseColor: [...material.baseColor] as [number, number, number, number],
@@ -229,13 +237,14 @@ export function cloneImported3DModel(model: Imported3DModel | null) {
     })),
     name: model.name,
     parts: model.parts.map((part) => ({
-      colors: part.colors ? new Float32Array(part.colors) : undefined,
+      colors: part.colors,
+      indices: part.indices,
       materialName: part.materialName,
       name: part.name,
-      normals: new Float32Array(part.normals),
-      tangents: part.tangents ? new Float32Array(part.tangents) : undefined,
-      texCoords: new Float32Array(part.texCoords),
-      vertices: new Float32Array(part.vertices)
+      normals: part.normals,
+      tangents: part.tangents,
+      texCoords: part.texCoords,
+      vertices: part.vertices
     })),
     sourceFormat: model.sourceFormat,
     stats: { ...model.stats },
@@ -288,4 +297,10 @@ async function loadImageElement(src: string) {
   }
 
   return image;
+}
+
+function createIndexArray(values: number[]) {
+  const maxIndex = values.reduce((max, value) => Math.max(max, value), 0);
+
+  return maxIndex > 65535 ? new Uint32Array(values) : new Uint16Array(values);
 }

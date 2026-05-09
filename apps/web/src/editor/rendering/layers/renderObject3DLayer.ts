@@ -1,7 +1,7 @@
 import { Camera2D } from "../../geometry/Camera2D";
 import { degreesToRadians } from "../../geometry/TransformGeometry";
 import type { Imported3DMaterial, Imported3DTexture } from "../../import3d/Imported3DModel";
-import { defaultLayerFilters, Layer } from "../../layers/Layer";
+import { defaultLayerFilters, defaultLayerTexture, Layer } from "../../layers/Layer";
 import { Object3DLayer } from "../../layers/Object3DLayer";
 import type { Object3DMaterialSlot } from "../../layers/Object3DLayer";
 import { Object3DMesh } from "../geometry/Object3DMesh";
@@ -37,10 +37,12 @@ export function renderObject3DLayer(
   filters: EffectiveLayerFilters
 ) {
   if (!context.renderColorOverride) {
-    renderInternalShadow(context, layer, camera, filters);
+    renderProjectedShadow(context, layer, camera, filters);
   }
 
   const objectScale = getObjectScale(layer);
+  const objectModelMatrix = getObjectModelMatrix(layer);
+  const viewProjectionMatrix = getViewProjectionMatrix(layer);
   const previousDepthTest = context.gl.isEnabled(context.gl.DEPTH_TEST);
   const previousCullFace = context.gl.isEnabled(context.gl.CULL_FACE);
   const previousDepthMask = context.gl.getParameter(context.gl.DEPTH_WRITEMASK) as boolean;
@@ -49,9 +51,9 @@ export function renderObject3DLayer(
   context.object3DShaderProgram.setProjection(camera.projectionMatrix);
   context.object3DShaderProgram.setLayerModel(context.getLayerModelMatrix(layer));
   context.object3DShaderProgram.setTransform3D(
-    getObjectModelMatrix(layer),
-    getObjectModelMatrix(layer),
-    getViewProjectionMatrix(layer)
+    objectModelMatrix,
+    objectModelMatrix,
+    viewProjectionMatrix
   );
   context.object3DShaderProgram.setObjectScale(objectScale.x, objectScale.y);
   context.object3DShaderProgram.setOpacity(layer.opacity * filters.opacity);
@@ -111,7 +113,7 @@ function bindSubmeshMaterial(
 
   context.object3DShaderProgram.setMaterial(
     importedMaterial ? getImportedMaterialColor(importedMaterial, layer) : materialColor,
-    importedMaterial ? { blend: 0, color: [1, 1, 1, 1], contrast: 0, kind: "none", scale: 16 } : layer.materialTexture
+    context.renderColorOverride || importedMaterial ? defaultLayerTexture : layer.materialTexture
   );
   bindImportedMaterialMaps(context, layer, importedMaterial);
 
@@ -190,50 +192,99 @@ function findObjectMaterial(layer: Object3DLayer, materialName: string | null) {
   );
 }
 
-function renderInternalShadow(
+function renderProjectedShadow(
   context: Object3DLayerRendererContext,
   layer: Object3DLayer,
   camera: Camera2D,
   filters: EffectiveLayerFilters
 ) {
-  if (layer.shadowOpacity <= 0) {
+  const opacity = layer.shadowOpacity * layer.opacity * filters.opacity;
+
+  if (opacity <= 0) {
     return;
   }
 
-  const shadow = getInternalShadowRectangle(layer);
+  const previousDepthTest = context.gl.isEnabled(context.gl.DEPTH_TEST);
+  const previousCullFace = context.gl.isEnabled(context.gl.CULL_FACE);
+  const previousDepthMask = context.gl.getParameter(context.gl.DEPTH_WRITEMASK) as boolean;
+  const objectScale = getObjectScale(layer);
+  const objectModelMatrix = getObjectModelMatrix(layer);
+  const shadowModelMatrix = getObjectShadowModelMatrix(layer, objectModelMatrix);
+  const viewProjectionMatrix = getViewProjectionMatrix(layer);
+  const softnessScale = 1 + layer.shadowSoftness / 280;
+  const passes =
+    layer.shadowSoftness > 1
+      ? [
+          { opacity: 0.38, scale: softnessScale },
+          { opacity: 0.72, scale: 1 }
+        ]
+      : [{ opacity: 1, scale: 1 }];
 
-  context.solidColorShaderProgram.use();
-  context.solidColorShaderProgram.setProjection(camera.projectionMatrix);
-  context.solidColorShaderProgram.setFilters({
-    ...filters.filters,
-    blur: Math.max(filters.filters.blur, layer.shadowSoftness)
-  });
-  context.solidColorShaderProgram.setAdjustmentFilters(filters.adjustments);
-  context.solidColorShaderProgram.setColor([
-    0,
-    0,
-    0,
-    layer.shadowOpacity * layer.opacity * filters.opacity
-  ]);
-  context.bindMask(layer, context.solidColorShaderProgram);
-  context.drawLayerLocalEllipse(layer, shadow);
+  context.object3DShaderProgram.use();
+  context.object3DShaderProgram.setProjection(camera.projectionMatrix);
+  context.object3DShaderProgram.setLayerModel(context.getLayerModelMatrix(layer));
+  context.object3DShaderProgram.setTransform3D(
+    shadowModelMatrix,
+    objectModelMatrix,
+    viewProjectionMatrix
+  );
+  context.object3DShaderProgram.setLighting([0, 1, 0], 1, 0);
+  context.object3DShaderProgram.setOpacity(1);
+  context.object3DShaderProgram.setFilters(defaultLayerFilters);
+  context.object3DShaderProgram.setAdjustmentFilters([]);
+  context.object3DShaderProgram.setMaskTextureUnit(1);
+  context.bindMask(layer, context.object3DShaderProgram);
+
+  context.gl.enable(context.gl.DEPTH_TEST);
+  context.gl.depthFunc(context.gl.LEQUAL);
+  context.gl.depthMask(true);
+  context.gl.disable(context.gl.CULL_FACE);
+
+  for (const pass of passes) {
+    setProjectedShadowMaterial(context, opacity * pass.opacity);
+    context.object3DShaderProgram.setObjectScale(
+      objectScale.x * pass.scale,
+      objectScale.y * pass.scale
+    );
+    context.gl.clearDepth(1);
+    context.gl.clear(context.gl.DEPTH_BUFFER_BIT);
+    context.getObject3DMesh(layer).draw(context.object3DShaderProgram);
+  }
+
+  if (!previousDepthTest) {
+    context.gl.disable(context.gl.DEPTH_TEST);
+  }
+
+  if (previousCullFace) {
+    context.gl.enable(context.gl.CULL_FACE);
+  } else {
+    context.gl.disable(context.gl.CULL_FACE);
+  }
+
+  context.gl.depthMask(previousDepthMask);
 }
 
-function getInternalShadowRectangle(layer: Object3DLayer) {
-  const baseWidth = layer.width * 0.56;
-  const baseHeight = layer.height * 0.16;
-  const softnessScale = 1 + layer.shadowSoftness / 96;
-  const offsetX = clamp(-layer.lightX * layer.width * 0.022, -layer.width * 0.2, layer.width * 0.2);
-  const offsetY = clamp(-layer.lightY * layer.height * 0.012, -layer.height * 0.08, layer.height * 0.08);
-  const width = baseWidth * softnessScale;
-  const height = baseHeight * softnessScale;
-
-  return {
-    height,
-    width,
-    x: layer.width * 0.5 - width / 2 + offsetX,
-    y: layer.height * 0.13 - height / 2 + offsetY
-  };
+function setProjectedShadowMaterial(context: Object3DLayerRendererContext, opacity: number) {
+  context.object3DShaderProgram.setMaterial([0, 0, 0, opacity], defaultLayerTexture);
+  context.object3DShaderProgram.setImportedTexture(false, 2, 0);
+  context.object3DShaderProgram.setImportedMaterial({
+    alphaMode: "OPAQUE",
+    emissiveColor: [0, 0, 0],
+    hasBaseColorTexture: false,
+    hasEmissiveTexture: false,
+    hasGlossinessTexture: false,
+    hasMetallicTexture: false,
+    hasNormalTexture: false,
+    hasRoughnessTexture: false,
+    hasSpecularTexture: false,
+    metallic: 0,
+    metallicTextureChannel: "r",
+    roughness: 1,
+    roughnessTextureChannel: "r",
+    shininess: 1,
+    specularColor: [0, 0, 0],
+    textureUnits: importedTextureUnits
+  });
 }
 
 function getObjectScale(layer: Object3DLayer) {
@@ -250,6 +301,39 @@ function getObjectModelMatrix(layer: Object3DLayer) {
     multiply4(rotationZ(layer.rotationZ), rotationY(layer.rotationY)),
     rotationX(layer.rotationX)
   );
+}
+
+function getObjectShadowModelMatrix(layer: Object3DLayer, objectModelMatrix: Float32Array) {
+  const lightY = Math.max(0.25, Math.abs(layer.lightY));
+  const distance = clamp(layer.shadowDistance, 0, 1.5);
+  const projection = floorShadowProjection(
+    -1.04,
+    (layer.lightX / lightY) * distance,
+    (layer.lightZ / lightY) * distance
+  );
+
+  return multiply4(projection, objectModelMatrix);
+}
+
+function floorShadowProjection(floorY: number, xSlope: number, zSlope: number) {
+  return new Float32Array([
+    1,
+    0,
+    0,
+    0,
+    -xSlope,
+    0,
+    -zSlope,
+    0,
+    0,
+    0,
+    1,
+    0,
+    floorY * xSlope,
+    floorY,
+    floorY * zSlope,
+    1
+  ]);
 }
 
 function getViewProjectionMatrix(layer: Object3DLayer) {

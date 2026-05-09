@@ -204,6 +204,8 @@ export function EditorPage() {
   const [isExportImageDialogOpen, setIsExportImageDialogOpen] = useState(false);
   const [isNewDocumentDialogOpen, setIsNewDocumentDialogOpen] = useState(false);
   const [isObject3DImportDialogOpen, setIsObject3DImportDialogOpen] = useState(false);
+  const [object3DImportInitialFiles, setObject3DImportInitialFiles] = useState<File[]>([]);
+  const [object3DImportMode, setObject3DImportMode] = useState<"add" | "replace">("add");
   const [isResizeCanvasDialogOpen, setIsResizeCanvasDialogOpen] = useState(false);
   const [isResizeImageDialogOpen, setIsResizeImageDialogOpen] = useState(false);
   const [imageLayerCommandPendingState, setImageLayerCommandPendingState] =
@@ -369,8 +371,19 @@ export function EditorPage() {
     setIsObject3DImportDialogOpen(false);
   }
 
+  function openObject3DImportDialog(mode: "add" | "replace", initialFiles: File[] = []) {
+    setObject3DImportMode(mode);
+    setObject3DImportInitialFiles(initialFiles);
+    setLayerAssetCommandPendingState(null);
+    setIsObject3DImportDialogOpen(true);
+  }
+
   function useLoadedObject3DModel(model: Imported3DModel) {
-    if (selectedObject3DLayer && !selectedObject3DLayer.locked) {
+    if (
+      object3DImportMode === "replace" &&
+      selectedObject3DLayer &&
+      !selectedObject3DLayer.locked
+    ) {
       runLayerAssetCommand({
         layerId: selectedObject3DLayer.id,
         model,
@@ -382,6 +395,8 @@ export function EditorPage() {
 
     setLayerAssetCommandPendingState(null);
     setIsObject3DImportDialogOpen(false);
+    setObject3DImportInitialFiles([]);
+    setObject3DImportMode("add");
   }
 
   function runClipboardCommand(command: EditorClipboardCommand) {
@@ -873,10 +888,7 @@ export function EditorPage() {
         onExportTemplate={exportCurrentProjectAsTemplate}
         onSaveTemplate={saveCurrentProjectAsTemplate}
         onAddAdjustmentLayer={() => runLayerCommand({ type: "add-adjustment" })}
-        onAddObject3DLayer={() => {
-          setLayerAssetCommandPendingState(null);
-          setIsObject3DImportDialogOpen(true);
-        }}
+        onAddObject3DLayer={() => openObject3DImportDialog("add")}
         onSelectionCommand={(command) => setSelectionCommandRequest({ command, id: Date.now() })}
         onSelectionModeChange={setSelectedSelectionMode}
         onSelectTool={setSelectedTool}
@@ -972,6 +984,7 @@ export function EditorPage() {
               imageExportRequest={imageExportRequest}
               onHistoryChange={setHistoryState}
               onLayersChange={setLayers}
+              onOpenObject3DImportFiles={(files) => openObject3DImportDialog("add", files)}
               onStrokeLayerCreated={(layerId) => {
                 setSelectedStrokeTargetLayerId(layerId);
                 setSelectedStrokeTargetMode("layer");
@@ -1224,10 +1237,7 @@ export function EditorPage() {
             <PropertiesPanel
               isCollapsed={collapsedSidePanels.properties}
               onGroupSelectedLayers={groupSelectedLayers}
-              onChangeObject3DModel={() => {
-                setLayerAssetCommandPendingState(null);
-                setIsObject3DImportDialogOpen(true);
-              }}
+              onChangeObject3DModel={() => openObject3DImportDialog("replace")}
               onLayerAssetCommand={runLayerAssetCommand}
               onLayerCommand={runLayerCommand}
               onToggleCollapsed={() => toggleSidePanelCollapsed("properties")}
@@ -1273,13 +1283,16 @@ export function EditorPage() {
       ) : null}
       {isObject3DImportDialogOpen ? (
         <Object3DImportDialog
+          initialFiles={object3DImportInitialFiles}
           onClose={() => {
             setIsObject3DImportDialogOpen(false);
             setLayerAssetCommandPendingState(null);
+            setObject3DImportInitialFiles([]);
+            setObject3DImportMode("add");
           }}
           onUseModel={useLoadedObject3DModel}
           replaceLayerName={
-            selectedObject3DLayer && !selectedObject3DLayer.locked
+            object3DImportMode === "replace" && selectedObject3DLayer && !selectedObject3DLayer.locked
               ? selectedObject3DLayer.name
               : null
           }

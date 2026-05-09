@@ -44,6 +44,7 @@ export type SceneLayerUpdates = Partial<{
   rotationY: number;
   rotationZ: number;
   shape: ShapeKind;
+  shadowDistance: number;
   shadowOpacity: number;
   shadowSoftness: number;
   strokeColor: [number, number, number, number];
@@ -202,6 +203,10 @@ export function applySceneLayerUpdates(layer: Layer, updates: SceneLayerUpdates)
 
     if (updates.shadowOpacity !== undefined) {
       layer.shadowOpacity = clamp(updates.shadowOpacity, 0, 1);
+    }
+
+    if (updates.shadowDistance !== undefined) {
+      layer.shadowDistance = clamp(updates.shadowDistance, 0, 1.5);
     }
 
     if (updates.shadowSoftness !== undefined) {
