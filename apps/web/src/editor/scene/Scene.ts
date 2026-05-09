@@ -18,7 +18,7 @@ import {
 } from "./sceneResize";
 import type { DocumentResizeAnchor } from "./sceneResize";
 import { loadSceneFromJSON, serializeSceneToJSON } from "./sceneSerialization";
-import type { SerializedProjectTemplateMetadata } from "./sceneSerialization";
+import type { SerializedProjectFontAsset, SerializedProjectTemplateMetadata } from "./sceneSerialization";
 import { getLayerSummary } from "./sceneSummaries";
 
 export type { LayerMaskAction } from "./sceneMaskActions";
@@ -49,11 +49,16 @@ export type SerializedScene = {
     x?: number;
     y?: number;
   };
+  fonts?: SerializedProjectFontAsset[];
   layers: SerializedLayer[];
   selectedLayerId?: string | null;
   selectedLayerIds?: string[];
   template?: SerializedProjectTemplateMetadata;
   version: 1;
+};
+
+export type SceneFontAsset = SerializedProjectFontAsset & {
+  blob: Blob;
 };
 
 /**
@@ -63,6 +68,7 @@ export class Scene {
   readonly document: DocumentBounds;
   readonly selection = new SelectionManager();
 
+  readonly fontAssets: SceneFontAsset[] = [];
   readonly layers: Layer[] = [];
   selectedLayerId: string | null = null;
   selectedLayerIds: string[] = [];
@@ -119,6 +125,30 @@ export class Scene {
     scene.selectLayers(loaded.selectedLayerIds);
 
     return scene;
+  }
+
+  upsertFontAsset(asset: SceneFontAsset) {
+    const index = this.fontAssets.findIndex(
+      (candidate) =>
+        candidate.id === asset.id ||
+        (candidate.family === asset.family &&
+          candidate.style === asset.style &&
+          candidate.weight === asset.weight &&
+          candidate.italic === asset.italic)
+    );
+
+    if (index >= 0) {
+      this.fontAssets[index] = asset;
+      return;
+    }
+
+    this.fontAssets.push(asset);
+  }
+
+  mergeFontAssets(assets: SceneFontAsset[]) {
+    for (const asset of assets) {
+      this.upsertFontAsset(asset);
+    }
   }
 
   /**

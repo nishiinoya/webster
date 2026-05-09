@@ -1,42 +1,81 @@
 /** Import/export helpers for the native `.webster` project package format. */
 import { ImageLayer } from "../layers/ImageLayer";
+import type { SerializedObject3DModel, SerializedLayer } from "../layers/Layer";
+import { Object3DLayer } from "../layers/Object3DLayer";
 import { Scene, SerializedScene } from "../scene/Scene";
 import type { SerializedProjectTemplateMetadata } from "../scene/sceneSerialization";
+import type { Imported3DModel } from "../import3d/Imported3DModel";
+import {
+  serializeImported3DModelToAssets
+} from "../import3d/Imported3DModel";
 import { blobEntry, createZip, readZip, readZipText, textEntry } from "./ZipStore";
+import type { ZipEntry } from "./ZipStore";
+
+export type ProjectPackageProgress = {
+  message: string;
+  progress: number;
+  title: string;
+};
+
+type ProjectPackageOptions = {
+  onProgress?: (state: ProjectPackageProgress) => void;
+};
 
 export async function exportScenePackage(
   scene: Scene,
-  templateMetadata?: SerializedProjectTemplateMetadata
+  templateMetadata?: SerializedProjectTemplateMetadata,
+  options: ProjectPackageOptions = {}
 ) {
-  const manifest = await scene.toJSON();
+  const entries: ZipEntry[] = [];
+  const modelReferences = new Map<string, SerializedObject3DModel>();
+
+  reportProgress(options, 8, "Saving project...", "Collecting layers and shared assets.");
+  const manifest = await serializeScenePackageManifest(scene, modelReferences, entries);
 
   if (templateMetadata) {
     manifest.template = templateMetadata;
   }
 
-  const entries = [textEntry("manifest.json", JSON.stringify(manifest, null, 2))];
+  reportProgress(
+    options,
+    48,
+    "Saving project...",
+    modelReferences.size > 0
+      ? `Packed ${modelReferences.size} shared 3D model asset${modelReferences.size === 1 ? "" : "s"}.`
+      : "Packed layer data."
+  );
+  await addFontAssetEntries(scene, manifest, entries);
+  entries.unshift(textEntry("manifest.json", JSON.stringify(manifest, null, 2)));
   const addedAssets = new Set<string>();
+  const imageLayers = scene.layers.filter((layer): layer is ImageLayer => layer instanceof ImageLayer);
 
-  for (const layer of scene.layers) {
-    if (layer instanceof ImageLayer) {
-      const layerJson = await layer.toJSON();
+  for (let index = 0; index < imageLayers.length; index += 1) {
+    const layer = imageLayers[index];
+    const layerJson = await layer.toJSON();
 
-      if (addedAssets.has(layerJson.assetPath)) {
-        continue;
-      }
+    reportProgress(
+      options,
+      55 + Math.round((index / Math.max(1, imageLayers.length)) * 22),
+      "Saving project...",
+      `Writing image asset ${index + 1} of ${imageLayers.length}.`
+    );
 
-      entries.push(await blobEntry(layerJson.assetPath, await layer.toAssetBlob()));
-      addedAssets.add(layerJson.assetPath);
+    if (addedAssets.has(layerJson.assetPath)) {
+      continue;
+    }
 
-      if (layerJson.originalAssetPath && !addedAssets.has(layerJson.originalAssetPath)) {
-        entries.push(
-          await blobEntry(layerJson.originalAssetPath, await layer.toOriginalAssetBlob())
-        );
-        addedAssets.add(layerJson.originalAssetPath);
-      }
+    entries.push(await blobEntry(layerJson.assetPath, await layer.toAssetBlob()));
+    addedAssets.add(layerJson.assetPath);
+
+    if (layerJson.originalAssetPath && !addedAssets.has(layerJson.originalAssetPath)) {
+      entries.push(
+        await blobEntry(layerJson.originalAssetPath, await layer.toOriginalAssetBlob())
+      );
+      addedAssets.add(layerJson.originalAssetPath);
     }
   }
 
+  reportProgress(options, 86, "Saving project...", "Writing Webster package.");
   return createZip(entries);
 }
 
@@ -46,10 +85,15 @@ export async function readScenePackageManifest(file: Blob) {
   return JSON.parse(await readZipText(entries, "manifest.json")) as SerializedScene;
 }
 
-export async function importScenePackage(file: Blob) {
+export async function importScenePackage(file: Blob, options: ProjectPackageOptions = {}) {
+  reportProgress(options, 8, "Opening project...", "Reading Webster package.");
   const entries = await readZip(file);
+  reportProgress(options, 28, "Opening project...", "Reading project manifest.");
   const manifest = JSON.parse(await readZipText(entries, "manifest.json")) as SerializedScene;
-  const assets = new Map<string, Blob>();
+  const assets = new Map(entries);
+  const modelLayerCount = manifest.layers.filter(
+    (layer) => layer.type === "object3d" && "model" in layer && layer.model
+  ).length;
 
   for (const asset of manifest.layers) {
     if (asset.type === "image") {
@@ -71,5 +115,144 @@ export async function importScenePackage(file: Blob) {
     }
   }
 
-  return Scene.fromJSON(manifest, assets);
+  reportProgress(
+    options,
+    45,
+    "Opening project...",
+    modelLayerCount > 0
+      ? `Loading ${modelLayerCount} 3D model layer${modelLayerCount === 1 ? "" : "s"}.`
+      : "Loading layers."
+  );
+  const scene = await Scene.fromJSON(manifest, assets);
+
+  reportProgress(options, 86, "Opening project...", "Preparing embedded fonts.");
+  for (const font of manifest.fonts ?? []) {
+    const blob = entries.get(font.assetPath);
+
+    if (blob) {
+      scene.upsertFontAsset({
+        ...font,
+        blob
+      });
+    }
+  }
+
+  reportProgress(options, 100, "Opening project...", "Project loaded.");
+  return scene;
+}
+
+async function serializeScenePackageManifest(
+  scene: Scene,
+  modelReferences: Map<string, SerializedObject3DModel>,
+  entries: ZipEntry[]
+): Promise<SerializedScene> {
+  return {
+    app: "webster",
+    canvas: {
+      background: scene.document.color,
+      height: scene.document.height,
+      width: scene.document.width,
+      x: scene.document.x,
+      y: scene.document.y
+    },
+    layers: await Promise.all(
+      scene.layers.map((layer) => serializeLayerForPackage(layer, modelReferences, entries))
+    ),
+    selectedLayerId: scene.selectedLayerId,
+    selectedLayerIds: scene.selectedLayerIds,
+    version: 1
+  };
+}
+
+async function serializeLayerForPackage(
+  layer: Scene["layers"][number],
+  modelReferences: Map<string, SerializedObject3DModel>,
+  entries: ZipEntry[]
+): Promise<SerializedLayer> {
+  if (!(layer instanceof Object3DLayer) || !layer.importedModel) {
+    return layer.toJSON();
+  }
+
+  return layer.toJSONWithModel(
+    await getImportedModelAssetReference(layer.importedModel, modelReferences, entries)
+  );
+}
+
+async function getImportedModelAssetReference(
+  model: Imported3DModel,
+  modelReferences: Map<string, SerializedObject3DModel>,
+  entries: ZipEntry[]
+): Promise<SerializedObject3DModel> {
+  const key = model.id || `${model.sourceFormat}:${model.name}:${model.stats.vertexCount}:${model.stats.triangleCount}`;
+  const existingReference = modelReferences.get(key);
+
+  if (existingReference) {
+    return existingReference;
+  }
+
+  const basePath = `assets/models/${sanitizeAssetPathSegment(key)}`;
+  const assetPath = `${basePath}/model.json`;
+  const serialized = await serializeImported3DModelToAssets(model, basePath);
+  const reference = {
+    assetPath,
+    id: model.id,
+    name: model.name,
+    sourceFormat: model.sourceFormat,
+    stats: { ...model.stats },
+    version: 3
+  } satisfies SerializedObject3DModel;
+
+  entries.push(textEntry(assetPath, JSON.stringify(serialized.model)));
+
+  for (const asset of serialized.assets) {
+    entries.push(await blobEntry(asset.path, asset.blob));
+  }
+
+  modelReferences.set(key, reference);
+
+  return reference;
+}
+
+async function addFontAssetEntries(scene: Scene, manifest: SerializedScene, entries: ZipEntry[]) {
+  if (scene.fontAssets.length === 0) {
+    return;
+  }
+
+  manifest.fonts = scene.fontAssets.map((font) => ({
+    assetPath: font.assetPath,
+    family: font.family,
+    id: font.id,
+    italic: font.italic,
+    mimeType: font.mimeType,
+    name: font.name,
+    style: font.style,
+    weight: font.weight
+  }));
+
+  for (const font of scene.fontAssets) {
+    entries.push(await blobEntry(font.assetPath, font.blob));
+  }
+}
+
+function sanitizeAssetPathSegment(value: string) {
+  return (
+    value
+      .trim()
+      .replace(/[^a-z0-9._-]+/giu, "-")
+      .replace(/^-+|-+$/gu, "")
+      .slice(0, 80) || "asset"
+  );
+}
+
+function reportProgress(
+  options: ProjectPackageOptions,
+  progress: number,
+  title: string,
+  message: string
+) {
+  options.onProgress?.({
+    message,
+    progress,
+    title
+  });
 }

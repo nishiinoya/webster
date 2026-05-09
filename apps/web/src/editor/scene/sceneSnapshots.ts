@@ -2,7 +2,7 @@ import { AdjustmentLayer } from "../layers/AdjustmentLayer";
 import { GroupLayer } from "../layers/GroupLayer";
 import { cloneImageLayerGeometry, ImageLayer } from "../layers/ImageLayer";
 import type { Imported3DModel } from "../import3d/Imported3DModel";
-import { cloneImported3DModel, serializeImported3DModel } from "../import3d/Imported3DModel";
+import { cloneImported3DModel } from "../import3d/Imported3DModel";
 import { Layer } from "../layers/Layer";
 import type { ImportedLayerTexture } from "../layers/Layer";
 import { LayerMask } from "../masks/LayerMask";
@@ -318,7 +318,31 @@ function areImported3DModelsEqual(
     return true;
   }
 
-  return JSON.stringify(serializeImported3DModel(left)) === JSON.stringify(serializeImported3DModel(right));
+  return getImported3DModelSignature(left) === getImported3DModelSignature(right);
+}
+
+function getImported3DModelSignature(model: Imported3DModel) {
+  return [
+    model.sourceFormat,
+    model.name,
+    model.stats.vertexCount,
+    model.stats.triangleCount,
+    model.stats.partCount,
+    model.stats.materialCount,
+    model.parts
+      .map((part) =>
+        [
+          part.name,
+          part.materialName ?? "",
+          part.vertices.length,
+          part.indices?.length ?? 0,
+          part.normals.length,
+          part.texCoords.length
+        ].join(":")
+      )
+      .join("|"),
+    model.textures.map((texture) => `${texture.name}:${texture.width}x${texture.height}`).join("|")
+  ].join(";");
 }
 
 function areLayersEqual(left: Layer, right: Layer) {

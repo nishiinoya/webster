@@ -7,6 +7,7 @@ import type {
   LayerOptions,
   LayerTextureSettings,
   Object3DKind,
+  SerializedObject3DModel,
   SerializedObject3DLayer
 } from "./Layer";
 
@@ -100,6 +101,20 @@ export class Object3DLayer extends Layer {
 
 
   toJSON(): SerializedObject3DLayer {
+    return this.toJSONWithModel(
+      this.importedModel
+        ? serializeImported3DModel(this.importedModel)
+        : this.modelSource
+          ? {
+              format: "obj",
+              name: this.modelName || "Imported model",
+              source: this.modelSource
+            }
+          : null
+    );
+  }
+
+  toJSONWithModel(model: SerializedObject3DModel | null): SerializedObject3DLayer {
     return {
       ...this.toJSONBase(),
       ambient: this.ambient,
@@ -116,15 +131,7 @@ export class Object3DLayer extends Layer {
         textureImage: serializeImportedLayerTexture(material.textureImage),
         texturePath: material.texturePath
       })),
-      model: this.importedModel
-        ? serializeImported3DModel(this.importedModel)
-        : this.modelSource
-          ? {
-              format: "obj",
-              name: this.modelName || "Imported model",
-              source: this.modelSource
-            }
-          : null,
+      model,
       objectKind: this.objectKind,
       objectZoom: this.objectZoom,
       rotationX: this.rotationX,

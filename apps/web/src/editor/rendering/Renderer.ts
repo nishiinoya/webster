@@ -1454,10 +1454,35 @@ export class Renderer {
   }
 
   /**
+   * Registers a user-supplied OpenType font for runtime text rendering.
+   */
+  async importFontFile(file: File) {
+    return this.fontLoader.addFontFile(file);
+  }
+
+  async importSceneFonts(scene: Scene) {
+    await Promise.all(
+      scene.fontAssets.map((font) =>
+        this.fontLoader.addFontBlob(font.blob, {
+          family: font.family,
+          id: font.id,
+          italic: font.italic,
+          mimeType: font.mimeType,
+          name: font.name,
+          style: font.style,
+          weight: font.weight
+        })
+      )
+    );
+  }
+
+  /**
    * Preloads fonts referenced by text layers before export or offscreen rendering.
    */
   async prepareSceneFonts(scene: Scene) {
     const tasks: Promise<unknown>[] = [];
+
+    await this.importSceneFonts(scene);
 
     for (const layer of scene.layers) {
       if (layer instanceof TextLayer) {

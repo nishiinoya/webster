@@ -27,14 +27,25 @@ type LoadedFontEntry = {
   font: RuntimeFont;
 };
 
+export type ImportedFontSummary = {
+  family: string;
+  id: string;
+  italic: boolean;
+  mimeType: string;
+  name: string;
+  style: string;
+  weight: number;
+};
+
 export class FontLoader {
   private readonly fonts = new Map<string, LoadedFontEntry>();
   private readonly loadingFonts = new Map<string, Promise<LoadedFontEntry | null>>();
   private readonly fallbackFonts = new Map<string, ResolvedRuntimeFont>();
   private readonly familyFallbackFonts = new Map<string, ResolvedRuntimeFont>();
+  private readonly importedFontSummaries = new Map<string, ImportedFontSummary>();
   private lastResolvedFont: ResolvedRuntimeFont | null = null;
 
-  private constructor(private readonly entries: CompiledFontManifestEntry[]) {}
+  private constructor(private entries: CompiledFontManifestEntry[]) {}
 
   static async create(manifestUrl = "/fonts/font-manifest.json") {
     try {
@@ -135,6 +146,75 @@ export class FontLoader {
     return resolvedFont;
   }
 
+  async addFontFile(file: File): Promise<ImportedFontSummary> {
+    return this.addFontBlob(file, {
+      mimeType: file.type || getFontMimeType(file.name),
+      name: file.name
+    });
+  }
+
+  async addFontBlob(
+    blob: Blob,
+    options: Partial<ImportedFontSummary> & { name: string }
+  ): Promise<ImportedFontSummary> {
+    if (options.id) {
+      const existing = this.importedFontSummaries.get(options.id);
+
+      if (existing) {
+        return existing;
+      }
+    }
+
+    const parsedFont = opentype.parse(await blob.arrayBuffer());
+    const fontFamily =
+      options.family?.trim() ||
+      getEnglishName(parsedFont.names?.fontFamily)?.trim() ||
+      stripFontExtension(options.name) ||
+      "Imported Font";
+    const fontStyle =
+      options.style?.trim() ||
+      getEnglishName(parsedFont.names?.fontSubfamily)?.trim() ||
+      "Regular";
+    const id = options.id || crypto.randomUUID();
+    const entry: CompiledFontManifestEntry = {
+      family: fontFamily,
+      italic: options.italic ?? isItalicFontStyle(fontStyle),
+      style: fontStyle,
+      url: `user-font:${id}:${options.name}`,
+      weight: options.weight ?? inferFontWeight(fontStyle)
+    };
+    const key = getEntryKey(entry);
+    const loadedFont = this.createLoadedFont(entry, parsedFont);
+    const resolvedFont = resolveFontStyle(
+      loadedFont,
+      (entry.weight ?? 400) >= 600,
+      Boolean(entry.italic),
+      false
+    );
+
+    this.entries = [
+      entry,
+      ...this.entries.filter((candidate) => getEntryKey(candidate) !== key)
+    ];
+    this.fonts.set(key, loadedFont);
+    this.familyFallbackFonts.set(getFamilyKey(entry.family), resolvedFont);
+    this.lastResolvedFont = resolvedFont;
+
+    const summary = {
+      family: loadedFont.font.family,
+      id,
+      italic: Boolean(entry.italic),
+      mimeType: options.mimeType || getFontMimeType(options.name),
+      name: options.name,
+      style: loadedFont.font.style,
+      weight: entry.weight ?? 400
+    };
+
+    this.importedFontSummaries.set(id, summary);
+
+    return summary;
+  }
+
   private async loadFont(entry: CompiledFontManifestEntry, key: string) {
     try {
       const response = await fetch(entry.url);
@@ -145,32 +225,7 @@ export class FontLoader {
 
       const arrayBuffer = await response.arrayBuffer();
       const parsedFont = opentype.parse(arrayBuffer);
-      const supportedCodepoints = getSupportedCodepoints(parsedFont);
-      const fontFamily = getEnglishName(parsedFont.names?.fontFamily) ?? entry.family;
-      const fontStyle = getEnglishName(parsedFont.names?.fontSubfamily) ?? entry.style ?? "Regular";
-      const glyphMeshCache = new GlyphMeshCache(parsedFont, supportedCodepoints, {
-        family: fontFamily,
-        style: fontStyle
-      });
-
-      glyphMeshCache.preloadBasicGlyphs();
-      logSupportedFontCharacters(fontFamily, fontStyle, supportedCodepoints);
-
-      const runtimeFont: RuntimeFont = {
-        ascender: parsedFont.ascender,
-        descender: parsedFont.descender,
-        entry,
-        family: fontFamily,
-        getGlyphGeometry: (character) => glyphMeshCache.getGlyphGeometry(character),
-        lineGap: 0,
-        style: fontStyle,
-        supportedCodepoints,
-        unitsPerEm: parsedFont.unitsPerEm
-      };
-      const loadedFont = {
-        entry,
-        font: runtimeFont
-      };
+      const loadedFont = this.createLoadedFont(entry, parsedFont);
 
       this.fonts.set(key, loadedFont);
 
@@ -180,6 +235,36 @@ export class FontLoader {
     } finally {
       this.loadingFonts.delete(key);
     }
+  }
+
+  private createLoadedFont(entry: CompiledFontManifestEntry, parsedFont: OpentypeFont) {
+    const supportedCodepoints = getSupportedCodepoints(parsedFont);
+    const fontFamily = getEnglishName(parsedFont.names?.fontFamily) ?? entry.family;
+    const fontStyle = getEnglishName(parsedFont.names?.fontSubfamily) ?? entry.style ?? "Regular";
+    const glyphMeshCache = new GlyphMeshCache(parsedFont, supportedCodepoints, {
+      family: fontFamily,
+      style: fontStyle
+    });
+
+    glyphMeshCache.preloadBasicGlyphs();
+    logSupportedFontCharacters(fontFamily, fontStyle, supportedCodepoints);
+
+    const runtimeFont: RuntimeFont = {
+      ascender: parsedFont.ascender,
+      descender: parsedFont.descender,
+      entry,
+      family: fontFamily,
+      getGlyphGeometry: (character) => glyphMeshCache.getGlyphGeometry(character),
+      lineGap: 0,
+      style: fontStyle,
+      supportedCodepoints,
+      unitsPerEm: parsedFont.unitsPerEm
+    };
+
+    return {
+      entry,
+      font: runtimeFont
+    };
   }
 
   private findEntry(family: string, bold: boolean, italic: boolean) {
@@ -255,6 +340,64 @@ function getEnglishName(name?: Record<string, string>) {
   }
 
   return name.en ?? Object.values(name)[0] ?? null;
+}
+
+function stripFontExtension(filename: string) {
+  return filename.replace(/\.(otf|ttf|woff|sfnt)$/iu, "").trim();
+}
+
+function getFontMimeType(filename: string) {
+  if (/\.woff$/iu.test(filename)) {
+    return "font/woff";
+  }
+
+  if (/\.otf$/iu.test(filename)) {
+    return "font/otf";
+  }
+
+  return "font/ttf";
+}
+
+function inferFontWeight(style: string) {
+  const normalizedStyle = style.toLowerCase();
+
+  if (normalizedStyle.includes("thin")) {
+    return 100;
+  }
+
+  if (normalizedStyle.includes("extra light") || normalizedStyle.includes("extralight")) {
+    return 200;
+  }
+
+  if (normalizedStyle.includes("light")) {
+    return 300;
+  }
+
+  if (normalizedStyle.includes("medium")) {
+    return 500;
+  }
+
+  if (normalizedStyle.includes("semi bold") || normalizedStyle.includes("semibold")) {
+    return 600;
+  }
+
+  if (normalizedStyle.includes("extra bold") || normalizedStyle.includes("extrabold")) {
+    return 800;
+  }
+
+  if (normalizedStyle.includes("black") || normalizedStyle.includes("heavy")) {
+    return 900;
+  }
+
+  if (normalizedStyle.includes("bold")) {
+    return 700;
+  }
+
+  return 400;
+}
+
+function isItalicFontStyle(style: string) {
+  return /italic|oblique/iu.test(style);
 }
 
 function normalizeFontFamily(family: string) {

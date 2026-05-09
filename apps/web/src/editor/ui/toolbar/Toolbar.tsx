@@ -31,6 +31,7 @@ type ToolbarProps = {
   onOpenExportDialog: () => void;
   onOpenImageResize: () => void;
   onOpenProject: (file: File, handle?: WebsterFileHandle | null) => void;
+  onImportFont: (file: File) => void;
   onPaste: () => void;
   onRedo: () => void;
   onRestoreImageOriginal: () => void;
@@ -145,6 +146,7 @@ export function Toolbar({
   onOpenExportDialog,
   onOpenImageResize,
   onOpenProject,
+  onImportFont,
   onPaste,
   onRedo,
   onRestoreImageOriginal,
@@ -189,6 +191,7 @@ export function Toolbar({
   const toolbarRef = useRef<HTMLElement | null>(null);
   const documentImageInputRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const fontInputRef = useRef<HTMLInputElement | null>(null);
   const fileMenuRef = useRef<HTMLDetailsElement | null>(null);
   const projectInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -230,6 +233,11 @@ export function Toolbar({
   function openImagePicker() {
     fileMenuRef.current?.removeAttribute("open");
     fileInputRef.current?.click();
+  }
+
+  function openFontPicker() {
+    fileMenuRef.current?.removeAttribute("open");
+    fontInputRef.current?.click();
   }
 
   async function openProjectPicker() {
@@ -326,6 +334,14 @@ export function Toolbar({
               type="button"
             >
               Import image as layer...
+            </button>
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!canEditDocument}
+              onClick={openFontPicker}
+              type="button"
+            >
+              Import font...
             </button>
             <button
               className={toolbarMenuItemClass}
@@ -929,6 +945,20 @@ export function Toolbar({
 
             if (file) {
               onUploadImage(file);
+              event.target.value = "";
+            }
+          }}
+          type="file"
+        />
+        <input
+          ref={fontInputRef}
+          accept=".ttf,.otf,.woff,font/ttf,font/otf,font/woff,application/font-woff,application/x-font-ttf,application/x-font-opentype"
+          className="absolute h-px w-px overflow-hidden whitespace-nowrap [clip:rect(0_0_0_0)]"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+
+            if (file) {
+              onImportFont(file);
               event.target.value = "";
             }
           }}

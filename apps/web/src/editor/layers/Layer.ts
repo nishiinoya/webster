@@ -331,7 +331,7 @@ export abstract class Layer {
           ? await loadImportedLayerTexture(data.materialTextureImage)
           : null,
         importedModel: "version" in (data.model ?? {})
-          ? await deserializeImported3DModel(data.model as SerializedImported3DModel)
+          ? await deserializeImported3DModel(data.model as SerializedImported3DModel, assets)
           : null,
         modelName: data.model?.name,
         modelSource: data.model && "source" in data.model ? data.model.source : null,

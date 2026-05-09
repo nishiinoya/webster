@@ -16,6 +16,7 @@ type UseEditorSceneRequestsOptions = {
   layerAssetCommandRequest: { command: LayerAssetCommand; id: number } | null;
   layerCommandRequest: { command: LayerCommand; id: number } | null;
   onLayersChange: (layers: LayerSummary[]) => void;
+  onFontImported?: (fontFamily: string) => void;
   onImageDocumentRequestHandled: (requestId: number) => void;
   onImageLayerCommandRequestHandled: (requestId: number) => void;
   onImageLayerCommandPendingChange?: (state: ImageLayerCommandPendingState | null) => void;
@@ -66,6 +67,7 @@ export function useEditorSceneRequests({
   layerAssetCommandRequest,
   layerCommandRequest,
   onLayersChange,
+  onFontImported,
   onImageDocumentRequestHandled,
   onImageLayerCommandRequestHandled,
   onImageLayerCommandPendingChange,
@@ -229,6 +231,11 @@ export function useEditorSceneRequests({
       }
 
       const result = await editorAppRef.current?.applyLayerAssetCommand(request.command);
+      const importedFontFamily = getImportedFontFamily(result);
+
+      if (importedFontFamily) {
+        onFontImported?.(importedFontFamily);
+      }
 
       if (isModelImport) {
         onLayerAssetCommandPendingChange?.(getCompletedModelImportState(result));
@@ -261,6 +268,9 @@ export function useEditorSceneRequests({
       })
       .finally(() => {
         if (!didCancel) {
+          if (isModelImport) {
+            window.setTimeout(() => onLayerAssetCommandPendingChange?.(null), 500);
+          }
           onLayerAssetCommandRequestHandled(requestId);
         }
       });
@@ -274,6 +284,7 @@ export function useEditorSceneRequests({
     onLayerAssetCommandPendingChange,
     onLayerAssetCommandRequestHandled,
     onLayersChange,
+    onFontImported,
     onSceneChange,
     setWebglError
   ]);
@@ -385,6 +396,16 @@ function isModelLayerAssetCommand(command: LayerAssetCommand) {
     command.type === "import-3d-model" ||
     command.type === "replace-loaded-3d-model"
   );
+}
+
+function getImportedFontFamily(result: unknown) {
+  if (!result || typeof result !== "object" || !("fontFamily" in result)) {
+    return null;
+  }
+
+  const fontFamily = (result as { fontFamily?: unknown }).fontFamily;
+
+  return typeof fontFamily === "string" && fontFamily.trim() ? fontFamily : null;
 }
 
 function getLayerAssetCommandPendingState(

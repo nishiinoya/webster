@@ -13,6 +13,7 @@ import type { CompiledFontManifest } from "../../rendering/text/CompiledFont";
 import { cn } from "../classNames";
 
 type PropertiesPanelProps = {
+  importedFontFamilies: string[];
   isCollapsed: boolean;
   onChangeObject3DModel: () => void;
   onGroupSelectedLayers: () => void;
@@ -97,6 +98,7 @@ type ImageLayerSummary = LayerSummary & {
 type ImageGeometryCornerId = keyof ImageLayerGeometry["corners"];
 
 export function PropertiesPanel({
+  importedFontFamilies,
   isCollapsed,
   onChangeObject3DModel,
   onGroupSelectedLayers,
@@ -109,11 +111,12 @@ export function PropertiesPanel({
 }: PropertiesPanelProps) {
   const objectMaterialTextureInputRef = useRef<HTMLInputElement | null>(null);
   const objectModelInputRef = useRef<HTMLInputElement | null>(null);
+  const fontInputRef = useRef<HTMLInputElement | null>(null);
   const shapeTextureInputRef = useRef<HTMLInputElement | null>(null);
   const [compiledFontFamilies, setCompiledFontFamilies] = useState<string[]>([]);
   const fontFamilies = useMemo(
-    () => getFontFamilyOptions(compiledFontFamilies, selectedLayer),
-    [compiledFontFamilies, selectedLayer]
+    () => getFontFamilyOptions([...compiledFontFamilies, ...importedFontFamilies], selectedLayer),
+    [compiledFontFamilies, importedFontFamilies, selectedLayer]
   );
 
   useEffect(() => {
@@ -373,21 +376,49 @@ export function PropertiesPanel({
                 value={Math.round(selectedLayer.fontSize)}
               />
             </label>
-            <label className={propertyRowClass}>
+            <div className={propertyRowClass}>
               <span className={propertyLabelClass}>Font</span>
-              <select
-                className={propertyInputClass}
-                disabled={selectedLayer.locked}
-                onChange={(event) => updateSelectedLayer({ fontFamily: event.target.value })}
-                value={selectedLayer.fontFamily}
-              >
-                {fontFamilies.map((fontFamily) => (
-                  <option key={fontFamily} value={fontFamily}>
-                    {fontFamily}
-                  </option>
-                ))}
-              </select>
-            </label>
+              <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-2">
+                <select
+                  className={propertyInputClass}
+                  disabled={selectedLayer.locked}
+                  onChange={(event) => updateSelectedLayer({ fontFamily: event.target.value })}
+                  value={selectedLayer.fontFamily}
+                >
+                  {fontFamilies.map((fontFamily) => (
+                    <option key={fontFamily} value={fontFamily}>
+                      {fontFamily}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className={propertyToggleClass}
+                  disabled={selectedLayer.locked}
+                  onClick={() => fontInputRef.current?.click()}
+                  type="button"
+                >
+                  Import...
+                </button>
+              </div>
+            </div>
+            <input
+              ref={fontInputRef}
+              accept=".ttf,.otf,.woff,font/ttf,font/otf,font/woff,application/font-woff,application/x-font-ttf,application/x-font-opentype"
+              className="absolute h-px w-px overflow-hidden whitespace-nowrap [clip:rect(0_0_0_0)]"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+
+                if (file) {
+                  onLayerAssetCommand({
+                    file,
+                    layerId: selectedLayer.id,
+                    type: "import-font"
+                  });
+                  event.target.value = "";
+                }
+              }}
+              type="file"
+            />
             <label className={propertyRowClass}>
               <span className={propertyLabelClass}>Color</span>
               <input

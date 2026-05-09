@@ -1,5 +1,5 @@
 /** Lightweight ZIP read/write helpers used by project packaging. */
-type ZipEntry = {
+export type ZipEntry = {
   data: Uint8Array;
   name: string;
 };

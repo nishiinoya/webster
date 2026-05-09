@@ -5,6 +5,7 @@ import type { EditorClipboardCommand } from "../../app/EditorApp";
 import { useEditorKeyboardShortcuts } from "./useEditorKeyboardShortcuts";
 import { saveProjectFile } from "../../projects/projectFiles";
 import type { WebsterFileHandle } from "../../projects/projectFiles";
+import type { ProjectPackageProgress } from "../../projects/ProjectPackage";
 import {
   forgetRememberedProjectFileHandle,
   rememberProjectFileHandle
@@ -18,6 +19,7 @@ type UseProjectFileActionsOptions = {
   onLayersChange: (layers: ReturnType<EditorApp["getLayerSummaries"]>) => void;
   onProjectFileRequestHandled: (requestId: number) => void;
   onProjectSaveRequestHandled: (requestId: number) => void;
+  onProjectFilePendingChange?: (state: ProjectFilePendingState | null) => void;
   onSaveStatusChange: (status: SaveStatus) => void;
   onSceneChange: () => void;
   onSelectTool: (tool: string) => void;
@@ -33,6 +35,10 @@ type UseProjectFileActionsOptions = {
 
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
 
+export type ProjectFilePendingState = ProjectPackageProgress & {
+  status: "complete" | "error" | "loading" | "saving";
+};
+
 export function useProjectFileActions({
   activeDocumentId,
   activeDocumentTitle,
@@ -41,6 +47,7 @@ export function useProjectFileActions({
   onLayersChange,
   onProjectFileRequestHandled,
   onProjectSaveRequestHandled,
+  onProjectFilePendingChange,
   onSaveStatusChange,
   onSceneChange,
   onSelectTool,
@@ -80,6 +87,13 @@ export function useProjectFileActions({
       }
 
       updateSaveStatus("saving");
+      onProjectFilePendingChange?.({
+        message: "Preparing project assets.",
+        progress: 4,
+        status: "saving",
+        title: "Saving project..."
+      });
+      await waitForNextPaint();
 
       try {
         const activeHandleRef = {
@@ -90,8 +104,21 @@ export function useProjectFileActions({
           editorAppRef.current,
           activeHandleRef,
           mode === "save-as",
-          getProjectFilename(activeDocumentTitle)
+          getProjectFilename(activeDocumentTitle),
+          {
+            onProgress: (state) =>
+              onProjectFilePendingChange?.({
+                ...state,
+                status: "saving"
+              })
+          }
         );
+        onProjectFilePendingChange?.({
+          message: "Project saved.",
+          progress: 100,
+          status: "complete",
+          title: "Save complete"
+        });
         projectFileHandleRef.current = activeHandleRef.current;
         projectFileHandlesRef.current.set(activeDocumentId, activeHandleRef.current);
         updateSaveStatus("saved");
@@ -99,14 +126,30 @@ export function useProjectFileActions({
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
           updateSaveStatus("idle");
+          onProjectFilePendingChange?.(null);
           return;
         }
 
         updateSaveStatus("error");
+        onProjectFilePendingChange?.({
+          message: error instanceof Error ? error.message : "Unable to save project file.",
+          progress: 100,
+          status: "error",
+          title: "Save failed"
+        });
         setWebglError(error instanceof Error ? error.message : "Unable to save project file.");
+      } finally {
+        window.setTimeout(() => onProjectFilePendingChange?.(null), 500);
       }
     },
-    [activeDocumentId, activeDocumentTitle, editorAppRef, setWebglError, updateSaveStatus]
+    [
+      activeDocumentId,
+      activeDocumentTitle,
+      editorAppRef,
+      onProjectFilePendingChange,
+      setWebglError,
+      updateSaveStatus
+    ]
   );
 
   const runClipboardCommand = useCallback(
@@ -302,7 +345,26 @@ export function useProjectFileActions({
 
     async function openProject() {
       try {
-        await editorApp.importProjectFile(request.file);
+        onProjectFilePendingChange?.({
+          message: "Preparing to open the project.",
+          progress: 4,
+          status: "loading",
+          title: "Opening project..."
+        });
+        await waitForNextPaint();
+        await editorApp.importProjectFile(request.file, {
+          onProgress: (state) =>
+            onProjectFilePendingChange?.({
+              ...state,
+              status: "loading"
+            })
+        });
+        onProjectFilePendingChange?.({
+          message: "Project loaded.",
+          progress: 100,
+          status: "complete",
+          title: "Open complete"
+        });
         projectFileHandleRef.current = request.handle ?? null;
         projectFileHandlesRef.current.set(activeDocumentId, request.handle ?? null);
 
@@ -315,8 +377,15 @@ export function useProjectFileActions({
         onSceneChange();
         setWebglError(null);
       } catch (error) {
+        onProjectFilePendingChange?.({
+          message: error instanceof Error ? error.message : "Unable to open project file.",
+          progress: 100,
+          status: "error",
+          title: "Open failed"
+        });
         setWebglError(error instanceof Error ? error.message : "Unable to open project file.");
       } finally {
+        window.setTimeout(() => onProjectFilePendingChange?.(null), 500);
         onProjectFileRequestHandled(requestId);
       }
     }
@@ -326,11 +395,18 @@ export function useProjectFileActions({
     activeDocumentId,
     editorAppRef,
     onLayersChange,
+    onProjectFilePendingChange,
     onProjectFileRequestHandled,
     onSceneChange,
     projectFileRequest,
     setWebglError
   ]);
+}
+
+function waitForNextPaint() {
+  return new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()));
+  });
 }
 
 function getProjectFilename(title: string) {

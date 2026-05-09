@@ -211,23 +211,11 @@ function renderProjectedShadow(
   const objectModelMatrix = getObjectModelMatrix(layer);
   const shadowModelMatrix = getObjectShadowModelMatrix(layer, objectModelMatrix);
   const viewProjectionMatrix = getViewProjectionMatrix(layer);
-  const softnessScale = 1 + layer.shadowSoftness / 280;
-  const passes =
-    layer.shadowSoftness > 1
-      ? [
-          { opacity: 0.38, scale: softnessScale },
-          { opacity: 0.72, scale: 1 }
-        ]
-      : [{ opacity: 1, scale: 1 }];
+  const samples = getProjectedShadowSamples(layer.shadowSoftness);
 
   context.object3DShaderProgram.use();
   context.object3DShaderProgram.setProjection(camera.projectionMatrix);
   context.object3DShaderProgram.setLayerModel(context.getLayerModelMatrix(layer));
-  context.object3DShaderProgram.setTransform3D(
-    shadowModelMatrix,
-    objectModelMatrix,
-    viewProjectionMatrix
-  );
   context.object3DShaderProgram.setLighting([0, 1, 0], 1, 0);
   context.object3DShaderProgram.setOpacity(1);
   context.object3DShaderProgram.setFilters(defaultLayerFilters);
@@ -240,11 +228,19 @@ function renderProjectedShadow(
   context.gl.depthMask(true);
   context.gl.disable(context.gl.CULL_FACE);
 
-  for (const pass of passes) {
-    setProjectedShadowMaterial(context, opacity * pass.opacity);
-    context.object3DShaderProgram.setObjectScale(
-      objectScale.x * pass.scale,
-      objectScale.y * pass.scale
+  context.object3DShaderProgram.setObjectScale(objectScale.x, objectScale.y);
+
+  for (const sample of samples) {
+    const sampleShadowModelMatrix =
+      sample.offsetX === 0 && sample.offsetZ === 0
+        ? shadowModelMatrix
+        : multiply4(translation(sample.offsetX, 0, sample.offsetZ), shadowModelMatrix);
+
+    setProjectedShadowMaterial(context, opacity * sample.opacity);
+    context.object3DShaderProgram.setTransform3D(
+      sampleShadowModelMatrix,
+      objectModelMatrix,
+      viewProjectionMatrix
     );
     context.gl.clearDepth(1);
     context.gl.clear(context.gl.DEPTH_BUFFER_BIT);
@@ -263,6 +259,43 @@ function renderProjectedShadow(
 
   context.gl.depthMask(previousDepthMask);
 }
+
+function getProjectedShadowSamples(softness: number) {
+  const softened = clamp(softness, 0, 64) / 64;
+
+  if (softened <= 0.01) {
+    return [{ offsetX: 0, offsetZ: 0, opacity: 1 }];
+  }
+
+  const radius = 0.02 + softened * 0.09;
+  const offsets = softened < 0.55 ? shadowCardinalSoftnessOffsets : shadowAllSoftnessOffsets;
+  const ringOpacity = offsets.length > 4 ? 0.055 + softened * 0.015 : 0.105 + softened * 0.025;
+  const centerOpacity = Math.max(0.42, 1 - ringOpacity * offsets.length);
+
+  return [
+    { offsetX: 0, offsetZ: 0, opacity: centerOpacity },
+    ...offsets.map(([x, z]) => ({
+      offsetX: x * radius,
+      offsetZ: z * radius,
+      opacity: ringOpacity
+    }))
+  ];
+}
+
+const shadowCardinalSoftnessOffsets = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1]
+] as const;
+
+const shadowAllSoftnessOffsets = [
+  ...shadowCardinalSoftnessOffsets,
+  [0.7, 0.7],
+  [-0.7, 0.7],
+  [0.7, -0.7],
+  [-0.7, -0.7]
+] as const;
 
 function setProjectedShadowMaterial(context: Object3DLayerRendererContext, opacity: number) {
   context.object3DShaderProgram.setMaterial([0, 0, 0, opacity], defaultLayerTexture);

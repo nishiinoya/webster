@@ -29,7 +29,7 @@ import type {
   LayerAssetCommandPendingState
 } from "./hooks/useEditorSceneRequests";
 import { useProjectFileActions } from "./hooks/useProjectFileActions";
-import type { SaveStatus } from "./hooks/useProjectFileActions";
+import type { ProjectFilePendingState, SaveStatus } from "./hooks/useProjectFileActions";
 import { saveUserProjectTemplate } from "../projects/projectTemplates";
 import type { WebsterFileHandle } from "../projects/projectFiles";
 import type { EditorDocumentTab } from "./editorDocuments";
@@ -64,6 +64,7 @@ type CanvasViewProps = {
   onHistoryChange: (history: HistoryStateSnapshot) => void;
   onClipboardCommandRequestHandled: (requestId: number) => void;
   onHistoryCommandRequestHandled: (requestId: number) => void;
+  onFontImported: (fontFamily: string) => void;
   onLayersChange: (layers: LayerSummary[]) => void;
   onOpenObject3DImportFiles: (files: File[]) => void;
   onStrokeLayerCreated: (layerId: string) => void;
@@ -76,6 +77,7 @@ type CanvasViewProps = {
   onLayerCommandRequestHandled: (requestId: number) => void;
   onImageExportRequestHandled: (requestId: number) => void;
   onProjectFileRequestHandled: (requestId: number) => void;
+  onProjectFilePendingChange: (state: ProjectFilePendingState | null) => void;
   onProjectSaveRequestHandled: (requestId: number) => void;
   onSaveStatusChange: (status: SaveStatus) => void;
   onSelectionCommandRequestHandled: (requestId: number) => void;
@@ -127,6 +129,7 @@ export function CanvasView({
   onHistoryChange,
   onClipboardCommandRequestHandled,
   onHistoryCommandRequestHandled,
+  onFontImported,
   onLayersChange,
   onOpenObject3DImportFiles,
   onStrokeLayerCreated,
@@ -139,6 +142,7 @@ export function CanvasView({
   onLayerCommandRequestHandled,
   onImageExportRequestHandled,
   onProjectFileRequestHandled,
+  onProjectFilePendingChange,
   onProjectSaveRequestHandled,
   onSaveStatusChange,
   onSelectionCommandRequestHandled,
@@ -215,6 +219,7 @@ export function CanvasView({
     layerAssetCommandRequest,
     layerCommandRequest,
     onLayersChange,
+    onFontImported,
     onImageDocumentRequestHandled,
     onImageLayerCommandRequestHandled,
     onImageLayerCommandPendingChange,
@@ -235,6 +240,7 @@ export function CanvasView({
     closedDocumentRequest,
     onLayersChange,
     onProjectFileRequestHandled,
+    onProjectFilePendingChange,
     onProjectSaveRequestHandled,
     onSaveStatusChange,
     onSceneChange: rememberActiveScene,

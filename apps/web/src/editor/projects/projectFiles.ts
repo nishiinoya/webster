@@ -2,6 +2,7 @@
  * Project file picker and save helpers for `.webster` documents.
  */
 import { EditorApp } from "../app/EditorApp";
+import type { ProjectPackageProgress } from "./ProjectPackage";
 import { rememberProjectFileHandle } from "./projectFileHandleStore";
 
 export type WebsterFileHandle = {
@@ -50,13 +51,14 @@ export async function saveProjectFile(
   editorApp: EditorApp,
   projectFileHandleRef: { current: WebsterFileHandle | null },
   forceNewPath = false,
-  suggestedName = "untitled.webster"
+  suggestedName = "untitled.webster",
+  options: { onProgress?: (state: ProjectPackageProgress) => void } = {}
 ) {
   if (forceNewPath || !projectFileHandleRef.current) {
     projectFileHandleRef.current = await getProjectFileHandle(suggestedName);
   }
 
-  const blob = await runAfterPaint(() => editorApp.exportProjectFile());
+  const blob = await runAfterPaint(() => editorApp.exportProjectFile(options));
 
   if (!projectFileHandleRef.current) {
     downloadBlob(blob, suggestedName);

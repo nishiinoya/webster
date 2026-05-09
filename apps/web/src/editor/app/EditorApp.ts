@@ -20,6 +20,7 @@ import {
 import type { DocumentResizeAnchor, LayerMaskAction, LayerStackPlacement } from "../scene/Scene";
 import type { LayerClipboardSnapshot } from "../scene/Scene";
 import { exportScenePackage, importScenePackage } from "../projects/ProjectPackage";
+import type { ProjectPackageProgress } from "../projects/ProjectPackage";
 import { ImageLayer } from "../layers/ImageLayer";
 import { Object3DLayer } from "../layers/Object3DLayer";
 import { ShapeLayer } from "../layers/ShapeLayer";
@@ -138,6 +139,7 @@ export type LayerAssetCommand =
   | { type: "clear-shape-texture"; layerId: string }
   | { type: "create-3d-model-layer"; files: File[] }
   | { type: "create-loaded-3d-model-layer"; model: Imported3DModel }
+  | { type: "import-font"; file: File; layerId?: string | null }
   | { type: "import-3d-material-texture"; file: File; layerId: string }
   | { type: "import-3d-model"; files: File[]; layerId: string }
   | { type: "replace-loaded-3d-model"; layerId: string; model: Imported3DModel }
@@ -467,17 +469,20 @@ export class EditorApp {
   /**
    * Exports the active scene as a native project package.
    */
-  async exportProjectFile() {
-    return exportScenePackage(this.scene);
+  async exportProjectFile(options: { onProgress?: (state: ProjectPackageProgress) => void } = {}) {
+    return exportScenePackage(this.scene, undefined, options);
   }
 
-  async exportProjectTemplateFile(templateName: string) {
+  async exportProjectTemplateFile(
+    templateName: string,
+    options: { onProgress?: (state: ProjectPackageProgress) => void } = {}
+  ) {
     return exportScenePackage(this.scene, {
       isTemplate: true,
       name: templateName.trim() || "Untitled template",
       savedAt: new Date().toISOString(),
       version: 1
-    });
+    }, options);
   }
 
   /**
@@ -530,8 +535,13 @@ export class EditorApp {
   /**
    * Imports a project package and replaces the active scene with it.
    */
-  async importProjectFile(file: File) {
-    const nextScene = await importScenePackage(file);
+  async importProjectFile(
+    file: File,
+    options: { onProgress?: (state: ProjectPackageProgress) => void } = {}
+  ) {
+    const nextScene = await importScenePackage(file, options);
+
+    await this.renderer.importSceneFonts(nextScene);
     this.replaceScene(nextScene, {
       rememberActiveDocument: true
     });
@@ -540,9 +550,16 @@ export class EditorApp {
     return this.scene;
   }
 
-  async importTemplateAsGroup(file: File, templateName: string) {
+  async importTemplateAsGroup(
+    file: File,
+    templateName: string,
+    options: { onProgress?: (state: ProjectPackageProgress) => void } = {}
+  ) {
     const before = this.captureAppSnapshot();
-    const templateScene = await importScenePackage(file);
+    const templateScene = await importScenePackage(file, options);
+
+    await this.renderer.importSceneFonts(templateScene);
+    this.scene.mergeFontAssets(templateScene.fontAssets);
     const group = this.scene.insertSceneAsGroup(templateScene, templateName);
 
     this.recordHistoryAction(
@@ -934,7 +951,7 @@ export class EditorApp {
   }
 
   /**
-   * Imports texture/model assets into shape and 3D layers.
+   * Imports font, texture, and model assets into editable layers.
    */
   async applyLayerAssetCommand(command: LayerAssetCommand) {
     const before = this.captureAppSnapshot();
@@ -1458,6 +1475,28 @@ export class EditorApp {
       return importModelAssetsIntoLayer(layer, command.files);
     }
 
+    if (command.type === "import-font") {
+      const importedFont = await this.renderer.importFontFile(command.file);
+      const layer = command.layerId ? this.scene.getLayer(command.layerId) : null;
+      const assetPath = getSceneFontAssetPath(importedFont.id, importedFont.name);
+
+      if (layer instanceof TextLayer && !layer.locked) {
+        layer.fontFamily = importedFont.family;
+      }
+
+      this.scene.upsertFontAsset({
+        ...importedFont,
+        assetPath,
+        blob: command.file
+      });
+
+      return {
+        fontFamily: importedFont.family,
+        fontStyle: importedFont.style,
+        layer: layer instanceof TextLayer ? layer : null
+      };
+    }
+
     const layer = this.scene.getLayer(command.layerId);
 
     if (command.type === "import-shape-texture") {
@@ -1856,7 +1895,10 @@ function getImageLayerCommandLabel(scene: Scene, command: ImageLayerCommand) {
 }
 
 function getLayerAssetCommandLabel(scene: Scene, command: LayerAssetCommand) {
-  const layerName = "layerId" in command ? getLayerName(scene, command.layerId) : "3D object";
+  const layerName =
+    "layerId" in command && command.layerId
+      ? getLayerName(scene, command.layerId)
+      : "layer";
 
   switch (command.type) {
     case "clear-3d-material-texture":
@@ -1867,6 +1909,8 @@ function getLayerAssetCommandLabel(scene: Scene, command: LayerAssetCommand) {
       return "Import 3D model";
     case "create-loaded-3d-model-layer":
       return `Add ${command.model.name}`;
+    case "import-font":
+      return "Import font";
     case "import-3d-material-texture":
       return `Texture ${layerName}`;
     case "import-3d-model":
@@ -1905,6 +1949,36 @@ function getLayerAssetCommandPayload(command: LayerAssetCommand) {
   }
 
   return command;
+}
+
+function getSceneFontAssetPath(fontId: string, filename: string) {
+  const extension = getFontAssetExtension(filename);
+  const safeId = sanitizeAssetPathSegment(fontId);
+  const safeName = sanitizeAssetPathSegment(filename.replace(/\.[^.]+$/u, ""));
+
+  return `assets/fonts/${safeId}-${safeName}.${extension}`;
+}
+
+function getFontAssetExtension(filename: string) {
+  if (/\.woff$/iu.test(filename)) {
+    return "woff";
+  }
+
+  if (/\.otf$/iu.test(filename)) {
+    return "otf";
+  }
+
+  return "ttf";
+}
+
+function sanitizeAssetPathSegment(value: string) {
+  return (
+    value
+      .trim()
+      .replace(/[^a-z0-9._-]+/giu, "-")
+      .replace(/^-+|-+$/gu, "")
+      .slice(0, 80) || "asset"
+  );
 }
 
 function getSelectionCommandLabel(command: SelectionCommand) {

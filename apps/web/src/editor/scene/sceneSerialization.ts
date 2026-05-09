@@ -10,11 +10,23 @@ export type SerializedSceneData = {
     x?: number;
     y?: number;
   };
+  fonts?: SerializedProjectFontAsset[];
   layers: SerializedLayer[];
   selectedLayerId?: string | null;
   selectedLayerIds?: string[];
   template?: SerializedProjectTemplateMetadata;
   version: 1;
+};
+
+export type SerializedProjectFontAsset = {
+  assetPath: string;
+  family: string;
+  id: string;
+  italic: boolean;
+  mimeType: string;
+  name: string;
+  style: string;
+  weight: number;
 };
 
 export type SerializedProjectTemplateMetadata = {

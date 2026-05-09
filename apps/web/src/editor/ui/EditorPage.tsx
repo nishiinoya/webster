@@ -39,7 +39,7 @@ import {
   renameUserProjectTemplate
 } from "../projects/projectTemplates";
 import type { UserProjectTemplateSummary } from "../projects/projectTemplates";
-import type { SaveStatus } from "./hooks/useProjectFileActions";
+import type { ProjectFilePendingState, SaveStatus } from "./hooks/useProjectFileActions";
 import { CanvasView } from "./CanvasView";
 import { cn } from "./classNames";
 import type { EditorDocumentTab, NewDocumentSize } from "./editorDocuments";
@@ -212,11 +212,14 @@ export function EditorPage() {
     useState<ImageLayerCommandPendingState | null>(null);
   const [layerAssetCommandPendingState, setLayerAssetCommandPendingState] =
     useState<LayerAssetCommandPendingState | null>(null);
+  const [projectFilePendingState, setProjectFilePendingState] =
+    useState<ProjectFilePendingState | null>(null);
   const [recentProjects, setRecentProjects] = useState<RecentProjectHandle[]>([]);
   const [recentProjectError, setRecentProjectError] = useState<string | null>(null);
   const [userTemplates, setUserTemplates] = useState<UserProjectTemplateSummary[]>([]);
   const [historyState, setHistoryState] = useState<HistoryStateSnapshot>(emptyHistoryState);
   const [layers, setLayers] = useState<LayerSummary[]>(initialLayers);
+  const [importedFontFamilies, setImportedFontFamilies] = useState<string[]>([]);
   const [uploadRequest, setUploadRequest] = useState<{ file: File; id: number } | null>(null);
   const [imageDocumentRequest, setImageDocumentRequest] = useState<{
     file: File;
@@ -313,10 +316,14 @@ export function EditorPage() {
     .map((layer) => layer.id);
   const canGroupSelectedLayers = groupableSelectedLayerIds.length > 1;
   const selectedImageLayer = isImageLayerSummary(selectedLayer) ? selectedLayer : null;
+  const selectedTextLayer = selectedLayer?.type === "text" ? selectedLayer : null;
   const selectedObject3DLayer = isObject3DLayerSummary(selectedLayer) ? selectedLayer : null;
   const activeDocument = tabs.find((tab) => tab.isActive) ?? tabs[0] ?? null;
   const activeHistoryState = activeDocument ? historyState : emptyHistoryState;
   const strokeLayers = layers.filter((layer) => layer.type === "stroke");
+  const textLayerFontFamilies = layers
+    .filter((layer): layer is LayerSummary & { fontFamily: string } => layer.type === "text")
+    .map((layer) => layer.fontFamily);
 
   useEffect(() => {
     if (
@@ -363,6 +370,14 @@ export function EditorPage() {
 
   function runLayerAssetCommand(command: LayerAssetCommand) {
     setLayerAssetCommandRequest({ command, id: Date.now() });
+  }
+
+  function rememberImportedFontFamily(fontFamily: string) {
+    setImportedFontFamilies((currentFamilies) =>
+      currentFamilies.includes(fontFamily)
+        ? currentFamilies
+        : [...currentFamilies, fontFamily].sort((a, b) => a.localeCompare(b))
+    );
   }
 
   function addBasicObject3DLayer(objectKind: Exclude<Object3DKind, "imported">) {
@@ -894,6 +909,13 @@ export function EditorPage() {
         onSelectTool={setSelectedTool}
         onShowCanvasBorderChange={setShowCanvasBorder}
         onUndo={() => setHistoryCommandRequest({ command: "undo", id: Date.now() })}
+        onImportFont={(file) =>
+          runLayerAssetCommand({
+            file,
+            layerId: selectedTextLayer && !selectedTextLayer.locked ? selectedTextLayer.id : null,
+            type: "import-font"
+          })
+        }
         onUploadImage={(file) => setUploadRequest({ file, id: Date.now() })}
         maskBrushOptions={maskBrushOptions}
         onMaskBrushOptionsChange={(options) =>
@@ -982,6 +1004,7 @@ export function EditorPage() {
               maskBrushOptions={maskBrushOptions}
               magicSelectionTolerance={magicSelectionTolerance}
               imageExportRequest={imageExportRequest}
+              onFontImported={rememberImportedFontFamily}
               onHistoryChange={setHistoryState}
               onLayersChange={setLayers}
               onOpenObject3DImportFiles={(files) => openObject3DImportDialog("add", files)}
@@ -1023,6 +1046,7 @@ export function EditorPage() {
               onProjectFileRequestHandled={(requestId) =>
                 setProjectFileRequest((request) => (request?.id === requestId ? null : request))
               }
+              onProjectFilePendingChange={setProjectFilePendingState}
               onProjectSaveRequestHandled={(requestId) =>
                 setProjectSaveRequest((request) => (request?.id === requestId ? null : request))
               }
@@ -1236,6 +1260,7 @@ export function EditorPage() {
           >
             <PropertiesPanel
               isCollapsed={collapsedSidePanels.properties}
+              importedFontFamilies={[...importedFontFamilies, ...textLayerFontFamilies]}
               onGroupSelectedLayers={groupSelectedLayers}
               onChangeObject3DModel={() => openObject3DImportDialog("replace")}
               onLayerAssetCommand={runLayerAssetCommand}
@@ -1375,10 +1400,53 @@ export function EditorPage() {
           }}
         />
       ) : null}
+      {layerAssetCommandPendingState ? (
+        <ProgressOverlay state={layerAssetCommandPendingState} />
+      ) : null}
+      {projectFilePendingState ? <ProgressOverlay state={projectFilePendingState} /> : null}
       {imageLayerCommandPendingState ? (
         <ImageLayerCommandOverlay state={imageLayerCommandPendingState} />
       ) : null}
     </main>
+  );
+}
+
+function ProgressOverlay({
+  state
+}: {
+  state: {
+    message: string;
+    progress: number;
+    status?: "complete" | "error" | "importing" | "loading" | "saving";
+    title: string;
+  };
+}) {
+  const progress = Math.max(0, Math.min(100, Math.round(state.progress)));
+  const barColor = state.status === "error" ? "#e76f6f" : "#4aa391";
+
+  return (
+    <div
+      aria-live="polite"
+      aria-modal="true"
+      className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-6"
+      role="dialog"
+    >
+      <div className="grid w-[min(420px,100%)] gap-4 rounded-xl border border-[#3a414a] bg-[rgba(23,25,29,0.98)] px-5 py-5 shadow-[0_24px_48px_rgba(0,0,0,0.48)]">
+        <div>
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <p className="m-0 text-[15px] font-extrabold text-[#f2f4f7]">{state.title}</p>
+            <strong className="text-xs font-extrabold text-[#cfd4da]">{progress}%</strong>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-[#111418]">
+            <div
+              className="h-full rounded-full transition-[width] duration-200"
+              style={{ backgroundColor: barColor, width: `${progress}%` }}
+            />
+          </div>
+        </div>
+        <p className="m-0 text-xs font-bold text-[#9aa1ab]">{state.message}</p>
+      </div>
+    </div>
   );
 }
 
