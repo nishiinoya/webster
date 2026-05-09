@@ -1,6 +1,6 @@
 # Webster
 
-Webster is a Photoshop-like web image editor built with Next.js, React, TypeScript, and raw WebGL rendering.
+Webster is a Photoshop-like web image editor built with Next.js, React, TypeScript, and raw WebGL rendering. It supports fully local editing with portable `.webster` files, plus a frontend collaboration layer for shared-project mode.
 
 ## Workspace
 
@@ -52,6 +52,15 @@ Type-check everything:
 npm run typecheck
 ```
 
+Optional shared-editing frontend configuration:
+
+```bash
+NEXT_PUBLIC_WEBSTER_API_URL=http://localhost:4000/api
+NEXT_PUBLIC_WEBSTER_WS_URL=ws://localhost:4000/ws/projects/{projectId}
+```
+
+If these are not set, the frontend assumes REST routes under `/api` and WebSocket rooms under `/ws/projects/:projectId`. The backend is not implemented in this repository yet.
+
 ## Current Status
 
 Legend:
@@ -63,8 +72,8 @@ Legend:
 | Area | Status | Notes |
 | --- | --- | --- |
 | Editor workspace | Present | Top menus, tool rail, tabs, WebGL canvas, layers, properties, and history panels exist. |
-| Top menus | Partial | File and Select have real actions. Edit/View/Filter now contain useful entries plus disabled TODO items. |
-| Project templates/presets | Partial | New document presets exist: 1200x800, 1920x1080, 1080x1080. User-created templates are planned. |
+| Top menus | Partial | File/Edit/Layer/View/Filter/Select expose the main editor commands. A few advanced view/filter entries remain future work. |
+| Project templates/presets | Present | Built-in document presets and user-created `.webster` templates exist. |
 | New project creation | Present | New document dialog creates a blank document from preset/custom size. |
 | WebGL rendering | Present | Scene rendering is outside React and handled by `Renderer`. |
 | Layers | Present | Image, text, shape, stroke, and adjustment layers are supported. |
@@ -75,13 +84,12 @@ Legend:
 | Drop shadow | Partial | Drop shadow is rendered as GPU passes behind the layer. It is useful but not a full Photoshop-style shadow renderer yet. |
 | Add images | Present | Image import creates an image layer. |
 | Move elements by mouse | Present | Move tool can select, move, resize, and rotate layers. |
-| Move elements by keyboard | Planned | Arrow-key nudging is not implemented yet. |
-| Delete elements | Present | Layer menu supports deleting layers. Keyboard delete is planned. |
+| Move elements by keyboard | Present | Arrow-key nudging is implemented. |
+| Delete elements | Present | Layer menu and keyboard delete/backspace can remove layers. |
 | Canvas pan | Present | Pan tool and middle mouse panning are supported. |
 | Canvas zoom | Present | Mouse wheel zoom is supported. Dedicated Zoom tool was removed because wheel zoom already covers it. |
-| Canvas resize | Partial | New documents can be created at chosen sizes. Resizing an existing canvas is planned. |
-| Selection tools | Present | Rectangle Select and Ellipse Select are implemented. |
-| Selection placeholders | Planned | Lasso Select and Magic Select are visible as disabled future tools. |
+| Canvas resize | Present | New documents can be created at chosen sizes and existing canvases can be resized. |
+| Selection tools | Present | Rectangle, ellipse, lasso, and magic/similarity selection tools are available. |
 | Selection overlay | Present | Active selections dim the outside area and show a moving dashed outline. |
 | Clear selection | Present | Select menu supports clearing the current selection. |
 | Invert selection | Present | Select menu supports inverted selections. |
@@ -92,16 +100,25 @@ Legend:
 | Stroke layers | Present | Multiple paths with different style/color/size can live on one stroke layer. Drawing can continue into an existing stroke layer. |
 | Text tool | Present | Text creation, editing, selection, color, size, font, alignment, bold, and italic controls exist. |
 | Shape elements | Present | Rectangle, circle, line, triangle, diamond, and arrow shapes exist with fill/stroke controls. |
-| History panel | Partial | Panel exists, but full undo/redo history is not implemented. Mask brush stroke undo exists. |
+| History panel | Present | Command history records editor actions and supports undo/redo summaries. |
 | Save `.webster` | Present | Saves a portable project package with `manifest.json` and image assets. |
 | Open `.webster` | Present | Opens saved Webster project packages. |
 | Recent project handle | Present | Uses browser File System Access API/IndexedDB when available. |
+| Local mode | Present | Editor works without a server. Users can create projects, edit locally, open/save `.webster`, and export files. |
+| Shared mode frontend | Partial | Frontend can load a shared project over REST, hydrate the editor from the existing `.webster` manifest shape, connect to WebSocket, join a project room, and send/receive collaboration events. Requires a backend to be useful. |
+| Share project frontend | Partial | `File -> Share project...` exports the current local project as a normal `.webster` Blob and uploads it through REST. Backend decomposition/storage is not implemented here. |
+| Shared project download frontend | Partial | Shared projects can request a backend-packed `.webster` export through REST. Backend packing is not implemented here. |
+| Realtime operations frontend | Partial | Local editor history actions become commit operations; pointer gestures can send preview operations; remote applied operations hydrate the local scene. Backend persistence/broadcast is not implemented here. |
+| Pending collaboration queue | Present | Unconfirmed commit operations are queued with `clientOperationId` and resent after reconnect. |
+| Shared roles frontend | Present | Shared types define owner/editor/viewer roles. Viewer mode disables editing controls while still allowing project viewing and remote updates. |
+| Presence frontend | Partial | Connection status and online users can be shown when backend presence events are available. Cursor/tool payloads are sent from the frontend. |
+| Version history frontend | Partial | A Versions panel lists snapshots/checkpoints, creates manual snapshot requests, restores snapshots by request, refreshes history, and downloads `.webster` when permitted. Backend snapshot APIs are not implemented here. |
 | Export PNG | Present | `File -> Export as... -> PNG`; transparent background option, no editor UI/tools in output. |
 | Export JPEG/JPG | Present | `File -> Export as... -> JPEG`; white or checkerboard background, no editor UI/tools in output. |
 | Export PDF | Present | `File -> Export as... -> PDF`; single-page PDF with white or checkerboard background, no editor UI/tools in output. |
 | Export color consistency | Partial | Export path uses WebGL offscreen rendering; color issues have been worked on, but more browser/device validation is still useful. |
 | Extra export format | Present | `.webster` project package is the extra native project format. |
-| Social sharing | Planned | Sharing to social networks is not implemented yet. |
+| Social sharing | Planned | Sharing to social networks is not implemented yet. Project sharing frontend is for shared editing, not social-network posting. |
 | Authentication | Planned | Registration, login, email confirmation, and profile editing are not implemented. |
 | Backend API | Planned | `apps/api` is reserved but currently empty. |
 | Database | Planned | No server database is currently used. |
@@ -110,7 +127,7 @@ Legend:
 
 ## Tools
 
-The tool rail shows active editor tools plus disabled placeholders for future selection tools.
+The tool rail shows the active editor tools available for the current document. In shared viewer mode, editing tools are disabled while viewing, pan, presence, and remote updates remain available.
 
 | Tool | Status | Description |
 | --- | --- | --- |
@@ -122,8 +139,8 @@ The tool rail shows active editor tools plus disabled placeholders for future se
 | Shape | Present | Draw rectangles, circles, lines, triangles, diamonds, and arrows. |
 | Rectangle Select | Present | Drag a rectangular selection. |
 | Ellipse Select | Present | Drag an oval selection. |
-| Lasso Select | Planned | Disabled placeholder for freehand selection. |
-| Magic Select | Planned | Disabled placeholder for color/similarity-based selection. |
+| Lasso Select | Present | Draw a freehand selection. |
+| Magic Select | Present | Pick similar image colors. |
 
 Removed from the active tool list:
 
@@ -133,9 +150,9 @@ Removed from the active tool list:
 
 | Menu | Status | Notes |
 | --- | --- | --- |
-| File | Present | New, open `.webster`, import image, save, save as, and export. |
-| Edit | Partial | Tool shortcuts exist. Undo/redo/cut/copy/paste are visible TODO items. |
-| View | Partial | Current zoom display and Pan workspace action exist. Fit canvas, keyboard zoom, checkerboard toggle, rulers, and guides are TODO. |
+| File | Present | New, open `.webster`, open shared project, import image/font, save local `.webster`, share project through REST, save/export templates, export image/PDF, download shared `.webster`, and open Version History. Backend-backed shared actions require backend routes. |
+| Edit | Present | Undo/redo, duplicate/delete/group, cut/copy/paste, layer ordering, and image-layer actions are available where applicable. |
+| View | Partial | Current zoom/canvas size display, canvas resize, canvas border toggle, and Pan workspace action exist. Fit canvas, keyboard zoom, checkerboard toggle, rulers, and guides remain future work. |
 | Filter | Partial | Can add an adjustment layer. Implemented filter families are listed. Filter gallery and clipping adjustment to one layer/group are TODO. |
 | Select | Present | Clear selection, invert selection, and convert selection to mask. |
 
@@ -144,17 +161,17 @@ Removed from the active tool list:
 | Control | Status | Action |
 | --- | --- | --- |
 | Ctrl+S / Cmd+S | Present | Save current `.webster` project. |
-| Ctrl+Z / Cmd+Z | Partial | Undo last Mask Brush stroke only. Full history undo is planned. |
+| Ctrl+Z / Cmd+Z | Present | Undo the latest recorded editor action. |
 | Mouse wheel | Present | Zoom canvas at pointer position. |
 | Middle mouse drag | Present | Pan canvas. |
 | Pan tool + drag | Present | Pan canvas. |
 | Move tool + drag layer | Present | Move selected layer with mouse. |
 | Transform handles | Present | Resize and rotate selected layer with mouse. |
 | Text keyboard input | Present | Typing, caret movement, selection, copy/paste text input, delete/backspace, and multiline text editing exist while editing text. |
-| Ctrl+C / Cmd+C | Planned | Copy selected layer or selected area. Selection-area copy is not implemented yet. |
-| Ctrl+V / Cmd+V | Planned | Paste copied layer/area. |
-| Delete / Backspace | Planned | Delete selected layer from keyboard. Layer menu delete exists. |
-| Arrow keys | Planned | Nudge selected layer or selection. |
+| Ctrl+C / Cmd+C | Present | Copy selected layer content or selected pixels when available. |
+| Ctrl+V / Cmd+V | Present | Paste copied layer/pixel content when available. |
+| Delete / Backspace | Present | Delete selected layer from keyboard. |
+| Arrow keys | Present | Nudge the selected layer. Shift nudges by a larger step. |
 | Ctrl+Plus / Ctrl+Minus | Planned | Keyboard zoom shortcuts. |
 | Escape | Planned | Cancel/clear selection or active input. |
 
@@ -184,6 +201,9 @@ Formats:
 
 - `manifest.json`
 - image assets referenced by image layers
+- original image assets when a layer has working pixel changes
+- font assets referenced by the manifest
+- imported 3D model packages/textures when 3D layers are present
 
 Current project data includes:
 
@@ -197,9 +217,49 @@ Current project data includes:
 - adjustment layers
 - layer masks
 - selection clips stored on stroke paths
+- font asset metadata
+- 3D layer/model/material metadata when used
 - transforms: x, y, width, height, scale, rotation
 - visibility, opacity, lock state
 - per-layer filter settings
+
+## Shared Editing Frontend
+
+Shared editing is frontend-only in this repository. No backend, database, Redis, server storage, backend auth, or server WebSocket logic has been added.
+
+The frontend supports two modes:
+
+- Local mode: current client-only editor behavior. `.webster` open/save/export works without a server.
+- Shared mode: project state is loaded from a backend snapshot, then realtime operations and presence use WebSocket.
+
+The shared-project snapshot shape is based on the existing `.webster` manifest structure. The frontend does not invent a second project format.
+
+REST is used for large/project-file work:
+
+- upload local `.webster` when sharing a project
+- load shared project snapshot/state
+- download shared project as `.webster`
+- upload/download assets when backend support exists
+- list/create/restore snapshots
+
+WebSocket is used only for realtime collaboration:
+
+- `project:join`
+- `project:leave`
+- `operation:preview`
+- `operation:commit`
+- `presence:cursor`
+- receiving `project:state`
+- receiving `operation:applied`
+- receiving `operation:preview`
+- receiving `presence:update`
+- receiving `project:error`
+
+Preview operations are temporary updates for drag/resize/rotate/drawing/mask/cursor movement. They are not saved and should not increase the project version.
+
+Commit operations are autosaved edits. They include a `clientOperationId`, are held in a pending queue until backend confirmation, and are resent after reconnect so disconnected clients do not lose unconfirmed work.
+
+For more detail, see [`docs/shared-editing-flow.md`](docs/shared-editing-flow.md).
 
 ## What Is Left To Implement
 
@@ -207,26 +267,15 @@ This is the practical remaining-work checklist.
 
 ### Core Editing
 
-- Full command-based undo/redo for layer creation, deletion, transforms, filters, masks, text edits, and strokes.
-- Keyboard delete for selected layer.
-- Arrow-key nudging for selected layer/selection.
-- Copy, cut, and paste for layers.
-- Copy, cut, and paste for selected pixel/selection area.
-- Duplicate layer command.
-- Layer grouping.
+- More precise undo/redo merge behavior for long gestures and complex asset imports.
+- More complete cut/copy/paste coverage for every selection/pixel workflow.
 - Better layer ordering shortcuts from menus/keyboard.
-- Canvas resize for an existing project.
 - Crop document to selection.
 
 ### Selection
 
-- Lasso Select implementation.
-- Magic Select/color similarity selection.
-- Add/subtract/intersect selection modes.
-- Feather selection.
-- Grow/shrink selection.
-- Save/load selection.
 - More exact rotated adjustment/selection region handling where needed.
+- More selection preview polish for complex lasso and magic-selection workflows.
 
 ### Filters And Effects
 
@@ -293,6 +342,11 @@ This is the practical remaining-work checklist.
 - User profile editing.
 - Cloud project storage.
 - Project ownership/permissions.
+- Server-side shared project snapshots.
+- Server-side operation persistence and replay.
+- Server WebSocket rooms/broadcast.
+- Backend asset storage for shared image/mask/model/texture assets.
+- Backend permission checks for owner/editor/viewer roles.
 - User-created templates.
 - Project sharing links.
 - Social sharing/export integration.
@@ -312,13 +366,13 @@ This is the practical remaining-work checklist.
 - Basic 3D primitives: cube, sphere, cylinder.
 - 3D materials, color, and texture support.
 - Plugin/filter architecture.
-- Collaboration/realtime cursors later.
+- Richer collaboration UI such as named cursor overlays, member management, comments, and snapshot previews.
 
 ## Database
 
 Current state: no server database is used.
 
-Why: the current implementation is a client-only editor. Projects are saved locally as `.webster` files, and recent file handles are remembered in the browser through IndexedDB/File System Access API support.
+Why: the current implementation is still frontend-only. Projects can be saved locally as `.webster` files, and recent file handles are remembered in the browser through IndexedDB/File System Access API support. Shared-project UI and socket clients exist, but server persistence is not implemented here.
 
 Planned production choice: PostgreSQL.
 
@@ -329,13 +383,16 @@ Why PostgreSQL is a good fit later:
 - template ownership
 - save history/revisions
 - sharing permissions
+- shared project operations
+- shared project snapshots/checkpoints
+- shared asset references
 - subscription/billing metadata if needed
 - reliable relational constraints for collaborative/project data
 
 The likely future stack is:
 
 ```text
-Next.js frontend -> backend API -> PostgreSQL
+Next.js frontend -> backend API/WebSocket server -> PostgreSQL + asset storage
 ```
 
 ## Docker And Hosting
@@ -410,7 +467,7 @@ This section maps the expected demo requirements to current project status.
 | Requirement | Status | Notes |
 | --- | --- | --- |
 | Show Dockerfile/docker-compose deployment config | Planned | Docker config is not present yet. |
-| Show project build logs | Partial | Local `npm run build:web` compiles, but this Windows/OneDrive workspace currently hits `spawn EPERM` during Next's later build phase. Docker build logs are not available until Docker config is added. |
+| Show project build logs | Partial | Local `npm run build:web` compiles. Docker build logs are not available until Docker config is added. |
 | App works on hosting by domain name | Planned | No hosted domain is configured. |
 | Explain database choice | Partial | No DB currently; PostgreSQL is the planned production choice. |
 | Go to app homepage | Present | Local homepage runs at `http://localhost:3000`. |
@@ -418,16 +475,16 @@ This section maps the expected demo requirements to current project status.
 | User login | Planned | No auth backend/UI yet. |
 | Email confirmation | Planned | No email/auth flow yet. |
 | Modify user profile | Planned | No user profile system yet. |
-| Project templates | Present | Built-in document presets exist. User templates are planned. |
+| Project templates | Present | Built-in document presets and user templates exist. |
 | Create new project | Present | New document dialog exists. |
 | Add/work with text | Present | Text tool/layers are implemented. |
 | Free drawing/pencil | Present | Draw tool is implemented. |
 | Shape elements | Present | Rectangle, circle, line, triangle, diamond, and arrow are implemented. |
 | Add pictures as elements | Present | Import image as layer works. |
 | Move elements with mouse | Present | Move tool works. |
-| Move elements with keyboard | Present | Arrow-key movement is not implemented. |
-| Delete elements from canvas | Present | Layer menu delete exists. Keyboard delete is planned. |
-| Change history and restore previous version | Present | History panel exists; full undo/revision restore is present. |
+| Move elements with keyboard | Present | Arrow-key nudging exists. |
+| Delete elements from canvas | Present | Layer menu and keyboard delete exist. |
+| Change history and restore previous version | Partial | Local history undo/redo exists. Shared snapshot restore UI exists, but backend-backed restore requires server support. |
 | Resize canvas | Present | New document size exists; resizing an existing document is present. |
 | Zoom canvas | Present | Mouse wheel zoom works. |
 | Save project as JPG | Present | Export as JPEG. |
@@ -436,4 +493,7 @@ This section maps the expected demo requirements to current project status.
 | Save project in additional format | Present | `.webster` native project format. |
 | Share in social networks | Planned | Not implemented. |
 | User-created templates | Present | Implemented. |
-|Import font|Planned|
+| Shared project frontend | Partial | File menu can open/share shared projects and the Versions panel can call snapshot/export APIs, but backend routes are not implemented. |
+| Collaboration roles | Partial | Frontend owner/editor/viewer permissions exist. Backend auth/permission enforcement is not implemented. |
+| Realtime collaboration | Partial | Frontend WebSocket client, operation queue, previews, commits, reconnect resend, and presence UI exist. Server WebSocket logic is not implemented. |
+| Import font | Present | Font import is available from File and text-layer properties. |

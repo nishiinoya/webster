@@ -49,6 +49,7 @@ import type {
 } from "./hooks/useEditorSceneRequests";
 import { HistoryPanel } from "./panels/HistoryPanel";
 import { LayersPanel } from "./panels/LayersPanel";
+import { VersionHistoryPanel } from "./panels/VersionHistoryPanel";
 import { ExportImageDialog } from "./dialogs/ExportImageDialog";
 import { NewDocumentDialog } from "./dialogs/NewDocumentDialog";
 import { Object3DImportDialog } from "./dialogs/Object3DImportDialog";
@@ -59,6 +60,7 @@ import { TabsBar } from "./toolbar/TabsBar";
 import { Toolbar } from "./toolbar/Toolbar";
 import { ToolsPanel } from "./toolbar/ToolsPanel";
 import type { ToolDefinition } from "./toolbar/ToolsPanel";
+import type { SharedProjectRequest, SharedProjectUiState } from "../collaboration/useCollaboration";
 
 const initialTabs: EditorDocumentTab[] = [];
 
@@ -150,7 +152,7 @@ const historyPanelMinHeight = 72;
 const sidePanelHandleHeight = 12;
 const collapsedSidePanelHeight = 42;
 
-type SidePanelId = "history" | "layers" | "properties";
+type SidePanelId = "history" | "layers" | "properties" | "versions";
 
 type EditorLayoutVars = CSSProperties & {
   "--tools-panel-width": string;
@@ -169,6 +171,27 @@ const emptyHistoryState: HistoryStateSnapshot = {
   entries: [],
   redoLabel: null,
   undoLabel: null
+};
+
+const initialSharedProjectState: SharedProjectUiState = {
+  capabilities: {
+    canCreateSnapshots: false,
+    canDownloadWebster: false,
+    canEdit: true,
+    canManageMembers: false,
+    canRestoreSnapshots: false
+  },
+  connectionStatus: "disconnected",
+  currentVersion: null,
+  error: null,
+  isBusy: false,
+  mode: "local",
+  pendingCommitCount: 0,
+  projectId: null,
+  projectName: null,
+  role: null,
+  snapshots: [],
+  users: []
 };
 
 export function EditorPage() {
@@ -219,6 +242,8 @@ export function EditorPage() {
   const [userTemplates, setUserTemplates] = useState<UserProjectTemplateSummary[]>([]);
   const [historyState, setHistoryState] = useState<HistoryStateSnapshot>(emptyHistoryState);
   const [layers, setLayers] = useState<LayerSummary[]>(initialLayers);
+  const [sharedProjectState, setSharedProjectState] =
+    useState<SharedProjectUiState>(initialSharedProjectState);
   const [importedFontFamilies, setImportedFontFamilies] = useState<string[]>([]);
   const [uploadRequest, setUploadRequest] = useState<{ file: File; id: number } | null>(null);
   const [imageDocumentRequest, setImageDocumentRequest] = useState<{
@@ -288,6 +313,8 @@ export function EditorPage() {
     command: EditorClipboardCommand;
     id: number;
   } | null>(null);
+  const [collaborationRequest, setCollaborationRequest] =
+    useState<SharedProjectRequest | null>(null);
   const [closedDocumentRequest, setClosedDocumentRequest] = useState<{
     id: number;
     tabId: string;
@@ -299,7 +326,8 @@ export function EditorPage() {
   const [collapsedSidePanels, setCollapsedSidePanels] = useState<Record<SidePanelId, boolean>>({
     history: false,
     layers: false,
-    properties: false
+    properties: false,
+    versions: false
   });
 
   const layoutStyle: EditorLayoutVars = {
@@ -320,6 +348,9 @@ export function EditorPage() {
   const selectedObject3DLayer = isObject3DLayerSummary(selectedLayer) ? selectedLayer : null;
   const activeDocument = tabs.find((tab) => tab.isActive) ?? tabs[0] ?? null;
   const activeHistoryState = activeDocument ? historyState : emptyHistoryState;
+  const canEditDocument =
+    Boolean(activeDocument) &&
+    (sharedProjectState.mode === "local" || sharedProjectState.capabilities.canEdit);
   const strokeLayers = layers.filter((layer) => layer.type === "stroke");
   const textLayerFontFamilies = layers
     .filter((layer): layer is LayerSummary & { fontFamily: string } => layer.type === "text")
@@ -365,11 +396,30 @@ export function EditorPage() {
   }, [tabs.length]);
 
   function runLayerCommand(command: LayerCommand) {
+    if (!canEditDocument) {
+      return;
+    }
+
     setLayerCommandRequest({ command, id: Date.now() });
   }
 
   function runLayerAssetCommand(command: LayerAssetCommand) {
+    if (!canEditDocument) {
+      return;
+    }
+
     setLayerAssetCommandRequest({ command, id: Date.now() });
+  }
+
+  function switchToLocalMode() {
+    if (sharedProjectState.mode === "local") {
+      return;
+    }
+
+    setCollaborationRequest({
+      id: Date.now(),
+      type: "switch-local"
+    });
   }
 
   function rememberImportedFontFamily(fontFamily: string) {
@@ -419,6 +469,10 @@ export function EditorPage() {
   }
 
   function groupSelectedLayers() {
+    if (!canEditDocument) {
+      return;
+    }
+
     if (groupableSelectedLayerIds.length < 2) {
       return;
     }
@@ -444,6 +498,7 @@ export function EditorPage() {
   }
 
   function createDocumentTab(size: NewDocumentSize) {
+    switchToLocalMode();
     documentCounterRef.current += 1;
 
     const tab: EditorDocumentTab = {
@@ -580,6 +635,104 @@ export function EditorPage() {
     });
   }
 
+  function shareCurrentProject() {
+    if (!activeDocument) {
+      window.alert("Open or create a project before sharing it.");
+      return;
+    }
+
+    setCollaborationRequest({
+      id: Date.now(),
+      title: activeDocument.title,
+      type: "share-local"
+    });
+  }
+
+  function openSharedProject() {
+    const projectId = window.prompt("Shared project ID");
+
+    if (!projectId?.trim()) {
+      return;
+    }
+
+    if (!activeDocument) {
+      documentCounterRef.current += 1;
+      const tab: EditorDocumentTab = {
+        height: 600,
+        id: `document-${documentCounterRef.current}`,
+        isActive: true,
+        title: `Shared ${projectId.trim()}`,
+        width: 800
+      };
+
+      setTabs((currentTabs) => [
+        ...currentTabs.map((currentTab) => ({ ...currentTab, isActive: false })),
+        tab
+      ]);
+    }
+
+    setCollaborationRequest({
+      id: Date.now(),
+      projectId: projectId.trim(),
+      type: "open-shared"
+    });
+  }
+
+  function downloadSharedProject() {
+    setCollaborationRequest({
+      id: Date.now(),
+      type: "download-webster"
+    });
+  }
+
+  function createSharedSnapshot() {
+    const message = window.prompt("Snapshot message", "");
+
+    if (message === null) {
+      return;
+    }
+
+    setCollaborationRequest({
+      id: Date.now(),
+      message,
+      type: "create-snapshot"
+    });
+  }
+
+  function restoreSharedSnapshot(snapshotId: string) {
+    setCollaborationRequest({
+      id: Date.now(),
+      snapshotId,
+      type: "restore-snapshot"
+    });
+  }
+
+  function refreshSharedSnapshots() {
+    setCollaborationRequest({
+      id: Date.now(),
+      type: "refresh-snapshots"
+    });
+  }
+
+  function updateActiveTabFromSharedDocument(document: {
+    height: number;
+    title: string;
+    width: number;
+  }) {
+    setTabs((currentTabs) =>
+      currentTabs.map((tab) =>
+        tab.isActive
+          ? {
+              ...tab,
+              height: document.height,
+              title: document.title,
+              width: document.width
+            }
+          : tab
+      )
+    );
+  }
+
   function closeDocumentTab(tabId: string) {
     setTabs((currentTabs) => {
       const closedIndex = currentTabs.findIndex((tab) => tab.id === tabId);
@@ -594,6 +747,7 @@ export function EditorPage() {
       if (remainingTabs.length === 0) {
         setLayers([]);
         setZoomPercentage(100);
+        switchToLocalMode();
         return [];
       }
 
@@ -639,6 +793,7 @@ export function EditorPage() {
   }
 
   function openProjectInNewTab(file: File, handle?: WebsterFileHandle | null) {
+    switchToLocalMode();
     documentCounterRef.current += 1;
 
     const tab: EditorDocumentTab = {
@@ -664,6 +819,7 @@ export function EditorPage() {
 
   async function openImageAsNewDocument(file: File) {
     try {
+      switchToLocalMode();
       const dimensions = await loadImageDimensions(file);
 
       documentCounterRef.current += 1;
@@ -851,10 +1007,11 @@ export function EditorPage() {
   return (
     <main className="grid h-screen min-h-0 grid-rows-[64px_1fr] overflow-hidden bg-[#101113] text-[13px] text-[#e7e9ec] min-[1400px]:text-[14px] max-[760px]:h-[100svh] max-[760px]:grid-rows-[118px_1fr]">
       <Toolbar
-        canEditDocument={Boolean(activeDocument)}
+        canDownloadSharedProject={sharedProjectState.capabilities.canDownloadWebster}
+        canEditDocument={canEditDocument}
         canGroupSelectedLayers={canGroupSelectedLayers}
-        canRedo={activeHistoryState.canRedo}
-        canUndo={activeHistoryState.canUndo}
+        canRedo={canEditDocument && activeHistoryState.canRedo}
+        canUndo={canEditDocument && activeHistoryState.canUndo}
         canvasSize={
           activeDocument
             ? {
@@ -863,7 +1020,9 @@ export function EditorPage() {
               }
             : null
         }
+        collaborationStatus={sharedProjectState.connectionStatus}
         documentTitle={activeDocument?.title ?? "No document"}
+        isSharedMode={sharedProjectState.mode === "shared"}
         onCopy={() => runClipboardCommand("copy")}
         onCut={() => runClipboardCommand("cut")}
         onDeleteSelectedLayer={() => {
@@ -871,6 +1030,7 @@ export function EditorPage() {
             runLayerCommand({ layerId: selectedLayer.id, type: "delete" });
           }
         }}
+        onDownloadSharedProject={downloadSharedProject}
         onDuplicateSelectedLayer={() => {
           if (selectedLayer) {
             runLayerCommand({ layerId: selectedLayer.id, type: "duplicate" });
@@ -882,6 +1042,10 @@ export function EditorPage() {
         onOpenExportDialog={() => setIsExportImageDialogOpen(true)}
         onOpenImageResize={() => setIsResizeImageDialogOpen(true)}
         onOpenProject={openProjectInNewTab}
+        onOpenSharedProject={openSharedProject}
+        onOpenVersionHistory={() =>
+          setCollapsedSidePanels((currentPanels) => ({ ...currentPanels, versions: false }))
+        }
         onPaste={() => runClipboardCommand("paste")}
         onOpenImageDocument={(file) => void openImageAsNewDocument(file)}
         onRedo={() => setHistoryCommandRequest({ command: "redo", id: Date.now() })}
@@ -900,6 +1064,7 @@ export function EditorPage() {
         }}
         onSaveAsProject={() => setProjectSaveRequest({ id: Date.now(), mode: "save-as" })}
         onSaveProject={() => setProjectSaveRequest({ id: Date.now(), mode: "save" })}
+        onShareProject={shareCurrentProject}
         onExportTemplate={exportCurrentProjectAsTemplate}
         onSaveTemplate={saveCurrentProjectAsTemplate}
         onAddAdjustmentLayer={() => runLayerCommand({ type: "add-adjustment" })}
@@ -937,6 +1102,9 @@ export function EditorPage() {
         }}
         onStrokeWidthChange={(width) => setSelectedStrokeWidth(Math.max(1, width || 1))}
         saveStatus={saveStatus}
+        onlineUserCount={sharedProjectState.users.length || (sharedProjectState.mode === "shared" ? 1 : 0)}
+        pendingCommitCount={sharedProjectState.pendingCommitCount}
+        projectRole={sharedProjectState.role}
         selectedLayer={selectedLayer}
         selectedSelectionMode={selectedSelectionMode}
         selectedStrokeColor={selectedStrokeColor}
@@ -966,6 +1134,7 @@ export function EditorPage() {
         aria-label="Editor workspace"
       >
         <ToolsPanel
+          canEditDocument={canEditDocument}
           onSelectTool={setSelectedTool}
           onSelectShape={setSelectedShape}
           selectedShape={selectedShape}
@@ -995,6 +1164,7 @@ export function EditorPage() {
               activeDocument={activeDocument}
               clipboardCommandRequest={clipboardCommandRequest}
               closedDocumentRequest={closedDocumentRequest}
+              collaborationRequest={collaborationRequest}
               documentCommandRequest={documentCommandRequest}
               historyCommandRequest={historyCommandRequest}
               imageDocumentRequest={imageDocumentRequest}
@@ -1005,6 +1175,12 @@ export function EditorPage() {
               magicSelectionTolerance={magicSelectionTolerance}
               imageExportRequest={imageExportRequest}
               onFontImported={rememberImportedFontFamily}
+              onCollaborationRequestHandled={(requestId) =>
+                setCollaborationRequest((request) =>
+                  request?.id === requestId ? null : request
+                )
+              }
+              onCollaborationStateChange={setSharedProjectState}
               onHistoryChange={setHistoryState}
               onLayersChange={setLayers}
               onOpenObject3DImportFiles={(files) => openObject3DImportDialog("add", files)}
@@ -1081,6 +1257,7 @@ export function EditorPage() {
                 setUploadRequest((request) => (request?.id === requestId ? null : request))
               }
               onZoomChange={setZoomPercentage}
+              onSharedDocumentLoaded={updateActiveTabFromSharedDocument}
               projectFileRequest={projectFileRequest}
               projectSaveRequest={projectSaveRequest}
               templateExportRequest={templateExportRequest}
@@ -1234,6 +1411,7 @@ export function EditorPage() {
             )}
           >
             <LayersPanel
+              canEditDocument={canEditDocument}
               canGroupSelectedLayers={canGroupSelectedLayers}
               isCollapsed={collapsedSidePanels.layers}
               layers={layers}
@@ -1259,6 +1437,7 @@ export function EditorPage() {
             )}
           >
             <PropertiesPanel
+              canEditDocument={canEditDocument}
               isCollapsed={collapsedSidePanels.properties}
               importedFontFamilies={[...importedFontFamilies, ...textLayerFontFamilies]}
               onGroupSelectedLayers={groupSelectedLayers}
@@ -1278,6 +1457,29 @@ export function EditorPage() {
             onPointerDown={startPropertiesResize}
             orientation="horizontal"
           />
+          <div
+            className={cn(
+              "flex-none overflow-hidden max-[760px]:min-h-0",
+              collapsedSidePanels.versions ? "h-[42px]" : "h-[248px]"
+            )}
+          >
+            <VersionHistoryPanel
+              capabilities={sharedProjectState.capabilities}
+              currentVersion={sharedProjectState.currentVersion}
+              isCollapsed={collapsedSidePanels.versions}
+              isSharedMode={sharedProjectState.mode === "shared"}
+              onCreateSnapshot={createSharedSnapshot}
+              onDownloadWebster={downloadSharedProject}
+              onRefreshSnapshots={refreshSharedSnapshots}
+              onRestoreSnapshot={restoreSharedSnapshot}
+              onToggleCollapsed={() => toggleSidePanelCollapsed("versions")}
+              pendingCommitCount={sharedProjectState.pendingCommitCount}
+              projectId={sharedProjectState.projectId}
+              role={sharedProjectState.role}
+              snapshots={sharedProjectState.snapshots}
+              users={sharedProjectState.users}
+            />
+          </div>
           <div
             className={cn(
               "flex-none overflow-hidden",
@@ -1406,6 +1608,14 @@ export function EditorPage() {
       {projectFilePendingState ? <ProgressOverlay state={projectFilePendingState} /> : null}
       {imageLayerCommandPendingState ? (
         <ImageLayerCommandOverlay state={imageLayerCommandPendingState} />
+      ) : null}
+      {sharedProjectState.error ? (
+        <p
+          className="fixed bottom-4 left-1/2 z-50 m-0 max-w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-lg border border-[#b96a6a] bg-[rgba(28,20,20,0.96)] px-4 py-3 text-center text-[13px] font-bold text-[#ffd0d0] shadow-[0_18px_36px_rgba(0,0,0,0.42)]"
+          role="status"
+        >
+          {sharedProjectState.error}
+        </p>
       ) : null}
     </main>
   );

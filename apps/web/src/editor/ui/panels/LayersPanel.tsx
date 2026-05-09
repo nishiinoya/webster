@@ -10,6 +10,7 @@ import type { LayerCommand, LayerSummary } from "../../app/EditorApp";
 import { cn } from "../classNames";
 
 type LayersPanelProps = {
+  canEditDocument: boolean;
   canGroupSelectedLayers: boolean;
   isCollapsed: boolean;
   layers: LayerSummary[];
@@ -27,6 +28,7 @@ type LayerDropTarget = {
 };
 
 export function LayersPanel({
+  canEditDocument,
   canGroupSelectedLayers,
   isCollapsed,
   layers,
@@ -73,10 +75,19 @@ export function LayersPanel({
   }
 
   function updateLayer(layerId: string, updates: Extract<LayerCommand, { type: "update" }>["updates"]) {
+    if (!canEditDocument) {
+      return;
+    }
+
     onLayerCommand({ type: "update", layerId, updates });
   }
 
   function runLayerMenuCommand(command: LayerCommand) {
+    if (!canEditDocument) {
+      setOpenMenu(null);
+      return;
+    }
+
     onLayerCommand(command);
     setOpenMenu(null);
   }
@@ -116,6 +127,11 @@ export function LayersPanel({
   }
 
   function startLayerDrag(event: ReactDragEvent<HTMLElement>, layerId: string) {
+    if (!canEditDocument) {
+      event.preventDefault();
+      return;
+    }
+
     if (isLayerControlTarget(event.target)) {
       event.preventDefault();
       return;
@@ -206,7 +222,7 @@ export function LayersPanel({
         <div className="flex items-center gap-2">
           <button
             className="rounded-md border border-[#333941] bg-[#202329] px-2 py-1 text-[11px] font-bold text-[#dce1e6] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731] disabled:cursor-not-allowed disabled:text-[#747b85] disabled:opacity-70 disabled:hover:border-[#333941] disabled:hover:bg-[#202329]"
-            disabled={!canGroupSelectedLayers}
+            disabled={!canEditDocument || !canGroupSelectedLayers}
             onClick={onGroupSelectedLayers}
             type="button"
           >
@@ -214,6 +230,7 @@ export function LayersPanel({
           </button>
           <button
             className="rounded-md border border-[#333941] bg-[#202329] px-2 py-1 text-[11px] font-bold text-[#dce1e6] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]"
+            disabled={!canEditDocument}
             onClick={() => onLayerCommand({ type: "add-adjustment" })}
             type="button"
           >
@@ -241,7 +258,7 @@ export function LayersPanel({
             isDraggingLayer && "opacity-45",
             layer.isSelected && "border-[#4aa391] bg-[#172722] shadow-[inset_3px_0_0_#4aa391]"
           )}
-            draggable
+            draggable={canEditDocument}
             key={layer.id}
             onClick={(event) => selectLayerFromPanel(event, layer.id)}
             onDragEnd={clearLayerDrag}
@@ -276,6 +293,7 @@ export function LayersPanel({
                 aria-label={layer.isVisible ? `Hide ${layer.name}` : `Show ${layer.name}`}
                 aria-pressed={layer.isVisible}
                 className={layerToggleClass(layer.isVisible)}
+                disabled={!canEditDocument}
                 onClick={() => updateLayer(layer.id, { visible: !layer.isVisible })}
                 type="button"
               >
@@ -285,6 +303,7 @@ export function LayersPanel({
                 aria-label={layer.locked ? `Unlock ${layer.name}` : `Lock ${layer.name}`}
                 aria-pressed={layer.locked}
                 className={layerToggleClass(layer.locked)}
+                disabled={!canEditDocument}
                 onClick={() => updateLayer(layer.id, { locked: !layer.locked })}
                 type="button"
               >
@@ -313,6 +332,7 @@ export function LayersPanel({
                     aria-label={layer.collapsed ? `Expand ${layer.name}` : `Collapse ${layer.name}`}
                     aria-expanded={!layer.collapsed}
                     className="grid h-6 w-6 flex-none place-items-center rounded-md border border-[#30353d] bg-[#111317] text-xs font-black text-[#c9cdd2] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]"
+                    disabled={!canEditDocument}
                     onClick={(event) => {
                       stopPanelControl(event);
                       updateLayer(layer.id, { collapsed: !layer.collapsed });
@@ -333,11 +353,12 @@ export function LayersPanel({
                 <input
                   aria-label={`Rename ${layer.name}`}
                   className="w-full min-w-0 truncate rounded-md border border-transparent bg-transparent py-0.5 text-[13px] font-extrabold text-[#eef1f4] focus:border-[#4aa391] focus:bg-[#101113] focus:px-[7px] focus:py-[5px] focus:outline-0 min-[1400px]:text-sm"
-                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                    updateLayer(layer.id, { name: event.target.value })
-                  }
-                  onClick={stopPanelControl}
-                  value={layer.name}
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  updateLayer(layer.id, { name: event.target.value })
+                }
+                onClick={stopPanelControl}
+                disabled={!canEditDocument}
+                value={layer.name}
                 />
               </div>
               <div className="flex min-w-0 items-center gap-1.5 text-[11px] font-bold capitalize text-[#8f98a3] min-[1400px]:text-xs">
@@ -352,6 +373,7 @@ export function LayersPanel({
                 {layer.hasMask ? (
                   <button
                     className="rounded-md border border-[#333941] bg-[#111317] px-1.5 py-[3px] text-[10px] font-extrabold text-[#c9cdd2] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731] min-[1400px]:text-[11px]"
+                    disabled={!canEditDocument}
                     onClick={(event) => {
                       stopPanelControl(event);
                       onLayerCommand({
@@ -371,6 +393,7 @@ export function LayersPanel({
               aria-expanded={openMenu?.layerId === layer.id}
               aria-label={`Layer actions for ${layer.name}`}
               className="grid h-7 w-7 cursor-default place-items-center justify-self-end rounded-md border border-[#30353d] bg-[#111317] text-sm font-black leading-none text-[#c9cdd2] hover:border-[#4aa391] hover:bg-[#203731] aria-expanded:border-[#4aa391] aria-expanded:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]"
+              disabled={!canEditDocument}
               onClick={(event) => toggleLayerMenu(event, layer.id)}
               type="button"
             >
@@ -388,6 +411,7 @@ export function LayersPanel({
                 onChange={(event) =>
                   updateLayer(layer.id, { opacity: Number(event.target.value) / 100 })
                 }
+                disabled={!canEditDocument}
                 type="range"
                 value={Math.round(layer.opacity * 100)}
               />

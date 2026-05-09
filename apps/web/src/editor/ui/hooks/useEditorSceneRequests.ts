@@ -10,6 +10,7 @@ import { EditorApp } from "../../app/EditorApp";
 
 type UseEditorSceneRequestsOptions = {
   activeDocumentId: string;
+  canEditDocument: boolean;
   editorAppRef: MutableRefObject<EditorApp | null>;
   imageDocumentRequest: { file: File; id: number; tabId: string } | null;
   imageLayerCommandRequest: { command: ImageLayerCommand; id: number } | null;
@@ -61,6 +62,7 @@ export type LayerAssetCommandPendingState = {
 
 export function useEditorSceneRequests({
   activeDocumentId,
+  canEditDocument,
   editorAppRef,
   imageDocumentRequest,
   imageLayerCommandRequest,
@@ -139,7 +141,7 @@ export function useEditorSceneRequests({
   ]);
 
   useEffect(() => {
-    if (!imageLayerCommandRequest || !editorAppRef.current) {
+    if (!canEditDocument || !imageLayerCommandRequest || !editorAppRef.current) {
       return;
     }
 
@@ -204,7 +206,7 @@ export function useEditorSceneRequests({
   ]);
 
   useEffect(() => {
-    if (!layerAssetCommandRequest || !editorAppRef.current) {
+    if (!canEditDocument || !layerAssetCommandRequest || !editorAppRef.current) {
       return;
     }
 
@@ -290,7 +292,7 @@ export function useEditorSceneRequests({
   ]);
 
   useEffect(() => {
-    if (!uploadRequest || !editorAppRef.current) {
+    if (!canEditDocument || !uploadRequest || !editorAppRef.current) {
       return;
     }
 
@@ -343,7 +345,7 @@ export function useEditorSceneRequests({
   }, [editorAppRef, onLayersChange, onSelectLayerRequestHandled, selectLayerRequest]);
 
   useEffect(() => {
-    if (!layerCommandRequest || !editorAppRef.current) {
+    if (!canEditDocument || !layerCommandRequest || !editorAppRef.current) {
       return;
     }
 

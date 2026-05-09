@@ -15,14 +15,18 @@ import { cn } from "../classNames";
 
 type ToolbarProps = {
   canEditDocument: boolean;
+  canDownloadSharedProject: boolean;
   canGroupSelectedLayers: boolean;
   canRedo: boolean;
   canUndo: boolean;
   canvasSize: { height: number; width: number } | null;
+  collaborationStatus: "connected" | "connecting" | "disconnected" | "reconnecting";
   documentTitle: string;
+  isSharedMode: boolean;
   onCopy: () => void;
   onCut: () => void;
   onDeleteSelectedLayer: () => void;
+  onDownloadSharedProject: () => void;
   onDuplicateSelectedLayer: () => void;
   onGroupSelectedLayers: () => void;
   onNewDocument: () => void;
@@ -31,6 +35,8 @@ type ToolbarProps = {
   onOpenExportDialog: () => void;
   onOpenImageResize: () => void;
   onOpenProject: (file: File, handle?: WebsterFileHandle | null) => void;
+  onOpenSharedProject: () => void;
+  onOpenVersionHistory: () => void;
   onImportFont: (file: File) => void;
   onPaste: () => void;
   onRedo: () => void;
@@ -38,6 +44,7 @@ type ToolbarProps = {
   onExportTemplate: () => void;
   onSaveAsProject: () => void;
   onSaveProject: () => void;
+  onShareProject: () => void;
   onSaveTemplate: () => void;
   onAddAdjustmentLayer: () => void;
   onAddObject3DLayer: () => void;
@@ -57,6 +64,9 @@ type ToolbarProps = {
   onStrokeTargetChange: (target: StrokeTargetSelection) => void;
   onStrokeWidthChange: (width: number) => void;
   saveStatus: SaveStatus;
+  onlineUserCount: number;
+  pendingCommitCount: number;
+  projectRole: string | null;
   selectedLayer: LayerSummary | null;
   selectedSelectionMode: SelectionMode;
   selectedStrokeColor: [number, number, number, number];
@@ -130,14 +140,18 @@ const shortcutMenuGroups = [
 
 export function Toolbar({
   canEditDocument,
+  canDownloadSharedProject,
   canGroupSelectedLayers,
   canRedo,
   canUndo,
   canvasSize,
+  collaborationStatus,
   documentTitle,
+  isSharedMode,
   onCopy,
   onCut,
   onDeleteSelectedLayer,
+  onDownloadSharedProject,
   onDuplicateSelectedLayer,
   onGroupSelectedLayers,
   onNewDocument,
@@ -146,6 +160,8 @@ export function Toolbar({
   onOpenExportDialog,
   onOpenImageResize,
   onOpenProject,
+  onOpenSharedProject,
+  onOpenVersionHistory,
   onImportFont,
   onPaste,
   onRedo,
@@ -153,6 +169,7 @@ export function Toolbar({
   onExportTemplate,
   onSaveAsProject,
   onSaveProject,
+  onShareProject,
   onSaveTemplate,
   onAddAdjustmentLayer,
   onAddObject3DLayer,
@@ -172,6 +189,9 @@ export function Toolbar({
   onStrokeTargetChange,
   onStrokeWidthChange,
   saveStatus,
+  onlineUserCount,
+  pendingCommitCount,
+  projectRole,
   selectedLayer,
   selectedSelectionMode,
   selectedStrokeColor,
@@ -324,6 +344,16 @@ export function Toolbar({
             <button className={toolbarMenuItemClass} onClick={openProjectPicker} type="button">
               Open .webster...
             </button>
+            <button
+              className={toolbarMenuItemClass}
+              onClick={(event) => {
+                closeMenu(event);
+                onOpenSharedProject();
+              }}
+              type="button"
+            >
+              Open shared project...
+            </button>
             <button className={toolbarMenuItemClass} onClick={openImageDocumentPicker} type="button">
               Open image as document...
             </button>
@@ -353,6 +383,17 @@ export function Toolbar({
               type="button"
             >
               Save
+            </button>
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!canEditDocument || isSharedMode}
+              onClick={(event) => {
+                closeMenu(event);
+                onShareProject();
+              }}
+              type="button"
+            >
+              Share project...
             </button>
             <button
               className={toolbarMenuItemClass}
@@ -389,14 +430,29 @@ export function Toolbar({
             </button>
             <button
               className={toolbarMenuItemClass}
-              disabled={!canEditDocument}
-              onClick={() => {
-                fileMenuRef.current?.removeAttribute("open");
-                onOpenExportDialog();
+              disabled={isSharedMode ? !canDownloadSharedProject : !canEditDocument}
+              onClick={(event) => {
+                closeMenu(event);
+                if (isSharedMode) {
+                  onDownloadSharedProject();
+                } else {
+                  onOpenExportDialog();
+                }
               }}
               type="button"
             >
-              Export as...
+              {isSharedMode ? "Download shared .webster..." : "Export as..."}
+            </button>
+            <button
+              className={toolbarMenuItemClass}
+              disabled={!isSharedMode}
+              onClick={() => {
+                fileMenuRef.current?.removeAttribute("open");
+                onOpenVersionHistory();
+              }}
+              type="button"
+            >
+              Version history...
             </button>
           </div>
         </details>
@@ -430,7 +486,7 @@ export function Toolbar({
             <MenuSeparator />
             <button
               className={toolbarMenuItemClass}
-              disabled={!selectedLayer}
+              disabled={!canEditDocument || !selectedLayer}
               onClick={(event) => {
                 closeMenu(event);
                 onDuplicateSelectedLayer();
@@ -442,7 +498,7 @@ export function Toolbar({
             </button>
             <button
               className={toolbarMenuItemClass}
-              disabled={!selectedLayer}
+              disabled={!canEditDocument || !selectedLayer}
               onClick={(event) => {
                 closeMenu(event);
                 onDeleteSelectedLayer();
@@ -454,7 +510,7 @@ export function Toolbar({
             </button>
             <button
               className={toolbarMenuItemClass}
-              disabled={!canGroupSelectedLayers}
+              disabled={!canEditDocument || !canGroupSelectedLayers}
               onClick={(event) => {
                 closeMenu(event);
                 onGroupSelectedLayers();
@@ -503,7 +559,7 @@ export function Toolbar({
             </button>
             <button
               className={toolbarMenuItemClass}
-              disabled={!isImageLayerSummary(selectedLayer) || selectedLayer.locked}
+              disabled={!canEditDocument || !isImageLayerSummary(selectedLayer) || selectedLayer.locked}
               onClick={(event) => {
                 closeMenu(event);
                 onOpenImageResize();
@@ -516,6 +572,7 @@ export function Toolbar({
             <button
               className={toolbarMenuItemClass}
               disabled={
+                !canEditDocument ||
                 !isImageLayerSummary(selectedLayer) ||
                 selectedLayer.locked ||
                 !selectedLayer.canRestoreOriginalPixels
@@ -1034,6 +1091,16 @@ export function Toolbar({
         className="flex items-center justify-end gap-2 text-[13px] text-[#c9cdd2] max-[980px]:hidden"
         aria-label="Current editor status"
       >
+        <span className={statusPillClass}>
+          {isSharedMode
+            ? getCollaborationStatusLabel(collaborationStatus, pendingCommitCount)
+            : "Local"}
+        </span>
+        {isSharedMode ? (
+          <span className={statusPillClass}>
+            {projectRole ?? "shared"} - {onlineUserCount || 1} online
+          </span>
+        ) : null}
         {saveStatus !== "idle" ? <span className={statusPillClass}>{getSaveStatusLabel(saveStatus)}</span> : null}
         {isImageLayerSummary(selectedLayer) ? (
           <span className={statusPillClass}>
@@ -1187,4 +1254,24 @@ function getSaveStatusLabel(status: SaveStatus) {
   }
 
   return "Save failed";
+}
+
+function getCollaborationStatusLabel(
+  status: "connected" | "connecting" | "disconnected" | "reconnecting",
+  pendingCommitCount: number
+) {
+  if (pendingCommitCount > 0) {
+    return `Unsynced ${pendingCommitCount}`;
+  }
+
+  switch (status) {
+    case "connected":
+      return "Shared connected";
+    case "connecting":
+      return "Shared connecting";
+    case "reconnecting":
+      return "Shared reconnecting";
+    case "disconnected":
+      return "Shared disconnected";
+  }
 }

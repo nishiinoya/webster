@@ -17,7 +17,12 @@ import {
   cloneSceneSnapshot,
   restoreSceneSnapshot
 } from "../scene/sceneSnapshots";
-import type { DocumentResizeAnchor, LayerMaskAction, LayerStackPlacement } from "../scene/Scene";
+import type {
+  DocumentResizeAnchor,
+  LayerMaskAction,
+  LayerStackPlacement,
+  SerializedScene
+} from "../scene/Scene";
 import type { LayerClipboardSnapshot } from "../scene/Scene";
 import { exportScenePackage, importScenePackage } from "../projects/ProjectPackage";
 import type { ProjectPackageProgress } from "../projects/ProjectPackage";
@@ -209,6 +214,7 @@ export class EditorApp {
   private readonly inputController: InputController;
   private readonly onCameraChange?: (camera: CameraSnapshot) => void;
   private readonly onHistoryChange?: (history: HistoryStateSnapshot) => void;
+  private readonly onLocalEditorAction?: (action: SharedEditorAction) => void;
   private animationFrameId: number | null = null;
   private isDisposed = false;
   private activeDocumentId: string | null = null;
@@ -231,6 +237,7 @@ export class EditorApp {
     callbacks: {
       onCameraChange?: (camera: CameraSnapshot) => void;
       onHistoryChange?: (history: HistoryStateSnapshot) => void;
+      onLocalEditorAction?: (action: SharedEditorAction) => void;
       onStrokeLayerCreated?: (layerId: string) => void;
     } = {}
   ) {
@@ -243,12 +250,14 @@ export class EditorApp {
     callbacks: {
       onCameraChange?: (camera: CameraSnapshot) => void;
       onHistoryChange?: (history: HistoryStateSnapshot) => void;
+      onLocalEditorAction?: (action: SharedEditorAction) => void;
       onStrokeLayerCreated?: (layerId: string) => void;
     } = {}
   ) {
     this.renderer = renderer;
     this.onCameraChange = callbacks.onCameraChange;
     this.onHistoryChange = callbacks.onHistoryChange;
+    this.onLocalEditorAction = callbacks.onLocalEditorAction;
     this.scene = new Scene({ createDefaultLayer: false });
     this.camera = new Camera2D();
     this.camera.setBounds(this.scene.document);
@@ -546,6 +555,39 @@ export class EditorApp {
       rememberActiveDocument: true
     });
     this.resetCurrentHistory("Opened project");
+
+    return this.scene;
+  }
+
+  /**
+   * Imports a server snapshot that uses the same manifest shape as `.webster`.
+   * Binary assets still arrive over REST as Blob entries, never through the
+   * realtime socket.
+   */
+  async importSerializedScene(
+    data: SerializedScene,
+    assets = new Map<string, Blob>(),
+    options: { historyLabel?: string } = {}
+  ) {
+    const nextScene = await Scene.fromJSON(data, assets);
+
+    for (const font of data.fonts ?? []) {
+      const blob = assets.get(font.assetPath) ?? assets.get(font.id);
+
+      if (blob) {
+        nextScene.upsertFontAsset({
+          ...font,
+          blob
+        });
+      }
+    }
+
+    await this.renderer.importSceneFonts(nextScene);
+    this.replaceScene(nextScene, {
+      disposeCurrent: true,
+      rememberActiveDocument: true
+    });
+    this.resetCurrentHistory(options.historyLabel ?? "Loaded project");
 
     return this.scene;
   }
@@ -1676,6 +1718,7 @@ export class EditorApp {
 
     history.record(action, before, after);
     this.notifyHistoryChange();
+    this.onLocalEditorAction?.(action);
   }
 
   private createHistoryAction(

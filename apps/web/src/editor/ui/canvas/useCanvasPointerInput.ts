@@ -9,15 +9,21 @@ import { EditorApp } from "../../app/EditorApp";
 import type { LayerSummary } from "../../app/EditorApp";
 
 type UseCanvasPointerInputOptions = {
+  canEditDocument: boolean;
   editorAppRef: MutableRefObject<EditorApp | null>;
   onLayersChange: (layers: LayerSummary[]) => void;
+  onPresenceCursor?: (cursor: { x: number; y: number }, tool: string) => void;
+  onPreviewEditorAction?: (tool: string) => void;
   onTextToolPointerDown?: (event: ReactPointerEvent<HTMLCanvasElement>) => boolean;
   selectedTool: string;
 };
 
 export function useCanvasPointerInput({
+  canEditDocument,
   editorAppRef,
   onLayersChange,
+  onPresenceCursor,
+  onPreviewEditorAction,
   onTextToolPointerDown,
   selectedTool
 }: UseCanvasPointerInputOptions) {
@@ -76,6 +82,10 @@ export function useCanvasPointerInput({
         }
 
         if (selectedTool === "Text") {
+          if (!canEditDocument) {
+            return;
+          }
+
           event.preventDefault();
           event.currentTarget.focus();
           if (editorAppRef.current?.startTextSelectionAtClientPoint(event.clientX, event.clientY)) {
@@ -89,7 +99,7 @@ export function useCanvasPointerInput({
           return;
         }
 
-        if (isCanvasInputTool(selectedTool)) {
+        if (canEditDocument && isCanvasInputTool(selectedTool)) {
           const didHandleInput = editorAppRef.current?.pointerDown({
             altKey: event.altKey,
             button: event.button,
@@ -108,6 +118,7 @@ export function useCanvasPointerInput({
       },
       onPointerLeave: () => setCanvasCursor("default"),
       onPointerMove: (event: ReactPointerEvent<HTMLCanvasElement>) => {
+        onPresenceCursor?.({ x: event.clientX, y: event.clientY }, selectedTool);
         panTo(event.clientX, event.clientY);
 
         if (selectedTool === "Text" && textSelectionPointerIdRef.current === event.pointerId) {
@@ -123,17 +134,20 @@ export function useCanvasPointerInput({
           return;
         }
 
-        const didHandleInput = editorAppRef.current?.pointerMove({
-          altKey: event.altKey,
-          button: event.button,
-          clientX: event.clientX,
-          clientY: event.clientY,
-          detail: event.detail,
-          shiftKey: event.shiftKey
-        });
+        const didHandleInput = canEditDocument
+          ? editorAppRef.current?.pointerMove({
+              altKey: event.altKey,
+              button: event.button,
+              clientX: event.clientX,
+              clientY: event.clientY,
+              detail: event.detail,
+              shiftKey: event.shiftKey
+            })
+          : false;
 
         if (didHandleInput && editorAppRef.current) {
           onLayersChange(editorAppRef.current.getLayerSummaries());
+          onPreviewEditorAction?.(selectedTool);
         }
 
         updateCanvasCursor(event.clientX, event.clientY);
@@ -150,7 +164,7 @@ export function useCanvasPointerInput({
           editorAppRef.current?.endTextSelection();
         }
 
-        if (editorAppRef.current?.pointerUp()) {
+        if (canEditDocument && editorAppRef.current?.pointerUp()) {
           onLayersChange(editorAppRef.current.getLayerSummaries());
         }
 

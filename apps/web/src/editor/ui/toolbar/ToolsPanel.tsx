@@ -10,6 +10,7 @@ export type ToolDefinition = {
 };
 
 type ToolsPanelProps = {
+  canEditDocument: boolean;
   onSelectTool: (tool: string) => void;
   onSelectShape: (shape: ShapeKind) => void;
   selectedShape: ShapeKind;
@@ -18,6 +19,7 @@ type ToolsPanelProps = {
 };
 
 export function ToolsPanel({
+  canEditDocument,
   onSelectShape,
   onSelectTool,
   selectedShape,
@@ -38,6 +40,7 @@ export function ToolsPanel({
       <ToolGroup
         onSelectShape={onSelectShape}
         onSelectTool={onSelectTool}
+        canEditDocument={canEditDocument}
         selectedShape={selectedShape}
         selectedTool={selectedTool}
         tools={availableTools}
@@ -50,6 +53,7 @@ export function ToolsPanel({
           <ToolGroup
             onSelectShape={onSelectShape}
             onSelectTool={onSelectTool}
+            canEditDocument={canEditDocument}
             selectedShape={selectedShape}
             selectedTool={selectedTool}
             tools={laterTools}
@@ -63,12 +67,14 @@ export function ToolsPanel({
 function ToolGroup({
   onSelectTool,
   onSelectShape,
+  canEditDocument,
   selectedShape,
   selectedTool,
   tools
 }: {
   onSelectTool: (tool: string) => void;
   onSelectShape: (shape: ShapeKind) => void;
+  canEditDocument: boolean;
   selectedShape: ShapeKind;
   selectedTool: string;
   tools: ToolDefinition[];
@@ -76,7 +82,7 @@ function ToolGroup({
   return (
     <div className="grid gap-[7px]">
       {tools.map((tool) => {
-        const isDisabled = tool.status === "later";
+        const isDisabled = tool.status === "later" || (!canEditDocument && tool.value !== "Pan");
 
         return (
           <div className="grid gap-1.5" key={tool.value}>
@@ -122,6 +128,7 @@ function ToolGroup({
                 </span>
                 <select
                   className="w-full rounded-md border border-[#36534c] bg-[#15171b] px-2 py-1.5 text-xs font-bold text-[#eef1f4]"
+                  disabled={!canEditDocument}
                   onChange={(event) => onSelectShape(toShapeKind(event.target.value))}
                   value={selectedShape}
                 >

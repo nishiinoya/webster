@@ -30,6 +30,9 @@ import type {
 } from "./hooks/useEditorSceneRequests";
 import { useProjectFileActions } from "./hooks/useProjectFileActions";
 import type { ProjectFilePendingState, SaveStatus } from "./hooks/useProjectFileActions";
+import type { SharedProjectRequest, SharedProjectUiState } from "../collaboration/useCollaboration";
+import { useCollaboration } from "../collaboration/useCollaboration";
+import type { SharedEditorAction } from "../app/history/SharedEditorAction";
 import { saveUserProjectTemplate } from "../projects/projectTemplates";
 import type { WebsterFileHandle } from "../projects/projectFiles";
 import type { EditorDocumentTab } from "./editorDocuments";
@@ -43,6 +46,7 @@ type CanvasViewProps = {
   activeDocument: EditorDocumentTab;
   clipboardCommandRequest: { command: EditorClipboardCommand; id: number } | null;
   closedDocumentRequest: { id: number; tabId: string } | null;
+  collaborationRequest: SharedProjectRequest | null;
   documentCommandRequest: { command: DocumentCommand; id: number } | null;
   historyCommandRequest: { command: "redo" | "undo"; id: number } | null;
   imageExportRequest: {
@@ -62,6 +66,8 @@ type CanvasViewProps = {
   maskBrushOptions: MaskBrushOptions;
   magicSelectionTolerance: number;
   onHistoryChange: (history: HistoryStateSnapshot) => void;
+  onCollaborationRequestHandled: (requestId: number) => void;
+  onCollaborationStateChange: (state: SharedProjectUiState) => void;
   onClipboardCommandRequestHandled: (requestId: number) => void;
   onHistoryCommandRequestHandled: (requestId: number) => void;
   onFontImported: (fontFamily: string) => void;
@@ -88,6 +94,7 @@ type CanvasViewProps = {
   onTemplateSaveRequestHandled: (requestId: number) => void;
   onUploadRequestHandled: (requestId: number) => void;
   onZoomChange: (zoomPercentage: number) => void;
+  onSharedDocumentLoaded: (document: { height: number; title: string; width: number }) => void;
   projectFileRequest: {
     file: File;
     handle?: WebsterFileHandle | null;
@@ -117,6 +124,7 @@ export function CanvasView({
   activeDocument,
   clipboardCommandRequest,
   closedDocumentRequest,
+  collaborationRequest,
   documentCommandRequest,
   historyCommandRequest,
   imageExportRequest,
@@ -127,6 +135,8 @@ export function CanvasView({
   maskBrushOptions,
   magicSelectionTolerance,
   onHistoryChange,
+  onCollaborationRequestHandled,
+  onCollaborationStateChange,
   onClipboardCommandRequestHandled,
   onHistoryCommandRequestHandled,
   onFontImported,
@@ -153,6 +163,7 @@ export function CanvasView({
   onTemplateSaveRequestHandled,
   onUploadRequestHandled,
   onZoomChange,
+  onSharedDocumentLoaded,
   projectFileRequest,
   projectSaveRequest,
   templateExportRequest,
@@ -173,6 +184,10 @@ export function CanvasView({
   showCanvasBorder
 }: CanvasViewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const collaborationActionHandlerRef = useRef<(action: SharedEditorAction) => void>(
+    () => undefined
+  );
+  const collaborationPreviewHandlerRef = useRef<(tool: string) => void>(() => undefined);
   const handledClipboardCommandRequestIdRef = useRef<number | null>(null);
   const handledTemplateInsertRequestIdRef = useRef<number | null>(null);
   const [fps, setFps] = useState(0);
@@ -180,6 +195,7 @@ export function CanvasView({
     canvasRef,
     maskBrushOptions,
     onHistoryChange,
+    onLocalEditorAction: (action) => collaborationActionHandlerRef.current(action),
     onLayersChange,
     onStrokeLayerCreated,
     onZoomChange,
@@ -195,9 +211,42 @@ export function CanvasView({
     selectedStrokeWidth,
     selectedTool
   });
+  const {
+    canEditSharedProject,
+    handleLocalEditorAction,
+    sendPresenceCursor,
+    sendPreviewFromCurrentScene
+  } = useCollaboration({
+    activeDocumentTitle: activeDocument.title,
+    editorAppRef,
+    onDocumentLoaded: onSharedDocumentLoaded,
+    onLayersChange,
+    onRequestHandled: onCollaborationRequestHandled,
+    onStateChange: onCollaborationStateChange,
+    request: collaborationRequest
+  });
+
+  useEffect(() => {
+    collaborationActionHandlerRef.current = (action) => {
+      void handleLocalEditorAction(action);
+    };
+    collaborationPreviewHandlerRef.current = (tool) => {
+      void sendPreviewFromCurrentScene(tool);
+    };
+  }, [handleLocalEditorAction, sendPreviewFromCurrentScene]);
+
+  useEffect(() => {
+    if (!canEditSharedProject && selectedTool !== "Pan") {
+      onSelectTool("Pan");
+    }
+  }, [canEditSharedProject, onSelectTool, selectedTool]);
+
   const { canvasCursor, pointerHandlers } = useCanvasPointerInput({
+    canEditDocument: canEditSharedProject,
     editorAppRef,
     onLayersChange,
+    onPresenceCursor: sendPresenceCursor,
+    onPreviewEditorAction: (tool) => collaborationPreviewHandlerRef.current(tool),
     onTextToolPointerDown: handleTextToolPointerDown,
     selectedTool
   });
@@ -213,6 +262,7 @@ export function CanvasView({
   useCanvasWheelZoom({ canvasRef, editorAppRef });
   useEditorSceneRequests({
     activeDocumentId: activeDocument.id,
+    canEditDocument: canEditSharedProject,
     editorAppRef,
     imageDocumentRequest,
     imageLayerCommandRequest,
@@ -237,6 +287,7 @@ export function CanvasView({
     editorAppRef,
     activeDocumentId: activeDocument.id,
     activeDocumentTitle: activeDocument.title,
+    canEditDocument: canEditSharedProject,
     closedDocumentRequest,
     onLayersChange,
     onProjectFileRequestHandled,
@@ -252,6 +303,11 @@ export function CanvasView({
 
   useEffect(() => {
     if (!clipboardCommandRequest || !editorAppRef.current) {
+      return;
+    }
+
+    if (!canEditSharedProject && clipboardCommandRequest.command !== "copy") {
+      onClipboardCommandRequestHandled(clipboardCommandRequest.id);
       return;
     }
 
@@ -302,6 +358,7 @@ export function CanvasView({
     };
   }, [
     clipboardCommandRequest,
+    canEditSharedProject,
     editorAppRef,
     onClipboardCommandRequestHandled,
     onLayersChange,
@@ -311,6 +368,11 @@ export function CanvasView({
 
   useEffect(() => {
     if (!templateSaveRequest || !editorAppRef.current) {
+      return;
+    }
+
+    if (!canEditSharedProject) {
+      onTemplateSaveRequestHandled(templateSaveRequest.id);
       return;
     }
 
@@ -357,6 +419,7 @@ export function CanvasView({
     };
   }, [
     editorAppRef,
+    canEditSharedProject,
     onSaveStatusChange,
     onTemplateSaveRequestHandled,
     setWebglError,
@@ -365,6 +428,11 @@ export function CanvasView({
 
   useEffect(() => {
     if (!templateInsertRequest || !editorAppRef.current) {
+      return;
+    }
+
+    if (!canEditSharedProject) {
+      onTemplateInsertRequestHandled(templateInsertRequest.id);
       return;
     }
 
@@ -407,6 +475,7 @@ export function CanvasView({
   }, [
     editorAppRef,
     activeDocument.id,
+    canEditSharedProject,
     onLayersChange,
     onTemplateInsertRequestHandled,
     rememberActiveScene,
@@ -466,6 +535,11 @@ export function CanvasView({
       return;
     }
 
+    if (!canEditSharedProject) {
+      onHistoryCommandRequestHandled(historyCommandRequest.id);
+      return;
+    }
+
     const didApply =
       historyCommandRequest.command === "undo"
         ? editorAppRef.current.undo()
@@ -480,6 +554,7 @@ export function CanvasView({
     onHistoryCommandRequestHandled(historyCommandRequest.id);
   }, [
     editorAppRef,
+    canEditSharedProject,
     historyCommandRequest,
     onHistoryCommandRequestHandled,
     onLayersChange,
@@ -492,6 +567,11 @@ export function CanvasView({
       return;
     }
 
+    if (!canEditSharedProject) {
+      onDocumentCommandRequestHandled(documentCommandRequest.id);
+      return;
+    }
+
     editorAppRef.current.applyDocumentCommand(documentCommandRequest.command);
     onDocumentCommandRequestHandled(documentCommandRequest.id);
     onLayersChange(editorAppRef.current.getLayerSummaries());
@@ -499,13 +579,14 @@ export function CanvasView({
   }, [
     documentCommandRequest,
     editorAppRef,
+    canEditSharedProject,
     onDocumentCommandRequestHandled,
     onLayersChange,
     rememberActiveScene
   ]);
 
   function handleTextToolPointerDown(event: ReactPointerEvent<HTMLCanvasElement>) {
-    if (event.button !== 0 || !editorAppRef.current) {
+    if (!canEditSharedProject || event.button !== 0 || !editorAppRef.current) {
       return false;
     }
 
@@ -516,6 +597,10 @@ export function CanvasView({
   }
 
   function handleCanvasDragOver(event: ReactDragEvent<HTMLCanvasElement>) {
+    if (!canEditSharedProject) {
+      return;
+    }
+
     if (!hasDroppableAsset(event.dataTransfer)) {
       return;
     }
@@ -525,7 +610,7 @@ export function CanvasView({
   }
 
   function handleCanvasDrop(event: ReactDragEvent<HTMLCanvasElement>) {
-    if (!editorAppRef.current || !hasDroppableAsset(event.dataTransfer)) {
+    if (!canEditSharedProject || !editorAppRef.current || !hasDroppableAsset(event.dataTransfer)) {
       return;
     }
 
@@ -560,7 +645,7 @@ export function CanvasView({
   }
 
   async function handleTextKeyDown(event: ReactKeyboardEvent<HTMLCanvasElement>) {
-    if (selectedTool !== "Text" || !editorAppRef.current) {
+    if (!canEditSharedProject || selectedTool !== "Text" || !editorAppRef.current) {
       return;
     }
 
@@ -687,6 +772,11 @@ export function CanvasView({
       return;
     }
 
+    if (!canEditSharedProject) {
+      onSelectionCommandRequestHandled(selectionCommandRequest.id);
+      return;
+    }
+
     const didApply = editorAppRef.current.applySelectionCommand(selectionCommandRequest.command);
 
     if (didApply) {
@@ -697,6 +787,7 @@ export function CanvasView({
     onSelectionCommandRequestHandled(selectionCommandRequest.id);
   }, [
     editorAppRef,
+    canEditSharedProject,
     onLayersChange,
     rememberActiveScene,
     onSelectionCommandRequestHandled,

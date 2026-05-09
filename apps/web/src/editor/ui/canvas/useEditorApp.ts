@@ -2,6 +2,7 @@
 import { MutableRefObject, useEffect, useRef, useState } from "react";
 import type { HistoryStateSnapshot, LayerSummary } from "../../app/EditorApp";
 import { EditorApp } from "../../app/EditorApp";
+import type { SharedEditorAction } from "../../app/history/SharedEditorAction";
 import type { ShapeKind } from "../../layers/ShapeLayer";
 import type { StrokeStyle } from "../../layers/StrokeLayer";
 import type { MaskBrushOptions } from "../../tools/mask-brush/MaskBrushTypes";
@@ -11,6 +12,7 @@ type UseEditorAppOptions = {
   canvasRef: MutableRefObject<HTMLCanvasElement | null>;
   onHistoryChange: (history: HistoryStateSnapshot) => void;
   onLayersChange: (layers: LayerSummary[]) => void;
+  onLocalEditorAction?: (action: SharedEditorAction) => void;
   onStrokeLayerCreated: (layerId: string) => void;
   onZoomChange: (zoomPercentage: number) => void;
   maskBrushOptions: MaskBrushOptions;
@@ -32,6 +34,7 @@ export function useEditorApp({
   maskBrushOptions,
   onHistoryChange,
   onLayersChange,
+  onLocalEditorAction,
   onStrokeLayerCreated,
   onZoomChange,
   magicSelectionTolerance,
@@ -48,6 +51,7 @@ export function useEditorApp({
 }: UseEditorAppOptions) {
   const editorAppRef = useRef<EditorApp | null>(null);
   const maskBrushOptionsRef = useRef(maskBrushOptions);
+  const onLocalEditorActionRef = useRef(onLocalEditorAction);
   const onStrokeLayerCreatedRef = useRef(onStrokeLayerCreated);
   const selectedShapeRef = useRef(selectedShape);
   const selectedSelectionModeRef = useRef(selectedSelectionMode);
@@ -61,6 +65,10 @@ export function useEditorApp({
   const magicSelectionToleranceRef = useRef(magicSelectionTolerance);
   const [editorReadyId, setEditorReadyId] = useState(0);
   const [webglError, setWebglError] = useState<string | null>(null);
+
+  useEffect(() => {
+    onLocalEditorActionRef.current = onLocalEditorAction;
+  }, [onLocalEditorAction]);
 
   useEffect(() => {
     onStrokeLayerCreatedRef.current = onStrokeLayerCreated;
@@ -132,6 +140,9 @@ export function useEditorApp({
           onZoomChange(Math.round(zoom * 100));
         },
         onHistoryChange,
+        onLocalEditorAction: (action) => {
+          onLocalEditorActionRef.current?.(action);
+        },
         onStrokeLayerCreated: (layerId) => {
           onStrokeLayerCreatedRef.current(layerId);
         }

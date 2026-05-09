@@ -14,6 +14,7 @@ import {
 type UseProjectFileActionsOptions = {
   activeDocumentId: string;
   activeDocumentTitle: string;
+  canEditDocument: boolean;
   closedDocumentRequest: { id: number; tabId: string } | null;
   editorAppRef: MutableRefObject<EditorApp | null>;
   onLayersChange: (layers: ReturnType<EditorApp["getLayerSummaries"]>) => void;
@@ -42,6 +43,7 @@ export type ProjectFilePendingState = ProjectPackageProgress & {
 export function useProjectFileActions({
   activeDocumentId,
   activeDocumentTitle,
+  canEditDocument,
   closedDocumentRequest,
   editorAppRef,
   onLayersChange,
@@ -190,7 +192,7 @@ export function useProjectFileActions({
   useEditorKeyboardShortcuts({
     isTextEditingActive: () => editorAppRef.current?.hasActiveTextEdit() ?? false,
     onClearSelection: () => {
-      if (!editorAppRef.current) {
+      if (!canEditDocument || !editorAppRef.current) {
         return;
       }
 
@@ -201,9 +203,13 @@ export function useProjectFileActions({
       }
     },
     onCopy: () => runClipboardCommand("copy"),
-    onCut: () => runClipboardCommand("cut"),
+    onCut: () => {
+      if (canEditDocument) {
+        return runClipboardCommand("cut");
+      }
+    },
     onDeleteSelectedLayer: () => {
-      if (!editorAppRef.current) {
+      if (!canEditDocument || !editorAppRef.current) {
         return;
       }
 
@@ -220,7 +226,7 @@ export function useProjectFileActions({
       }
     },
     onDuplicateSelectedLayer: () => {
-      if (!editorAppRef.current) {
+      if (!canEditDocument || !editorAppRef.current) {
         return;
       }
 
@@ -237,7 +243,7 @@ export function useProjectFileActions({
       }
     },
     onGroupSelectedLayers: () => {
-      if (!editorAppRef.current) {
+      if (!canEditDocument || !editorAppRef.current) {
         return;
       }
 
@@ -254,7 +260,7 @@ export function useProjectFileActions({
       }
     },
     onNudgeSelectedLayer: (dx, dy) => {
-      if (!editorAppRef.current) {
+      if (!canEditDocument || !editorAppRef.current) {
         return;
       }
 
@@ -264,11 +270,19 @@ export function useProjectFileActions({
         setWebglError(null);
       }
     },
-    onPaste: () => runClipboardCommand("paste"),
+    onPaste: () => {
+      if (canEditDocument) {
+        return runClipboardCommand("paste");
+      }
+    },
     onSaveProject: () => saveCurrentProject("save"),
-    onSelectTool,
+    onSelectTool: (tool) => {
+      if (canEditDocument || tool === "Pan") {
+        return onSelectTool(tool);
+      }
+    },
     onUndo: () => {
-      if (!editorAppRef.current) {
+      if (!canEditDocument || !editorAppRef.current) {
         return;
       }
 
@@ -279,7 +293,7 @@ export function useProjectFileActions({
       }
     },
     onRedo: () => {
-      if (!editorAppRef.current) {
+      if (!canEditDocument || !editorAppRef.current) {
         return;
       }
 

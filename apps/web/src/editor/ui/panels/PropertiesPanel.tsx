@@ -13,6 +13,7 @@ import type { CompiledFontManifest } from "../../rendering/text/CompiledFont";
 import { cn } from "../classNames";
 
 type PropertiesPanelProps = {
+  canEditDocument: boolean;
   importedFontFamilies: string[];
   isCollapsed: boolean;
   onChangeObject3DModel: () => void;
@@ -98,6 +99,7 @@ type ImageLayerSummary = LayerSummary & {
 type ImageGeometryCornerId = keyof ImageLayerGeometry["corners"];
 
 export function PropertiesPanel({
+  canEditDocument,
   importedFontFamilies,
   isCollapsed,
   onChangeObject3DModel,
@@ -141,7 +143,7 @@ export function PropertiesPanel({
   }, []);
 
   function updateSelectedLayer(updates: Extract<LayerCommand, { type: "update" }>["updates"]) {
-    if (!selectedLayer) {
+    if (!canEditDocument || !selectedLayer) {
       return;
     }
 
@@ -225,7 +227,19 @@ export function PropertiesPanel({
         </div>
       </div>
       <div className={cn("min-h-0 overflow-auto px-3 pb-3", isCollapsed && "hidden")}>
-      <div className="grid gap-3">
+      <div
+        className={cn("grid gap-3", !canEditDocument && "opacity-60")}
+        onPointerDownCapture={(event) => {
+          if (
+            !canEditDocument &&
+            event.target instanceof Element &&
+            event.target.closest("button, input, select, textarea")
+          ) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }}
+      >
         <div className={propertyRowClass}>
           <span className={propertyLabelClass}>Tool</span>
           <strong className={propertyValueClass}>{selectedTool}</strong>
