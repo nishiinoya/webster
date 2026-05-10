@@ -109,6 +109,7 @@ Legend:
 | Share project frontend | Partial | `File -> Share project...` exports the current local project as a normal `.webster` Blob and uploads it through REST. Backend decomposition/storage is not implemented here. |
 | Shared project download frontend | Partial | Shared projects can request a backend-packed `.webster` export through REST. Backend packing is not implemented here. |
 | Realtime operations frontend | Partial | Local editor history actions become commit operations; pointer gestures can send preview operations; remote applied operations hydrate the local scene. Backend persistence/broadcast is not implemented here. |
+| Shared asset upload frontend | Partial | New shared-mode image assets, selected-pixel edits, image resampling results, fonts, textures, and 3D model assets upload through REST before socket operations are sent. Requires backend asset routes. |
 | Pending collaboration queue | Present | Unconfirmed commit operations are queued with `clientOperationId` and resent after reconnect. |
 | Shared roles frontend | Present | Shared types define owner/editor/viewer roles. Viewer mode disables editing controls while still allowing project viewing and remote updates. |
 | Presence frontend | Partial | Connection status and online users can be shown when backend presence events are available. Cursor/tool payloads are sent from the frontend. |
@@ -239,7 +240,7 @@ REST is used for large/project-file work:
 - upload local `.webster` when sharing a project
 - load shared project snapshot/state
 - download shared project as `.webster`
-- upload/download assets when backend support exists
+- upload/download assets when new images, selected-pixel edits, resampled image pixels, fonts, textures, or 3D model files are created in shared mode
 - list/create/restore snapshots
 
 WebSocket is used only for realtime collaboration:

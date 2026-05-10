@@ -31,8 +31,10 @@ import {
   listProjectSnapshots,
   loadSharedProject,
   restoreProjectSnapshot,
-  uploadLocalWebsterProject
+  uploadLocalWebsterProject,
+  uploadSharedProjectAssets
 } from "./sharedProjectApi";
+import type { PreparedProjectOperation } from "./operations";
 
 export type SharedProjectRequest =
   | { id: number; type: "share-local"; title: string }
@@ -108,6 +110,7 @@ export function useCollaboration({
   const latestStateRef = useRef(state);
   const pendingQueueRef = useRef(new PendingOperationsQueue());
   const resyncingRef = useRef(false);
+  const uploadedAssetPathsRef = useRef(new Set<string>());
 
   useEffect(() => {
     latestStateRef.current = state;
@@ -126,6 +129,41 @@ export function useCollaboration({
       pendingCommitCount: pendingQueueRef.current.size
     }));
   }, []);
+
+  const rememberUploadedAssets = useCallback((assets: Array<{ assetPath: string }> = []) => {
+    for (const asset of assets) {
+      uploadedAssetPathsRef.current.add(asset.assetPath);
+    }
+  }, []);
+
+  const prepareOperationForSocket = useCallback(
+    async (prepared: PreparedProjectOperation) => {
+      const missingAssets = prepared.assetUploads.filter(
+        (asset) => !uploadedAssetPathsRef.current.has(asset.assetPath)
+      );
+      const uploadedAssets = await uploadSharedProjectAssets(
+        prepared.operation.projectId,
+        missingAssets
+      );
+
+      rememberUploadedAssets(missingAssets);
+      rememberUploadedAssets(uploadedAssets);
+
+      const referencesByPath = new Map(
+        (prepared.operation.assetReferences ?? []).map((asset) => [asset.assetPath, asset])
+      );
+
+      for (const asset of uploadedAssets) {
+        referencesByPath.set(asset.assetPath, asset);
+      }
+
+      return {
+        ...prepared.operation,
+        assetReferences: [...referencesByPath.values()]
+      };
+    },
+    [rememberUploadedAssets]
+  );
 
   const importSharedState = useCallback(
     async (payload: SharedProjectLoadResponse) => {
@@ -158,6 +196,7 @@ export function useCollaboration({
     async (payload: SharedProjectLoadResponse) => {
       const capabilities = getProjectRoleCapabilities(payload.role, payload.permissions);
 
+      rememberUploadedAssets(payload.assets);
       await importSharedState(payload);
       setState((currentState) => ({
         ...currentState,
@@ -175,7 +214,7 @@ export function useCollaboration({
         users: payload.users ?? currentState.users
       }));
     },
-    [importSharedState]
+    [importSharedState, rememberUploadedAssets]
   );
 
   const connectToSharedProject = useCallback(
@@ -357,20 +396,28 @@ export function useCollaboration({
         return;
       }
 
-      const operation = await createOperationFromEditorAction({
-        action,
-        clientId,
-        editorApp,
-        phase: "commit",
-        projectId: currentState.projectId,
-        projectVersion: currentState.currentVersion ?? 0
-      });
+      try {
+        const preparedOperation = await createOperationFromEditorAction({
+          action,
+          clientId,
+          editorApp,
+          phase: "commit",
+          projectId: currentState.projectId,
+          projectVersion: currentState.currentVersion ?? 0
+        });
+        const operation = await prepareOperationForSocket(preparedOperation);
 
-      pendingQueueRef.current.add(operation);
-      updatePendingCount();
-      clientRef.current?.sendCommit(operation);
+        pendingQueueRef.current.add(operation);
+        updatePendingCount();
+        clientRef.current?.sendCommit(operation);
+      } catch (error) {
+        setState((currentState) => ({
+          ...currentState,
+          error: error instanceof Error ? error.message : "Unable to prepare shared edit."
+        }));
+      }
     },
-    [clientId, editorAppRef, updatePendingCount]
+    [clientId, editorAppRef, prepareOperationForSocket, updatePendingCount]
   );
 
   const sendPreviewFromCurrentScene = useCallback(
@@ -389,17 +436,25 @@ export function useCollaboration({
         return;
       }
 
-      const operation = await createPreviewOperationFromEditorScene({
-        clientId,
-        editorApp,
-        projectId: currentState.projectId,
-        projectVersion: currentState.currentVersion ?? 0,
-        tool
-      });
+      try {
+        const preparedOperation = await createPreviewOperationFromEditorScene({
+          clientId,
+          editorApp,
+          projectId: currentState.projectId,
+          projectVersion: currentState.currentVersion ?? 0,
+          tool
+        });
+        const operation = await prepareOperationForSocket(preparedOperation);
 
-      clientRef.current.sendPreview(operation);
+        clientRef.current.sendPreview(operation);
+      } catch (error) {
+        setState((currentState) => ({
+          ...currentState,
+          error: error instanceof Error ? error.message : "Unable to prepare shared preview."
+        }));
+      }
     },
-    [clientId, editorAppRef]
+    [clientId, editorAppRef, prepareOperationForSocket]
   );
 
   const sendPresenceCursor = useCallback((cursor: { x: number; y: number } | null, tool: string) => {
@@ -432,6 +487,7 @@ export function useCollaboration({
         } else if (request.type === "switch-local") {
           clientRef.current?.disconnect();
           pendingQueueRef.current.clear();
+          uploadedAssetPathsRef.current.clear();
           setState(initialState);
         } else if (request.type === "download-webster") {
           const projectId = latestStateRef.current.projectId;

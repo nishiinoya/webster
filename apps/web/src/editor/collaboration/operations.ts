@@ -8,7 +8,9 @@ import type {
 } from "@webster/shared";
 import type { EditorApp } from "../app/EditorApp";
 import type { SharedEditorAction } from "../app/history/SharedEditorAction";
+import { serializeScenePackageAssets } from "../projects/ProjectPackage";
 import type { SerializedScene } from "../scene/Scene";
+import type { SharedProjectAssetUpload } from "./sharedProjectApi";
 
 type CreateOperationOptions = {
   action: SharedEditorAction;
@@ -27,6 +29,11 @@ type CreatePreviewOperationOptions = {
   tool: string;
 };
 
+export type PreparedProjectOperation = {
+  assetUploads: SharedProjectAssetUpload[];
+  operation: ProjectOperation;
+};
+
 export async function createOperationFromEditorAction({
   action,
   clientId,
@@ -34,22 +41,25 @@ export async function createOperationFromEditorAction({
   phase,
   projectId,
   projectVersion
-}: CreateOperationOptions): Promise<ProjectOperation> {
-  const scene = await editorApp.getScene().toJSON();
-  const manifest = scene as WebsterProjectManifest;
+}: CreateOperationOptions): Promise<PreparedProjectOperation> {
+  const { assetReferences, assetUploads, manifest } =
+    await createCollaborationSceneSnapshot(editorApp, projectId);
 
   return {
-    assetReferences: collectAssetReferences(manifest),
-    baseVersion: projectVersion,
-    clientId,
-    clientOperationId: crypto.randomUUID(),
-    createdAt: new Date().toISOString(),
-    kind: getOperationKind(action),
-    label: action.label,
-    payload: getOperationPayload(action),
-    phase,
-    projectId,
-    scene: manifest
+    assetUploads,
+    operation: {
+      assetReferences,
+      baseVersion: projectVersion,
+      clientId,
+      clientOperationId: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      kind: getOperationKind(action),
+      label: action.label,
+      payload: getOperationPayload(action),
+      phase,
+      projectId,
+      scene: manifest
+    }
   };
 }
 
@@ -59,25 +69,28 @@ export async function createPreviewOperationFromEditorScene({
   projectId,
   projectVersion,
   tool
-}: CreatePreviewOperationOptions): Promise<ProjectOperation> {
-  const scene = await editorApp.getScene().toJSON();
-  const manifest = scene as WebsterProjectManifest;
+}: CreatePreviewOperationOptions): Promise<PreparedProjectOperation> {
+  const { assetReferences, assetUploads, manifest } =
+    await createCollaborationSceneSnapshot(editorApp, projectId);
 
   return {
-    assetReferences: collectAssetReferences(manifest),
-    baseVersion: projectVersion,
-    clientId,
-    clientOperationId: crypto.randomUUID(),
-    createdAt: new Date().toISOString(),
-    kind: getPreviewOperationKind(tool),
-    label: `${tool} preview`,
-    payload: {
-      source: "pointer-preview",
-      tool
-    },
-    phase: "preview",
-    projectId,
-    scene: manifest
+    assetUploads,
+    operation: {
+      assetReferences,
+      baseVersion: projectVersion,
+      clientId,
+      clientOperationId: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      kind: getPreviewOperationKind(tool),
+      label: `${tool} preview`,
+      payload: {
+        source: "pointer-preview",
+        tool
+      },
+      phase: "preview",
+      projectId,
+      scene: manifest
+    }
   };
 }
 
@@ -100,6 +113,35 @@ export async function applyOperationToScene(
   });
 
   return true;
+}
+
+async function createCollaborationSceneSnapshot(
+  editorApp: EditorApp,
+  projectId: string
+) {
+  const { assetEntries, manifest } = await serializeScenePackageAssets(editorApp.getScene());
+  const assetUploads = assetEntries.map((entry) => {
+    const mimeType = inferAssetMimeType(entry.name);
+
+    return {
+      assetId: getAssetIdForPath(manifest as WebsterProjectManifest, entry.name),
+      assetPath: entry.name,
+      blob: new Blob([toBlobPart(entry.data)], { type: mimeType }),
+      mimeType
+    } satisfies SharedProjectAssetUpload;
+  });
+
+  await collectEmbeddedTextureUploads(manifest as WebsterProjectManifest, assetUploads, projectId);
+
+  return {
+    assetReferences: createAssetReferences(
+      manifest as WebsterProjectManifest,
+      assetUploads,
+      projectId
+    ),
+    assetUploads,
+    manifest: manifest as WebsterProjectManifest
+  };
 }
 
 function getOperationKind(action: SharedEditorAction): ProjectOperationKind {
@@ -178,9 +220,20 @@ function getCommandOperationKind(scope: string, payload: unknown): ProjectOperat
   switch (type) {
     case "add-adjustment":
     case "add-object3d":
+    case "create-3d-model-layer":
+    case "create-loaded-3d-model-layer":
     case "duplicate":
     case "group":
       return "layer:create";
+    case "clear-shape-texture":
+    case "import-font":
+    case "import-shape-texture":
+      return "asset:create";
+    case "clear-3d-material-texture":
+    case "import-3d-material-texture":
+    case "import-3d-model":
+    case "replace-loaded-3d-model":
+      return "object3d:update";
     case "delete":
       return "layer:delete";
     case "move-down":
@@ -190,6 +243,8 @@ function getCommandOperationKind(scope: string, payload: unknown): ProjectOperat
       return "layer:reorder";
     case "mask":
       return "mask:paint";
+    case "nudge":
+      return "layer:transform";
     case "update":
       return getLayerUpdateOperationKind(payload);
     default:
@@ -295,26 +350,41 @@ function readPayloadType(payload: unknown) {
     : null;
 }
 
-function collectAssetReferences(manifest: WebsterProjectManifest): SharedProjectAssetReference[] {
+function createAssetReferences(
+  manifest: WebsterProjectManifest,
+  assetUploads: SharedProjectAssetUpload[],
+  projectId: string
+) {
   const references = new Map<string, SharedProjectAssetReference>();
 
   for (const layer of manifest.layers) {
-    addLayerAssetReference(references, layer, "assetPath", "assetId", "mimeType");
+    addLayerAssetReference(references, layer, "assetPath", "assetId", "mimeType", projectId);
     addLayerAssetReference(
       references,
       layer,
       "originalAssetPath",
       "originalAssetId",
-      "originalMimeType"
+      "originalMimeType",
+      projectId
     );
+    addTextureAssetReferences(references, layer, projectId);
   }
 
   for (const font of manifest.fonts ?? []) {
     references.set(font.assetPath, {
       assetId: font.id,
       assetPath: font.assetPath,
-      downloadUrl: `/shared-assets/${encodeURIComponent(font.assetPath)}`,
+      downloadUrl: getDefaultAssetDownloadUrl(projectId, font.assetPath),
       mimeType: font.mimeType
+    });
+  }
+
+  for (const upload of assetUploads) {
+    references.set(upload.assetPath, {
+      assetId: upload.assetId,
+      assetPath: upload.assetPath,
+      downloadUrl: getDefaultAssetDownloadUrl(projectId, upload.assetPath),
+      mimeType: upload.mimeType || upload.blob.type || inferAssetMimeType(upload.assetPath)
     });
   }
 
@@ -326,7 +396,8 @@ function addLayerAssetReference(
   layer: WebsterSerializedLayer,
   pathKey: string,
   idKey: string,
-  mimeTypeKey: string
+  mimeTypeKey: string,
+  projectId: string
 ) {
   const assetPath = layer[pathKey];
 
@@ -340,7 +411,263 @@ function addLayerAssetReference(
   references.set(assetPath, {
     assetId: typeof assetId === "string" ? assetId : undefined,
     assetPath,
-    downloadUrl: `/shared-assets/${encodeURIComponent(assetPath)}`,
+    downloadUrl: getDefaultAssetDownloadUrl(projectId, assetPath),
     mimeType: typeof mimeType === "string" ? mimeType : undefined
   });
+}
+
+async function collectEmbeddedTextureUploads(
+  manifest: WebsterProjectManifest,
+  assetUploads: SharedProjectAssetUpload[],
+  projectId: string
+) {
+  const seenAssetPaths = new Set(assetUploads.map((asset) => asset.assetPath));
+
+  for (const layer of manifest.layers) {
+    await addEmbeddedTextureUpload(
+      assetUploads,
+      seenAssetPaths,
+      layer,
+      layer["textureImage"],
+      "shape-texture",
+      projectId
+    );
+    await addEmbeddedTextureUpload(
+      assetUploads,
+      seenAssetPaths,
+      layer,
+      layer["materialTextureImage"],
+      "material-texture",
+      projectId
+    );
+
+    const modelMaterials = layer["modelMaterials"];
+
+    if (Array.isArray(modelMaterials)) {
+      for (const [index, material] of modelMaterials.entries()) {
+        if (material && typeof material === "object" && "textureImage" in material) {
+          await addEmbeddedTextureUpload(
+            assetUploads,
+            seenAssetPaths,
+            layer,
+            (material as { textureImage?: unknown }).textureImage,
+            `model-material-${index}`,
+            projectId
+          );
+        }
+      }
+    }
+  }
+}
+
+async function addEmbeddedTextureUpload(
+  assetUploads: SharedProjectAssetUpload[],
+  seenAssetPaths: Set<string>,
+  layer: WebsterSerializedLayer,
+  value: unknown,
+  role: string,
+  projectId: string
+) {
+  if (!isSerializedTexture(value) || !isInlineTextureUrl(value.dataUrl)) {
+    return;
+  }
+
+  const blob = await fetch(value.dataUrl).then((response) => response.blob());
+  const mimeType = normalizeMimeType(value.mimeType, blob.type);
+  const assetPath =
+    value.assetPath ?? getTextureAssetPath(layer.id, role, value.id, value.name, mimeType);
+
+  value.assetPath = assetPath;
+  value.dataUrl = getDefaultAssetDownloadUrl(projectId, assetPath);
+
+  if (seenAssetPaths.has(assetPath)) {
+    return;
+  }
+
+  seenAssetPaths.add(assetPath);
+  assetUploads.push({
+    assetId: value.id,
+    assetPath,
+    blob,
+    mimeType
+  });
+}
+
+function addTextureAssetReferences(
+  references: Map<string, SharedProjectAssetReference>,
+  layer: WebsterSerializedLayer,
+  projectId: string
+) {
+  addTextureAssetReference(references, layer["textureImage"], projectId);
+  addTextureAssetReference(references, layer["materialTextureImage"], projectId);
+
+  const modelMaterials = layer["modelMaterials"];
+
+  if (Array.isArray(modelMaterials)) {
+    for (const material of modelMaterials) {
+      if (material && typeof material === "object" && "textureImage" in material) {
+        addTextureAssetReference(
+          references,
+          (material as { textureImage?: unknown }).textureImage,
+          projectId
+        );
+      }
+    }
+  }
+}
+
+function addTextureAssetReference(
+  references: Map<string, SharedProjectAssetReference>,
+  value: unknown,
+  projectId: string
+) {
+  if (!isSerializedTexture(value) || !value.assetPath || references.has(value.assetPath)) {
+    return;
+  }
+
+  references.set(value.assetPath, {
+    assetId: value.id,
+    assetPath: value.assetPath,
+    downloadUrl: getDefaultAssetDownloadUrl(projectId, value.assetPath),
+    mimeType: value.mimeType
+  });
+}
+
+function getAssetIdForPath(manifest: WebsterProjectManifest, assetPath: string) {
+  for (const layer of manifest.layers) {
+    if (layer.assetPath === assetPath && typeof layer.assetId === "string") {
+      return layer.assetId;
+    }
+
+    if (
+      layer.originalAssetPath === assetPath &&
+      typeof layer.originalAssetId === "string"
+    ) {
+      return layer.originalAssetId;
+    }
+
+    const textureId = getTextureIdForPath(layer["textureImage"], assetPath)
+      ?? getTextureIdForPath(layer["materialTextureImage"], assetPath);
+
+    if (textureId) {
+      return textureId;
+    }
+  }
+
+  const font = manifest.fonts?.find((candidate) => candidate.assetPath === assetPath);
+
+  return font?.id;
+}
+
+function getTextureIdForPath(value: unknown, assetPath: string) {
+  return isSerializedTexture(value) && value.assetPath === assetPath ? value.id : undefined;
+}
+
+type SerializedTextureRecord = {
+  assetPath?: string;
+  dataUrl: string;
+  height?: number;
+  id?: string;
+  mimeType?: string;
+  name?: string;
+  projectId?: string;
+  width?: number;
+};
+
+function isSerializedTexture(value: unknown): value is SerializedTextureRecord {
+  return Boolean(value && typeof value === "object" && typeof (value as { dataUrl?: unknown }).dataUrl === "string");
+}
+
+function isInlineTextureUrl(value: string) {
+  return value.startsWith("data:") || value.startsWith("blob:");
+}
+
+function getTextureAssetPath(
+  layerId: string,
+  role: string,
+  textureId: string | undefined,
+  textureName: string | undefined,
+  mimeType: string
+) {
+  const extension = getAssetExtension(mimeType);
+  const safeLayerId = sanitizeAssetPathSegment(layerId);
+  const safeTextureId = sanitizeAssetPathSegment(textureId || textureName || role);
+
+  return `assets/textures/${safeLayerId}-${sanitizeAssetPathSegment(role)}-${safeTextureId}.${extension}`;
+}
+
+function getDefaultAssetDownloadUrl(projectId: string | undefined, assetPath: string) {
+  const encodedPath = encodeURIComponent(assetPath);
+
+  return projectId
+    ? `/shared-projects/${encodeURIComponent(projectId)}/assets/${encodedPath}`
+    : `/shared-assets/${encodedPath}`;
+}
+
+function inferAssetMimeType(assetPath: string) {
+  const lowerPath = assetPath.toLowerCase();
+
+  if (lowerPath.endsWith(".jpg") || lowerPath.endsWith(".jpeg")) {
+    return "image/jpeg";
+  }
+
+  if (lowerPath.endsWith(".webp")) {
+    return "image/webp";
+  }
+
+  if (lowerPath.endsWith(".png")) {
+    return "image/png";
+  }
+
+  if (lowerPath.endsWith(".json")) {
+    return "application/json";
+  }
+
+  if (lowerPath.endsWith(".woff")) {
+    return "font/woff";
+  }
+
+  if (lowerPath.endsWith(".woff2")) {
+    return "font/woff2";
+  }
+
+  if (lowerPath.endsWith(".ttf")) {
+    return "font/ttf";
+  }
+
+  if (lowerPath.endsWith(".otf")) {
+    return "font/otf";
+  }
+
+  return "application/octet-stream";
+}
+
+function normalizeMimeType(primary: string | undefined, fallback: string | undefined) {
+  return primary || fallback || "application/octet-stream";
+}
+
+function getAssetExtension(mimeType: string) {
+  if (mimeType === "image/jpeg") {
+    return "jpg";
+  }
+
+  if (mimeType === "image/webp") {
+    return "webp";
+  }
+
+  return "png";
+}
+
+function sanitizeAssetPathSegment(value: string) {
+  return (
+    value
+      .trim()
+      .replace(/[^a-z0-9._-]+/giu, "-")
+      .replace(/^-+|-+$/gu, "")
+      .slice(0, 80) || "asset"
+  );
+}
+
+function toBlobPart(bytes: Uint8Array) {
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }

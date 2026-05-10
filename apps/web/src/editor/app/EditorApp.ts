@@ -1441,8 +1441,9 @@ export class EditorApp {
     const scale = shouldKeepDocumentPlacement
       ? 1
       : Math.min(1, maxInitialSize / Math.max(imageWidth, imageHeight));
+    const assetId = crypto.randomUUID();
     const layer = new ImageLayer({
-      assetId: crypto.randomUUID(),
+      assetId,
       height: imageHeight,
       id: crypto.randomUUID(),
       image,
@@ -1463,6 +1464,7 @@ export class EditorApp {
         label,
         operation: "paste-image-layer",
         payload: {
+          assetId,
           layerId: layer.id
         }
       }),
@@ -2707,7 +2709,11 @@ async function copySelectedScenePixels(
 
     const maskedCanvas = copyCanvasTo2dCanvas(canvas);
 
-    if (!applySelectionAlphaMask(maskedCanvas, bounds, selection)) {
+    if (
+      !applySelectionAlphaMask(maskedCanvas, selection, (x, y) =>
+        camera.screenToWorld(x, y)
+      )
+    ) {
       return null;
     }
 
@@ -2755,11 +2761,14 @@ async function copySelectedImageLayerPixels(
   let copiedPixels = 0;
 
   for (let y = 0; y < height; y += 1) {
-    const worldY = bounds.y + ((y + 0.5) / height) * bounds.height;
-
     for (let x = 0; x < width; x += 1) {
-      const worldX = bounds.x + ((x + 0.5) / width) * bounds.width;
-
+      const { x: worldX, y: worldY } = getClipboardPixelWorldPoint(
+        bounds,
+        width,
+        height,
+        x,
+        y
+      );
       const selectionAlpha = getSelectionAlpha(selection, worldX, worldY);
 
       if (selectionAlpha <= 0) {
@@ -2968,8 +2977,8 @@ function copyCanvasTo2dCanvas(source: HTMLCanvasElement) {
 
 function applySelectionAlphaMask(
   canvas: HTMLCanvasElement,
-  bounds: SelectionBounds,
-  selection: Selection
+  selection: Selection,
+  getWorldPoint: (x: number, y: number) => { x: number; y: number }
 ) {
   const context = canvas.getContext("2d", { willReadFrequently: true });
 
@@ -2981,10 +2990,8 @@ function applySelectionAlphaMask(
   let hasVisiblePixels = false;
 
   for (let y = 0; y < canvas.height; y += 1) {
-    const worldY = bounds.y + ((y + 0.5) / canvas.height) * bounds.height;
-
     for (let x = 0; x < canvas.width; x += 1) {
-      const worldX = bounds.x + ((x + 0.5) / canvas.width) * bounds.width;
+      const { x: worldX, y: worldY } = getWorldPoint(x + 0.5, y + 0.5);
       const alphaIndex = (y * canvas.width + x) * 4 + 3;
 
       const selectionAlpha = getSelectionAlpha(selection, worldX, worldY);
@@ -3005,6 +3012,19 @@ function applySelectionAlphaMask(
   context.putImageData(imageData, 0, 0);
 
   return hasVisiblePixels;
+}
+
+function getClipboardPixelWorldPoint(
+  bounds: SelectionBounds,
+  width: number,
+  height: number,
+  x: number,
+  y: number
+) {
+  return {
+    x: bounds.x + ((x + 0.5) / width) * bounds.width,
+    y: bounds.y + bounds.height - ((y + 0.5) / height) * bounds.height
+  };
 }
 
 type SystemClipboardSnapshot = {

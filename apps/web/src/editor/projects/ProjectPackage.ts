@@ -19,6 +19,12 @@ export type ProjectPackageProgress = {
 
 type ProjectPackageOptions = {
   onProgress?: (state: ProjectPackageProgress) => void;
+  skipAssetPaths?: ReadonlySet<string>;
+};
+
+export type SerializedScenePackageAssets = {
+  assetEntries: ZipEntry[];
+  manifest: SerializedScene;
 };
 
 export async function exportScenePackage(
@@ -26,11 +32,35 @@ export async function exportScenePackage(
   templateMetadata?: SerializedProjectTemplateMetadata,
   options: ProjectPackageOptions = {}
 ) {
+  const { assetEntries, manifest } = await serializeScenePackageAssets(
+    scene,
+    templateMetadata,
+    options
+  );
+  const entries: ZipEntry[] = [...assetEntries];
+
+  reportProgress(
+    options,
+    48,
+    "Saving project...",
+    "Packed layer data."
+  );
+  entries.unshift(textEntry("manifest.json", JSON.stringify(manifest, null, 2)));
+
+  reportProgress(options, 86, "Saving project...", "Writing Webster package.");
+  return createZip(entries);
+}
+
+export async function serializeScenePackageAssets(
+  scene: Scene,
+  templateMetadata?: SerializedProjectTemplateMetadata,
+  options: ProjectPackageOptions = {}
+): Promise<SerializedScenePackageAssets> {
   const entries: ZipEntry[] = [];
   const modelReferences = new Map<string, SerializedObject3DModel>();
 
   reportProgress(options, 8, "Saving project...", "Collecting layers and shared assets.");
-  const manifest = await serializeScenePackageManifest(scene, modelReferences, entries);
+  const manifest = await serializeScenePackageManifest(scene, modelReferences, entries, options);
 
   if (templateMetadata) {
     manifest.template = templateMetadata;
@@ -44,8 +74,20 @@ export async function exportScenePackage(
       ? `Packed ${modelReferences.size} shared 3D model asset${modelReferences.size === 1 ? "" : "s"}.`
       : "Packed layer data."
   );
-  await addFontAssetEntries(scene, manifest, entries);
-  entries.unshift(textEntry("manifest.json", JSON.stringify(manifest, null, 2)));
+  await addFontAssetEntries(scene, manifest, entries, options);
+  await addImageAssetEntries(scene, entries, options);
+
+  return {
+    assetEntries: entries,
+    manifest
+  };
+}
+
+async function addImageAssetEntries(
+  scene: Scene,
+  entries: ZipEntry[],
+  options: ProjectPackageOptions
+) {
   const addedAssets = new Set<string>();
   const imageLayers = scene.layers.filter((layer): layer is ImageLayer => layer instanceof ImageLayer);
 
@@ -60,23 +102,22 @@ export async function exportScenePackage(
       `Writing image asset ${index + 1} of ${imageLayers.length}.`
     );
 
-    if (addedAssets.has(layerJson.assetPath)) {
-      continue;
+    if (!addedAssets.has(layerJson.assetPath) && !options.skipAssetPaths?.has(layerJson.assetPath)) {
+      entries.push(await blobEntry(layerJson.assetPath, await layer.toAssetBlob()));
+      addedAssets.add(layerJson.assetPath);
     }
 
-    entries.push(await blobEntry(layerJson.assetPath, await layer.toAssetBlob()));
-    addedAssets.add(layerJson.assetPath);
-
-    if (layerJson.originalAssetPath && !addedAssets.has(layerJson.originalAssetPath)) {
+    if (
+      layerJson.originalAssetPath &&
+      !addedAssets.has(layerJson.originalAssetPath) &&
+      !options.skipAssetPaths?.has(layerJson.originalAssetPath)
+    ) {
       entries.push(
         await blobEntry(layerJson.originalAssetPath, await layer.toOriginalAssetBlob())
       );
       addedAssets.add(layerJson.originalAssetPath);
     }
   }
-
-  reportProgress(options, 86, "Saving project...", "Writing Webster package.");
-  return createZip(entries);
 }
 
 export async function readScenePackageManifest(file: Blob) {
@@ -144,7 +185,8 @@ export async function importScenePackage(file: Blob, options: ProjectPackageOpti
 async function serializeScenePackageManifest(
   scene: Scene,
   modelReferences: Map<string, SerializedObject3DModel>,
-  entries: ZipEntry[]
+  entries: ZipEntry[],
+  options: ProjectPackageOptions
 ): Promise<SerializedScene> {
   return {
     app: "webster",
@@ -156,7 +198,7 @@ async function serializeScenePackageManifest(
       y: scene.document.y
     },
     layers: await Promise.all(
-      scene.layers.map((layer) => serializeLayerForPackage(layer, modelReferences, entries))
+      scene.layers.map((layer) => serializeLayerForPackage(layer, modelReferences, entries, options))
     ),
     selectedLayerId: scene.selectedLayerId,
     selectedLayerIds: scene.selectedLayerIds,
@@ -167,21 +209,23 @@ async function serializeScenePackageManifest(
 async function serializeLayerForPackage(
   layer: Scene["layers"][number],
   modelReferences: Map<string, SerializedObject3DModel>,
-  entries: ZipEntry[]
+  entries: ZipEntry[],
+  options: ProjectPackageOptions
 ): Promise<SerializedLayer> {
   if (!(layer instanceof Object3DLayer) || !layer.importedModel) {
     return layer.toJSON();
   }
 
   return layer.toJSONWithModel(
-    await getImportedModelAssetReference(layer.importedModel, modelReferences, entries)
+    await getImportedModelAssetReference(layer.importedModel, modelReferences, entries, options)
   );
 }
 
 async function getImportedModelAssetReference(
   model: Imported3DModel,
   modelReferences: Map<string, SerializedObject3DModel>,
-  entries: ZipEntry[]
+  entries: ZipEntry[],
+  options: ProjectPackageOptions
 ): Promise<SerializedObject3DModel> {
   const key = model.id || `${model.sourceFormat}:${model.name}:${model.stats.vertexCount}:${model.stats.triangleCount}`;
   const existingReference = modelReferences.get(key);
@@ -202,10 +246,18 @@ async function getImportedModelAssetReference(
     version: 3
   } satisfies SerializedObject3DModel;
 
+  if (options.skipAssetPaths?.has(assetPath)) {
+    modelReferences.set(key, reference);
+
+    return reference;
+  }
+
   entries.push(textEntry(assetPath, JSON.stringify(serialized.model)));
 
   for (const asset of serialized.assets) {
-    entries.push(await blobEntry(asset.path, asset.blob));
+    if (!options.skipAssetPaths?.has(asset.path)) {
+      entries.push(await blobEntry(asset.path, asset.blob));
+    }
   }
 
   modelReferences.set(key, reference);
@@ -213,7 +265,12 @@ async function getImportedModelAssetReference(
   return reference;
 }
 
-async function addFontAssetEntries(scene: Scene, manifest: SerializedScene, entries: ZipEntry[]) {
+async function addFontAssetEntries(
+  scene: Scene,
+  manifest: SerializedScene,
+  entries: ZipEntry[],
+  options: ProjectPackageOptions
+) {
   if (scene.fontAssets.length === 0) {
     return;
   }
@@ -230,7 +287,9 @@ async function addFontAssetEntries(scene: Scene, manifest: SerializedScene, entr
   }));
 
   for (const font of scene.fontAssets) {
-    entries.push(await blobEntry(font.assetPath, font.blob));
+    if (!options.skipAssetPaths?.has(font.assetPath)) {
+      entries.push(await blobEntry(font.assetPath, font.blob));
+    }
   }
 }
 

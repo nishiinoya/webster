@@ -4,6 +4,13 @@ import type {
   SharedProjectSnapshotSummary
 } from "@webster/shared";
 
+export type SharedProjectAssetUpload = {
+  assetId?: string;
+  assetPath: string;
+  blob: Blob;
+  mimeType?: string;
+};
+
 type CreateSnapshotInput = {
   message?: string | null;
   projectId: string;
@@ -67,6 +74,53 @@ export async function downloadSharedProjectFile(projectId: string) {
   }
 
   return response.blob();
+}
+
+/**
+ * Uploads binary assets introduced while already in shared mode. The socket
+ * operation carries only asset references plus the scene manifest; the backend
+ * stores these blobs and returns download URLs other clients can fetch.
+ */
+export async function uploadSharedProjectAssets(
+  projectId: string,
+  uploads: SharedProjectAssetUpload[]
+) {
+  if (uploads.length === 0) {
+    return [] satisfies SharedProjectAssetReference[];
+  }
+
+  const formData = new FormData();
+  const metadata = uploads.map((upload, index) => ({
+    assetId: upload.assetId,
+    assetPath: upload.assetPath,
+    fileField: `asset-${index}`,
+    mimeType: upload.mimeType || upload.blob.type || "application/octet-stream"
+  }));
+
+  formData.append("metadata", JSON.stringify({ assets: metadata }));
+
+  uploads.forEach((upload, index) => {
+    const fileField = `asset-${index}`;
+
+    formData.append(fileField, upload.blob, getAssetFilename(upload.assetPath));
+  });
+
+  const response = await fetchJson<{ assets?: SharedProjectAssetReference[] }>(
+    `/shared-projects/${encodeURIComponent(projectId)}/assets`,
+    {
+      body: formData,
+      method: "POST"
+    }
+  );
+
+  return response.assets?.length
+    ? response.assets
+    : metadata.map((asset) => ({
+        assetId: asset.assetId,
+        assetPath: asset.assetPath,
+        downloadUrl: getDefaultAssetDownloadUrl(projectId, asset.assetPath),
+        mimeType: asset.mimeType
+      }));
 }
 
 export async function listProjectSnapshots(projectId: string) {
@@ -163,4 +217,12 @@ function appendProjectId(url: string, projectId: string) {
 
 function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/u, "");
+}
+
+function getAssetFilename(assetPath: string) {
+  return assetPath.split("/").filter(Boolean).at(-1) || "asset";
+}
+
+function getDefaultAssetDownloadUrl(projectId: string, assetPath: string) {
+  return `/shared-projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetPath)}`;
 }

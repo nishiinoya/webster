@@ -42,7 +42,9 @@ export type ImportedLayerTexture = {
   width: number;
 };
 
-export type SerializedImportedLayerTexture = Omit<ImportedLayerTexture, "image">;
+export type SerializedImportedLayerTexture = Omit<ImportedLayerTexture, "image"> & {
+  assetPath?: string;
+};
 
 export type Object3DKind = "cube" | "sphere" | "pyramid" | "imported";
 
@@ -310,7 +312,7 @@ export abstract class Layer {
         customPath: data.customPath,
         texture: data.texture,
         textureImage: data.textureImage
-          ? await loadImportedLayerTexture(data.textureImage)
+          ? await loadImportedLayerTexture(data.textureImage, assets)
           : null
       });
     }
@@ -328,7 +330,7 @@ export abstract class Layer {
         materialColor: data.materialColor,
         materialTexture: data.materialTexture,
         materialTextureImage: data.materialTextureImage
-          ? await loadImportedLayerTexture(data.materialTextureImage)
+          ? await loadImportedLayerTexture(data.materialTextureImage, assets)
           : null,
         importedModel: "version" in (data.model ?? {})
           ? await deserializeImported3DModel(data.model as SerializedImported3DModel, assets)
@@ -341,7 +343,7 @@ export abstract class Layer {
                 diffuseColor: material.diffuseColor,
                 name: material.name,
                 textureImage: material.textureImage
-                  ? await loadImportedLayerTexture(material.textureImage)
+                  ? await loadImportedLayerTexture(material.textureImage, assets)
                   : null,
                 texturePath: material.texturePath
               }))
@@ -555,14 +557,18 @@ export function serializeImportedLayerTexture(
 }
 
 export async function loadImportedLayerTexture(
-  texture: SerializedImportedLayerTexture
+  texture: SerializedImportedLayerTexture,
+  assets = new Map<string, Blob>()
 ): Promise<ImportedLayerTexture> {
+  const assetBlob = texture.assetPath ? assets.get(texture.assetPath) : null;
+  const objectUrl = assetBlob ? URL.createObjectURL(assetBlob) : texture.dataUrl;
+
   return {
-    dataUrl: texture.dataUrl,
+    dataUrl: objectUrl,
     height: texture.height,
     id: texture.id || crypto.randomUUID(),
-    image: await loadImageElement(texture.dataUrl),
-    mimeType: texture.mimeType || "image/png",
+    image: await loadImageElement(objectUrl),
+    mimeType: texture.mimeType || assetBlob?.type || "image/png",
     name: texture.name || "Texture",
     width: texture.width
   };
