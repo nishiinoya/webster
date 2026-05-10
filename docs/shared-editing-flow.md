@@ -34,6 +34,77 @@ The socket client lives in `apps/web/src/editor/collaboration`, not in editor
 tools or random UI components. UI components call collaboration hooks; they do
 not own WebSocket behavior.
 
+## WebSocket Event Contract
+
+Every WebSocket message uses the same JSON envelope:
+
+```json
+{
+  "type": "operation:commit",
+  "payload": {}
+}
+```
+
+The socket carries realtime state only. Do not send `.webster` archives, images,
+masks, fonts, 3D models, textures, or other large binary assets through it.
+
+### Frontend Sends
+
+| Event | Payload | Backend should do |
+| --- | --- | --- |
+| `project:join` | `{ projectId, clientId }` | Authenticate/authorize the socket, attach it to the project room, send `project:state`, and broadcast updated presence. This is sent after opening the socket and again after reconnect. |
+| `project:leave` | `{ projectId, clientId }` | Remove this socket/client from the room and broadcast updated presence. |
+| `operation:preview` | `ProjectOperation` with `phase: "preview"` | Check edit permission, do not persist, do not increment version, and broadcast the temporary preview to other users in the room. |
+| `operation:commit` | `ProjectOperation` with `phase: "commit"` and `clientOperationId` | Check edit permission, dedupe by `clientOperationId`, validate `baseVersion`, persist the operation, increment project version, and broadcast `operation:applied`. |
+| `presence:cursor` | `{ projectId, clientId, cursor, tool }` | Update the user's cursor/tool presence and broadcast `presence:update`. `cursor` can be `null` when the pointer leaves the canvas. |
+
+### Frontend Receives
+
+| Event | Payload | Frontend should do |
+| --- | --- | --- |
+| `project:state` | `SharedProjectStatePayload` | Hydrate the editor from `snapshot`, update `currentVersion`, role, permissions, assets, snapshots, and online users. |
+| `operation:applied` | `AppliedProjectOperation` | Remove the matching pending commit when `clientOperationId` matches a local queued operation, update project version, and apply the operation to the local scene if needed. |
+| `operation:preview` | `ProjectOperation` with `phase: "preview"` | Apply a temporary remote preview without saving it to local history or treating it as the confirmed project version. |
+| `presence:update` | `SharedProjectPresence[]` | Refresh the online users list, cursors, colors, roles, and active tools. |
+| `project:error` | `ProjectErrorPayload` | Show the error and follow the recovery path for the error code. |
+
+### Error Codes
+
+| Code | Meaning | Frontend behavior |
+| --- | --- | --- |
+| `forbidden` | The user does not have permission for the attempted action. | Stop the attempted action, refresh role/permissions if needed, and keep viewer/editing controls disabled when appropriate. |
+| `not_found` | The project or requested resource does not exist. | Stop shared mode for that project and show a load/join failure. |
+| `socket_error` | The realtime connection failed. | Show disconnected/reconnecting state and keep pending commits queued. |
+| `version_conflict` | The commit was based on an old project version. | Pause new commits, reload latest project state through REST, clear or rebuild pending commits, and continue after resync. MVP behavior is simple reload/resync. |
+
+### Operation Kinds
+
+The backend should accept the `ProjectOperationKind` values from
+`packages/shared`:
+
+- `asset:create`
+- `document:update`
+- `filter:update`
+- `image-layer:update`
+- `layer:create`
+- `layer:delete`
+- `layer:reorder`
+- `layer:transform`
+- `layer:update`
+- `mask:paint`
+- `object3d:update`
+- `scene:replace`
+- `selection:update`
+- `shape:edit`
+- `stroke:commit`
+- `text:edit`
+
+For the MVP, operations may include a full `scene` snapshot in the existing
+`.webster` manifest shape. That lets the frontend apply remote commits through
+the same scene import path as local `.webster` loading. Later, the backend and
+frontend can make individual operation payloads more granular without changing
+the socket event names.
+
 ## Local Project To Shared Project
 
 When a user clicks Share project, the frontend creates a normal `.webster` Blob
