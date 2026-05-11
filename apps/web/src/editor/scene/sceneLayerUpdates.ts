@@ -1,12 +1,17 @@
 import { normalizeLayerFilters, normalizeLayerTexture } from "../layers/Layer";
 import type {
   ImageLayerGeometry,
+  LayerContentCrop,
   LayerFilterSettings,
   LayerTextureSettings,
   Object3DKind
 } from "../layers/Layer";
 import { GroupLayer } from "../layers/GroupLayer";
-import { ImageLayer, normalizeImageLayerGeometry } from "../layers/ImageLayer";
+import {
+  createDefaultImageLayerGeometry,
+  ImageLayer,
+  normalizeImageLayerGeometry
+} from "../layers/ImageLayer";
 import { Layer } from "../layers/Layer";
 import { Object3DLayer, normalizeObject3DKind, normalizeRotation as normalize3DRotation } from "../layers/Object3DLayer";
 import { ShapeLayer } from "../layers/ShapeLayer";
@@ -39,6 +44,7 @@ export type SceneLayerUpdates = Partial<{
   objectKind: Object3DKind;
   objectZoom: number;
   opacity: number;
+  resetCrop: boolean;
   rotation: number;
   rotationX: number;
   rotationY: number;
@@ -85,6 +91,10 @@ export function applySceneLayerUpdates(layer: Layer, updates: SceneLayerUpdates)
   }
 
   if (!layer.locked) {
+    if (updates.resetCrop) {
+      resetLayerCrop(layer);
+    }
+
     if (updates.x !== undefined) {
       layer.x = updates.x;
     }
@@ -278,4 +288,107 @@ function normalizeColor(color: [number, number, number, number]): [number, numbe
     clamp(color[2], 0, 1),
     clamp(color[3], 0, 1)
   ];
+}
+
+function resetLayerCrop(layer: Layer) {
+  if (layer.crop) {
+    restoreLayerBoundsFromCrop(layer, layer.crop);
+    layer.crop = null;
+
+    if (!(layer instanceof ImageLayer)) {
+      layer.mask = null;
+    }
+  }
+
+  if (layer instanceof ImageLayer) {
+    const defaultGeometry = createDefaultImageLayerGeometry();
+    const crop = layer.geometry.crop;
+
+    if (!areImageCropsEqual(crop, defaultGeometry.crop)) {
+      restoreLayerBoundsFromCrop(layer, {
+        bottom: crop.bottom * layer.height,
+        left: crop.left * layer.width,
+        right: crop.right * layer.width,
+        top: crop.top * layer.height
+      });
+      layer.geometry = {
+        ...layer.geometry,
+        crop: defaultGeometry.crop
+      };
+    }
+  }
+}
+
+function restoreLayerBoundsFromCrop(layer: Layer, crop: LayerContentCrop) {
+  const cropWidth = Math.max(1e-6, crop.right - crop.left);
+  const cropHeight = Math.max(1e-6, crop.top - crop.bottom);
+  const resetScaleX = layer.scaleX * (layer.width / cropWidth);
+  const resetScaleY = layer.scaleY * (layer.height / cropHeight);
+  const fullWidth = layer.width * resetScaleX;
+  const fullHeight = layer.height * resetScaleY;
+  const currentWidth = layer.width * layer.scaleX;
+  const currentHeight = layer.height * layer.scaleY;
+  const currentCenter = {
+    x: layer.x + currentWidth / 2,
+    y: layer.y + currentHeight / 2
+  };
+  const cropBottomLeftWorld = rotatePoint(
+    { x: layer.x, y: layer.y },
+    currentCenter,
+    layer.rotation
+  );
+  const cropOffsetFromFullCenter = rotateVector(
+    {
+      x: crop.left * resetScaleX - fullWidth / 2,
+      y: crop.bottom * resetScaleY - fullHeight / 2
+    },
+    layer.rotation
+  );
+  const fullCenter = {
+    x: cropBottomLeftWorld.x - cropOffsetFromFullCenter.x,
+    y: cropBottomLeftWorld.y - cropOffsetFromFullCenter.y
+  };
+
+  layer.scaleX = resetScaleX;
+  layer.scaleY = resetScaleY;
+  layer.x = fullCenter.x - fullWidth / 2;
+  layer.y = fullCenter.y - fullHeight / 2;
+}
+
+function rotatePoint(point: { x: number; y: number }, center: { x: number; y: number }, degrees: number) {
+  const rotated = rotateVector(
+    {
+      x: point.x - center.x,
+      y: point.y - center.y
+    },
+    degrees
+  );
+
+  return {
+    x: center.x + rotated.x,
+    y: center.y + rotated.y
+  };
+}
+
+function rotateVector(vector: { x: number; y: number }, degrees: number) {
+  const radians = (degrees * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+
+  return {
+    x: vector.x * cos - vector.y * sin,
+    y: vector.x * sin + vector.y * cos
+  };
+}
+
+function areImageCropsEqual(
+  left: ImageLayerGeometry["crop"],
+  right: ImageLayerGeometry["crop"]
+) {
+  return (
+    left.left === right.left &&
+    left.right === right.right &&
+    left.bottom === right.bottom &&
+    left.top === right.top
+  );
 }

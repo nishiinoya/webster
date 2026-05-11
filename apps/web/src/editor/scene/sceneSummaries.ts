@@ -22,6 +22,7 @@ export function getLayerSummary(
   const baseSummary = {
     childCount: options.childCount ?? 0,
     collapsed: false,
+    crop: layer.crop ? { ...layer.crop } : null,
     depth: options.depth ?? 0,
     groupId: layer.groupId,
     hasMask: Boolean(layer.mask),

@@ -1,7 +1,9 @@
 /** Lightweight ZIP read/write helpers used by project packaging. */
 export type ZipEntry = {
-  data: Uint8Array;
+  crc?: number;
+  data: Blob | Uint8Array;
   name: string;
+  size?: number;
 };
 
 const textEncoder = new TextEncoder();
@@ -9,13 +11,13 @@ const textDecoder = new TextDecoder();
 const crcTable = createCrcTable();
 
 export async function createZip(entries: ZipEntry[]) {
-  const localParts: Uint8Array[] = [];
+  const localParts: BlobPart[] = [];
   const centralParts: Uint8Array[] = [];
   let offset = 0;
 
   for (const entry of entries) {
+    const entryData = await prepareZipEntryData(entry);
     const name = textEncoder.encode(entry.name);
-    const crc = crc32(entry.data);
     const localHeader = new Uint8Array(30 + name.length);
     const localView = new DataView(localHeader.buffer);
 
@@ -23,12 +25,12 @@ export async function createZip(entries: ZipEntry[]) {
     localView.setUint16(4, 20, true);
     localView.setUint16(8, 0, true);
     localView.setUint16(10, 0, true);
-    localView.setUint32(14, crc, true);
-    localView.setUint32(18, entry.data.length, true);
-    localView.setUint32(22, entry.data.length, true);
+    localView.setUint32(14, entryData.crc, true);
+    localView.setUint32(18, entryData.size, true);
+    localView.setUint32(22, entryData.size, true);
     localView.setUint16(26, name.length, true);
     localHeader.set(name, 30);
-    localParts.push(localHeader, entry.data);
+    localParts.push(toBlobPart(localHeader), toZipBlobPart(entryData.data));
 
     const centralHeader = new Uint8Array(46 + name.length);
     const centralView = new DataView(centralHeader.buffer);
@@ -38,15 +40,15 @@ export async function createZip(entries: ZipEntry[]) {
     centralView.setUint16(6, 20, true);
     centralView.setUint16(10, 0, true);
     centralView.setUint16(12, 0, true);
-    centralView.setUint32(16, crc, true);
-    centralView.setUint32(20, entry.data.length, true);
-    centralView.setUint32(24, entry.data.length, true);
+    centralView.setUint32(16, entryData.crc, true);
+    centralView.setUint32(20, entryData.size, true);
+    centralView.setUint32(24, entryData.size, true);
     centralView.setUint16(28, name.length, true);
     centralView.setUint32(42, offset, true);
     centralHeader.set(name, 46);
     centralParts.push(centralHeader);
 
-    offset += localHeader.length + entry.data.length;
+    offset += localHeader.length + entryData.size;
   }
 
   const centralDirectoryOffset = offset;
@@ -60,14 +62,25 @@ export async function createZip(entries: ZipEntry[]) {
   endView.setUint32(12, centralDirectorySize, true);
   endView.setUint32(16, centralDirectoryOffset, true);
 
-  return new Blob([...localParts, ...centralParts, endRecord].map(toBlobPart), {
+  return new Blob([...localParts, ...centralParts.map(toBlobPart), toBlobPart(endRecord)], {
     type: "application/vnd.webster.project"
   });
 }
 
 export async function readZip(file: Blob) {
-  const bytes = new Uint8Array(await file.arrayBuffer());
+  const references = await readZipEntryReferences(file);
   const entries = new Map<string, Blob>();
+
+  for (const [name, entry] of references) {
+    entries.set(name, entry.data instanceof Blob ? entry.data : new Blob([toBlobPart(entry.data)]));
+  }
+
+  return entries;
+}
+
+export async function readZipEntryReferences(file: Blob) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const references = new Map<string, ZipEntry>();
   let offset = 0;
 
   while (offset + 30 <= bytes.length) {
@@ -79,6 +92,7 @@ export async function readZip(file: Blob) {
     }
 
     const compression = view.getUint16(8, true);
+    const crc = view.getUint32(14, true);
     const compressedSize = view.getUint32(18, true);
     const uncompressedSize = view.getUint32(22, true);
     const nameLength = view.getUint16(26, true);
@@ -92,11 +106,16 @@ export async function readZip(file: Blob) {
       throw new Error("This .webster file uses compressed entries that are not supported yet.");
     }
 
-    entries.set(name, new Blob([toBlobPart(bytes.slice(dataStart, dataEnd))]));
+    references.set(name, {
+      crc,
+      data: file.slice(dataStart, dataEnd),
+      name,
+      size: uncompressedSize
+    });
     offset = dataEnd;
   }
 
-  return entries;
+  return references;
 }
 
 export async function readZipText(entries: Map<string, Blob>, path: string) {
@@ -118,9 +137,15 @@ export function textEntry(name: string, text: string): ZipEntry {
 
 export async function blobEntry(name: string, blob: Blob): Promise<ZipEntry> {
   return {
-    data: new Uint8Array(await blob.arrayBuffer()),
+    data: blob,
     name
   };
+}
+
+export function zipEntryToBlob(entry: ZipEntry, type?: string) {
+  return entry.data instanceof Blob
+    ? new Blob([entry.data], { type })
+    : new Blob([toBlobPart(entry.data)], { type });
 }
 
 function byteLength(parts: Uint8Array[]) {
@@ -129,6 +154,38 @@ function byteLength(parts: Uint8Array[]) {
 
 function toBlobPart(bytes: Uint8Array) {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
+function toZipBlobPart(data: Blob | Uint8Array): BlobPart {
+  return data instanceof Blob ? data : toBlobPart(data);
+}
+
+async function prepareZipEntryData(entry: ZipEntry) {
+  if (entry.data instanceof Uint8Array) {
+    return {
+      crc: entry.crc ?? crc32(entry.data),
+      data: entry.data,
+      size: entry.size ?? entry.data.length
+    };
+  }
+
+  const knownSize = entry.size ?? entry.data.size;
+
+  if (entry.crc !== undefined) {
+    return {
+      crc: entry.crc,
+      data: entry.data,
+      size: knownSize
+    };
+  }
+
+  const bytes = new Uint8Array(await entry.data.arrayBuffer());
+
+  return {
+    crc: crc32(bytes),
+    data: bytes,
+    size: bytes.length
+  };
 }
 
 function crc32(bytes: Uint8Array) {

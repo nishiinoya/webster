@@ -9,6 +9,7 @@ import type {
 import type { EditorApp } from "../app/EditorApp";
 import type { SharedEditorAction } from "../app/history/SharedEditorAction";
 import { serializeScenePackageAssets } from "../projects/ProjectPackage";
+import { zipEntryToBlob } from "../projects/ZipStore";
 import type { SerializedScene } from "../scene/Scene";
 import type { SharedProjectAssetUpload } from "./sharedProjectApi";
 
@@ -126,7 +127,7 @@ async function createCollaborationSceneSnapshot(
     return {
       assetId: getAssetIdForPath(manifest as WebsterProjectManifest, entry.name),
       assetPath: entry.name,
-      blob: new Blob([toBlobPart(entry.data)], { type: mimeType }),
+      blob: zipEntryToBlob(entry, mimeType),
       mimeType
     } satisfies SharedProjectAssetUpload;
   });
@@ -303,6 +304,7 @@ function getLayerUpdateOperationKind(payload: unknown): ProjectOperationKind {
     keys.has("width") ||
     keys.has("height") ||
     keys.has("rotation") ||
+    keys.has("resetCrop") ||
     keys.has("scaleX") ||
     keys.has("scaleY") ||
     keys.has("imageGeometry")
@@ -666,8 +668,4 @@ function sanitizeAssetPathSegment(value: string) {
       .replace(/^-+|-+$/gu, "")
       .slice(0, 80) || "asset"
   );
-}
-
-function toBlobPart(bytes: Uint8Array) {
-  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }

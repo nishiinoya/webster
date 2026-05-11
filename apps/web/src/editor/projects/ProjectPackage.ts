@@ -17,8 +17,9 @@ export type ProjectPackageProgress = {
   title: string;
 };
 
-type ProjectPackageOptions = {
+export type ProjectPackageOptions = {
   onProgress?: (state: ProjectPackageProgress) => void;
+  reusableAssetEntries?: ReadonlyMap<string, ZipEntry>;
   skipAssetPaths?: ReadonlySet<string>;
 };
 
@@ -38,6 +39,7 @@ export async function exportScenePackage(
     options
   );
   const entries: ZipEntry[] = [...assetEntries];
+  const entryNames = new Set(entries.map((entry) => entry.name));
 
   reportProgress(
     options,
@@ -46,6 +48,8 @@ export async function exportScenePackage(
     "Packed layer data."
   );
   entries.unshift(textEntry("manifest.json", JSON.stringify(manifest, null, 2)));
+  entryNames.add("manifest.json");
+  entries.push(...getReusableAssetEntries(manifest, options.reusableAssetEntries, entryNames));
 
   reportProgress(options, 86, "Saving project...", "Writing Webster package.");
   return createZip(entries);
@@ -236,7 +240,6 @@ async function getImportedModelAssetReference(
 
   const basePath = `assets/models/${sanitizeAssetPathSegment(key)}`;
   const assetPath = `${basePath}/model.json`;
-  const serialized = await serializeImported3DModelToAssets(model, basePath);
   const reference = {
     assetPath,
     id: model.id,
@@ -251,6 +254,8 @@ async function getImportedModelAssetReference(
 
     return reference;
   }
+
+  const serialized = await serializeImported3DModelToAssets(model, basePath);
 
   entries.push(textEntry(assetPath, JSON.stringify(serialized.model)));
 
@@ -314,4 +319,64 @@ function reportProgress(
     progress,
     title
   });
+}
+
+function getReusableAssetEntries(
+  manifest: SerializedScene,
+  reusableAssetEntries: ReadonlyMap<string, ZipEntry> | undefined,
+  existingEntryNames: Set<string>
+) {
+  if (!reusableAssetEntries) {
+    return [];
+  }
+
+  const reusableEntries: ZipEntry[] = [];
+  const reusableAssetPaths = getReferencedPackageAssetPaths(manifest, reusableAssetEntries);
+
+  for (const assetPath of reusableAssetPaths) {
+    const entry = reusableAssetEntries.get(assetPath);
+
+    if (!entry || existingEntryNames.has(entry.name)) {
+      continue;
+    }
+
+    reusableEntries.push(entry);
+    existingEntryNames.add(entry.name);
+  }
+
+  return reusableEntries;
+}
+
+function getReferencedPackageAssetPaths(
+  manifest: SerializedScene,
+  reusableAssetEntries: ReadonlyMap<string, ZipEntry>
+) {
+  const assetPaths = new Set<string>();
+
+  for (const layer of manifest.layers) {
+    if (layer.type === "image") {
+      assetPaths.add(layer.assetPath);
+
+      if (layer.originalAssetPath) {
+        assetPaths.add(layer.originalAssetPath);
+      }
+    }
+
+    if (layer.type === "object3d" && layer.model && "assetPath" in layer.model) {
+      const assetPath = layer.model.assetPath;
+      const modelDirectory = assetPath.replace(/\/[^/]*$/u, "");
+
+      for (const entryName of reusableAssetEntries.keys()) {
+        if (entryName === assetPath || entryName.startsWith(`${modelDirectory}/`)) {
+          assetPaths.add(entryName);
+        }
+      }
+    }
+  }
+
+  for (const font of manifest.fonts ?? []) {
+    assetPaths.add(font.assetPath);
+  }
+
+  return assetPaths;
 }

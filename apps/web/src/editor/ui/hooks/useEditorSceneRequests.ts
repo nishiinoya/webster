@@ -241,7 +241,6 @@ export function useEditorSceneRequests({
 
       if (isModelImport) {
         onLayerAssetCommandPendingChange?.(getCompletedModelImportState(result));
-        await wait(350);
       }
     }
 
@@ -271,7 +270,7 @@ export function useEditorSceneRequests({
       .finally(() => {
         if (!didCancel) {
           if (isModelImport) {
-            window.setTimeout(() => onLayerAssetCommandPendingChange?.(null), 500);
+            onLayerAssetCommandPendingChange?.(null);
           }
           onLayerAssetCommandRequestHandled(requestId);
         }
@@ -279,6 +278,9 @@ export function useEditorSceneRequests({
 
     return () => {
       didCancel = true;
+      if (isModelImport) {
+        onLayerAssetCommandPendingChange?.(null);
+      }
     };
   }, [
     editorAppRef,

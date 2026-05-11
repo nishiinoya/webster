@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { LayerAssetCommand, LayerCommand, LayerSummary } from "../../app/EditorApp";
 import type {
+  LayerContentCrop,
   LayerFilterSettings,
   LayerTextureKind,
   LayerTextureSettings,
@@ -96,6 +97,9 @@ type ImageLayerSummary = LayerSummary & {
   hasCustomImageGeometry: boolean;
   imageGeometry: ImageLayerGeometry;
 };
+type CropLayerSummary = LayerSummary & {
+  crop: LayerContentCrop | null;
+};
 type ImageGeometryCornerId = keyof ImageLayerGeometry["corners"];
 
 export function PropertiesPanel({
@@ -178,6 +182,10 @@ export function PropertiesPanel({
 
   function updateImageGeometry(geometry: ImageLayerGeometry) {
     updateSelectedLayer({ imageGeometry: geometry });
+  }
+
+  function resetSelectedLayerCrop() {
+    updateSelectedLayer({ resetCrop: true });
   }
 
   function updateImageCorner(
@@ -816,12 +824,7 @@ export function PropertiesPanel({
                 className={propertyToggleClass}
                 disabled={selectedLayer.locked}
                 onClick={() => {
-                  const defaults = createDefaultImageLayerGeometry();
-
-                  updateImageGeometry({
-                    ...selectedLayer.imageGeometry,
-                    crop: defaults.crop
-                  });
+                  resetSelectedLayerCrop();
                 }}
                 type="button"
               >
@@ -845,12 +848,36 @@ export function PropertiesPanel({
               <button
                 className={propertyToggleClass}
                 disabled={selectedLayer.locked}
-                onClick={() => updateImageGeometry(createDefaultImageLayerGeometry())}
+                onClick={() => {
+                  updateSelectedLayer({
+                    imageGeometry: createDefaultImageLayerGeometry(),
+                    resetCrop: true
+                  });
+                }}
                 type="button"
               >
                 Reset all
               </button>
             </div>
+          </div>
+        ) : null}
+        {isCropLayerSummary(selectedLayer) && !isImageLayerSummary(selectedLayer) ? (
+          <div className={propertySectionClass}>
+            <h3 className={propertySectionTitleClass}>Crop</h3>
+            <div className={propertyRowClass}>
+              <span className={propertyLabelClass}>State</span>
+              <strong className={propertyValueClass}>
+                {selectedLayer.crop ? "Cropped" : "Full"}
+              </strong>
+            </div>
+            <button
+              className={propertyToggleClass}
+              disabled={selectedLayer.locked || !selectedLayer.crop}
+              onClick={resetSelectedLayerCrop}
+              type="button"
+            >
+              Reset crop
+            </button>
           </div>
         ) : null}
         {selectedLayer ? (
@@ -1013,6 +1040,15 @@ function isObject3DLayerSummary(layer: LayerSummary | null): layer is Object3DLa
 
 function isImageLayerSummary(layer: LayerSummary | null): layer is ImageLayerSummary {
   return Boolean(layer && layer.type === "image" && "imageGeometry" in layer);
+}
+
+function isCropLayerSummary(layer: LayerSummary | null): layer is CropLayerSummary {
+  return Boolean(
+    layer &&
+      "crop" in layer &&
+      layer.type !== "adjustment" &&
+      layer.type !== "group"
+  );
 }
 
 function formatCropValue(crop: ImageLayerGeometry["crop"]) {

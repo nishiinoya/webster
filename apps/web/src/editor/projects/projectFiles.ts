@@ -2,8 +2,10 @@
  * Project file picker and save helpers for `.webster` documents.
  */
 import { EditorApp } from "../app/EditorApp";
-import type { ProjectPackageProgress } from "./ProjectPackage";
+import type { ProjectPackageOptions } from "./ProjectPackage";
 import { rememberProjectFileHandle } from "./projectFileHandleStore";
+import { readZipEntryReferences } from "./ZipStore";
+import type { ZipEntry } from "./ZipStore";
 
 export type WebsterFileHandle = {
   getFile?: () => Promise<File>;
@@ -52,23 +54,26 @@ export async function saveProjectFile(
   projectFileHandleRef: { current: WebsterFileHandle | null },
   forceNewPath = false,
   suggestedName = "untitled.webster",
-  options: { onProgress?: (state: ProjectPackageProgress) => void } = {}
+  options: ProjectPackageOptions = {}
 ) {
   if (forceNewPath || !projectFileHandleRef.current) {
     projectFileHandleRef.current = await getProjectFileHandle(suggestedName);
   }
 
-  const blob = await runAfterPaint(() => editorApp.exportProjectFile(options));
-
-  if (!projectFileHandleRef.current) {
-    downloadBlob(blob, suggestedName);
-    saveProjectMetadata(suggestedName, false);
-    return;
-  }
-
-  if (!(await ensureWritePermission(projectFileHandleRef.current))) {
+  if (
+    projectFileHandleRef.current &&
+    !(await ensureWritePermission(projectFileHandleRef.current))
+  ) {
     projectFileHandleRef.current = await getProjectFileHandle(suggestedName);
   }
+
+  const reusableAssetEntries = projectFileHandleRef.current
+    ? await readReusableAssetEntries(projectFileHandleRef.current)
+    : undefined;
+  const exportOptions = reusableAssetEntries
+    ? withReusableAssetEntries(options, reusableAssetEntries)
+    : options;
+  const blob = await runAfterPaint(() => editorApp.exportProjectFile(exportOptions));
 
   if (!projectFileHandleRef.current) {
     downloadBlob(blob, suggestedName);
@@ -203,4 +208,42 @@ function saveProjectMetadata(filename: string, hasWritableHandle: boolean) {
       savedAt: new Date().toISOString()
     })
   );
+}
+
+async function readReusableAssetEntries(handle: WebsterFileHandle) {
+  if (!handle.getFile) {
+    return undefined;
+  }
+
+  try {
+    const entries = await readZipEntryReferences(await handle.getFile());
+    const assetEntries = new Map<string, ZipEntry>();
+
+    for (const [name, entry] of entries) {
+      if (name.startsWith("assets/")) {
+        assetEntries.set(name, entry);
+      }
+    }
+
+    return assetEntries.size > 0 ? assetEntries : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function withReusableAssetEntries(
+  options: ProjectPackageOptions,
+  reusableAssetEntries: ReadonlyMap<string, ZipEntry>
+): ProjectPackageOptions {
+  const skipAssetPaths = new Set(options.skipAssetPaths ?? []);
+
+  for (const assetPath of reusableAssetEntries.keys()) {
+    skipAssetPaths.add(assetPath);
+  }
+
+  return {
+    ...options,
+    reusableAssetEntries,
+    skipAssetPaths
+  };
 }

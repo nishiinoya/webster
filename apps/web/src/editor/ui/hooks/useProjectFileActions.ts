@@ -89,13 +89,6 @@ export function useProjectFileActions({
       }
 
       updateSaveStatus("saving");
-      onProjectFilePendingChange?.({
-        message: "Preparing project assets.",
-        progress: 4,
-        status: "saving",
-        title: "Saving project..."
-      });
-      await waitForNextPaint();
 
       try {
         const activeHandleRef = {
@@ -106,21 +99,8 @@ export function useProjectFileActions({
           editorAppRef.current,
           activeHandleRef,
           mode === "save-as",
-          getProjectFilename(activeDocumentTitle),
-          {
-            onProgress: (state) =>
-              onProjectFilePendingChange?.({
-                ...state,
-                status: "saving"
-              })
-          }
+          getProjectFilename(activeDocumentTitle)
         );
-        onProjectFilePendingChange?.({
-          message: "Project saved.",
-          progress: 100,
-          status: "complete",
-          title: "Save complete"
-        });
         projectFileHandleRef.current = activeHandleRef.current;
         projectFileHandlesRef.current.set(activeDocumentId, activeHandleRef.current);
         updateSaveStatus("saved");
@@ -128,27 +108,17 @@ export function useProjectFileActions({
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
           updateSaveStatus("idle");
-          onProjectFilePendingChange?.(null);
           return;
         }
 
         updateSaveStatus("error");
-        onProjectFilePendingChange?.({
-          message: error instanceof Error ? error.message : "Unable to save project file.",
-          progress: 100,
-          status: "error",
-          title: "Save failed"
-        });
         setWebglError(error instanceof Error ? error.message : "Unable to save project file.");
-      } finally {
-        window.setTimeout(() => onProjectFilePendingChange?.(null), 500);
       }
     },
     [
       activeDocumentId,
       activeDocumentTitle,
       editorAppRef,
-      onProjectFilePendingChange,
       setWebglError,
       updateSaveStatus
     ]

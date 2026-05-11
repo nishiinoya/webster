@@ -129,6 +129,7 @@ export function areSceneSnapshotsEqual(
 function cloneLayerForSnapshot(layer: Layer) {
   const baseOptions = {
     filters: { ...layer.filters },
+    crop: layer.crop ? { ...layer.crop } : null,
     groupId: layer.groupId,
     height: layer.height,
     id: layer.id,
@@ -362,6 +363,7 @@ function areLayersEqual(left: Layer, right: Layer) {
     left.scaleX !== right.scaleX ||
     left.scaleY !== right.scaleY ||
     !areLayerFiltersEqual(left.filters, right.filters) ||
+    !areLayerContentCropsEqual(left.crop, right.crop) ||
     !areMasksEqual(left.mask, right.mask)
   ) {
     return false;
@@ -496,6 +498,23 @@ function areImageLayerGeometriesEqual(
     left.corners.topLeft.y === right.corners.topLeft.y &&
     left.corners.topRight.x === right.corners.topRight.x &&
     left.corners.topRight.y === right.corners.topRight.y
+  );
+}
+
+function areLayerContentCropsEqual(left: Layer["crop"], right: Layer["crop"]) {
+  if (left === right) {
+    return true;
+  }
+
+  if (!left || !right) {
+    return false;
+  }
+
+  return (
+    left.left === right.left &&
+    left.right === right.right &&
+    left.bottom === right.bottom &&
+    left.top === right.top
   );
 }
 

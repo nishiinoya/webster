@@ -8,6 +8,7 @@ import {
   midpoint
 } from "../../geometry/TransformGeometry";
 import { defaultLayerFilters, Layer } from "../../layers/Layer";
+import { AdjustmentLayer } from "../../layers/AdjustmentLayer";
 import { GroupLayer } from "../../layers/GroupLayer";
 import { ImageLayer } from "../../layers/ImageLayer";
 import { Scene } from "../../scene/Scene";
@@ -156,7 +157,7 @@ function drawSelectionOutline(
   context.solidColorShaderProgram.setColor([0.39, 0.86, 0.75, 1]);
   drawCornerOutline(context, frameCorners, outlineWidth);
 
-  if (showTransformHandles && !layer.locked && !(layer instanceof GroupLayer)) {
+  if (canDrawTransformHandles(layer, showTransformHandles, showRotationHandle)) {
     if (showImageWarpControls && layer instanceof ImageLayer) {
       context.solidColorShaderProgram.setColor([0.39, 0.86, 0.75, 0.35]);
       drawCornerOutline(context, warpCorners, Math.max(5 / camera.zoom, 1.2));
@@ -171,6 +172,19 @@ function drawSelectionOutline(
 
     drawTransformHandles(context, layer, camera, showRotationHandle);
   }
+}
+
+function canDrawTransformHandles(
+  layer: Layer,
+  showTransformHandles: boolean,
+  showRotationHandle: boolean
+) {
+  return (
+    showTransformHandles &&
+    !layer.locked &&
+    !(layer instanceof GroupLayer) &&
+    (showRotationHandle || !(layer instanceof AdjustmentLayer))
+  );
 }
 
 function drawCornerOutline(

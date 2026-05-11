@@ -32,6 +32,7 @@ export function cloneLayer(
 ) {
   const options = {
     groupId: optionsOverride.groupId ?? layer.groupId,
+    crop: layer.crop ? { ...layer.crop } : null,
     height: layer.height,
     id: optionsOverride.id ?? crypto.randomUUID(),
     locked: optionsOverride.locked ?? false,

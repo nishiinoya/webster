@@ -25,7 +25,7 @@ import type {
 } from "../scene/Scene";
 import type { LayerClipboardSnapshot } from "../scene/Scene";
 import { exportScenePackage, importScenePackage } from "../projects/ProjectPackage";
-import type { ProjectPackageProgress } from "../projects/ProjectPackage";
+import type { ProjectPackageOptions, ProjectPackageProgress } from "../projects/ProjectPackage";
 import { ImageLayer } from "../layers/ImageLayer";
 import { Object3DLayer } from "../layers/Object3DLayer";
 import { ShapeLayer } from "../layers/ShapeLayer";
@@ -478,13 +478,13 @@ export class EditorApp {
   /**
    * Exports the active scene as a native project package.
    */
-  async exportProjectFile(options: { onProgress?: (state: ProjectPackageProgress) => void } = {}) {
+  async exportProjectFile(options: ProjectPackageOptions = {}) {
     return exportScenePackage(this.scene, undefined, options);
   }
 
   async exportProjectTemplateFile(
     templateName: string,
-    options: { onProgress?: (state: ProjectPackageProgress) => void } = {}
+    options: ProjectPackageOptions = {}
   ) {
     return exportScenePackage(this.scene, {
       isTemplate: true,

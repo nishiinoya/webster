@@ -94,6 +94,13 @@ export type ImageLayerGeometry = {
   };
 };
 
+export type LayerContentCrop = {
+  bottom: number;
+  left: number;
+  right: number;
+  top: number;
+};
+
 export const defaultLayerFilters: LayerFilterSettings = {
   brightness: 0,
   blur: 0,
@@ -135,6 +142,7 @@ export type SerializedLayerBase = {
   groupId?: string | null;
   mask?: SerializedLayerMask | null;
   filters?: Partial<LayerFilterSettings>;
+  crop?: LayerContentCrop | null;
 };
 
 export type SerializedShapeLayer = SerializedLayerBase & {
@@ -251,6 +259,7 @@ export type LayerOptions = {
   scaleY?: number;
   mask?: LayerMask | null;
   filters?: Partial<LayerFilterSettings>;
+  crop?: Partial<LayerContentCrop> | null;
 };
 
 export abstract class Layer {
@@ -270,6 +279,7 @@ export abstract class Layer {
   groupId: string | null;
   mask: LayerMask | null;
   filters: LayerFilterSettings;
+  crop: LayerContentCrop | null;
 
   protected constructor(options: LayerOptions) {
     this.id = options.id;
@@ -288,6 +298,7 @@ export abstract class Layer {
     this.groupId = options.groupId ?? null;
     this.mask = options.mask ?? null;
     this.filters = normalizeLayerFilters(options.filters);
+    this.crop = normalizeLayerContentCrop(options.crop, this.width, this.height);
   }
 
   static async fromJSON(data: SerializedLayer, assets = new Map<string, Blob>()) {
@@ -454,9 +465,50 @@ export abstract class Layer {
       y: this.y,
       groupId: this.groupId,
       filters: this.filters,
-      mask: this.mask?.toJSON() ?? null
+      mask: this.mask?.toJSON() ?? null,
+      crop: this.crop ? { ...this.crop } : null
     };
   }
+}
+
+export function normalizeLayerContentCrop(
+  crop: Partial<LayerContentCrop> | undefined | null,
+  width: number,
+  height: number
+): LayerContentCrop | null {
+  if (!crop) {
+    return null;
+  }
+
+  const safeWidth = Math.max(1, Number.isFinite(width) ? Math.abs(width) : 1);
+  const safeHeight = Math.max(1, Number.isFinite(height) ? Math.abs(height) : 1);
+  let left = clampNumber(crop.left, 0, safeWidth, 0);
+  let right = clampNumber(crop.right, 0, safeWidth, safeWidth);
+  let bottom = clampNumber(crop.bottom, 0, safeHeight, 0);
+  let top = clampNumber(crop.top, 0, safeHeight, safeHeight);
+  const minSpan = 1;
+
+  if (right - left < minSpan) {
+    const center = clampNumber((left + right) / 2, 0, safeWidth, safeWidth / 2);
+
+    left = Math.max(0, center - minSpan / 2);
+    right = Math.min(safeWidth, left + minSpan);
+    left = Math.max(0, right - minSpan);
+  }
+
+  if (top - bottom < minSpan) {
+    const center = clampNumber((bottom + top) / 2, 0, safeHeight, safeHeight / 2);
+
+    bottom = Math.max(0, center - minSpan / 2);
+    top = Math.min(safeHeight, bottom + minSpan);
+    bottom = Math.max(0, top - minSpan);
+  }
+
+  if (left <= 1e-6 && bottom <= 1e-6 && right >= safeWidth - 1e-6 && top >= safeHeight - 1e-6) {
+    return null;
+  }
+
+  return { bottom, left, right, top };
 }
 
 export function normalizeLayerFilters(
@@ -511,6 +563,15 @@ export function normalizeLayerTexture(
 
 function clampFilter(value: number, min: number, max: number) {
   return Math.min(Math.max(Number.isFinite(value) ? value : 0, min), max);
+}
+
+function clampNumber(
+  value: number | undefined,
+  min: number,
+  max: number,
+  fallback: number
+) {
+  return Math.min(Math.max(Number.isFinite(value) ? Number(value) : fallback, min), max);
 }
 
 function normalizeTextureKind(kind: LayerTextureKind | undefined): LayerTextureKind {
@@ -591,6 +652,7 @@ function getLayerOptions(data: SerializedLayer): LayerOptions {
     y: data.y,
     groupId: data.groupId ?? null,
     filters: data.filters,
+    crop: data.crop,
     mask: data.mask ? LayerMask.fromJSON(data.mask) : null
   };
 }
