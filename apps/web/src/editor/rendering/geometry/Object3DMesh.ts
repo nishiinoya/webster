@@ -153,14 +153,29 @@ export class Object3DMesh {
   }
 
   dispose() {
+    this.resetVertexAttributes();
+
     this.gl.deleteBuffer(this.colorBuffer);
+
     if (this.indexBuffer) {
       this.gl.deleteBuffer(this.indexBuffer);
     }
+
     this.gl.deleteBuffer(this.normalBuffer);
     this.gl.deleteBuffer(this.tangentBuffer);
     this.gl.deleteBuffer(this.texCoordBuffer);
     this.gl.deleteBuffer(this.vertexBuffer);
+
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, null);
+    this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, null);
+  }
+  
+  private resetVertexAttributes() {
+    const attributeCount = this.gl.getParameter(this.gl.MAX_VERTEX_ATTRIBS) as number;
+
+    for (let index = 0; index < attributeCount; index += 1) {
+      this.gl.disableVertexAttribArray(index);
+    }
   }
 
   private bindAttributes(program: Object3DDrawableProgram) {

@@ -36,7 +36,11 @@ export function renderObject3DLayer(
   camera: Camera2D,
   filters: EffectiveLayerFilters
 ) {
-  if (!context.renderColorOverride) {
+  if (
+    !context.renderColorOverride &&
+    layer.shadowOpacity > 0 &&
+    !(layer.objectKind === "imported" && layer.importedModel)
+  ) {
     renderProjectedShadow(context, layer, camera, filters);
   }
 

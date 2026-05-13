@@ -268,12 +268,8 @@ export function useEditorSceneRequests({
         }
       })
       .finally(() => {
-        if (!didCancel) {
-          if (isModelImport) {
-            onLayerAssetCommandPendingChange?.(null);
-          }
+          onLayerAssetCommandPendingChange?.(null);
           onLayerAssetCommandRequestHandled(requestId);
-        }
       });
 
     return () => {

@@ -93,9 +93,9 @@ export class Object3DLayer extends Layer {
     this.rotationX = normalizeRotation(options.rotationX ?? -18);
     this.rotationY = normalizeRotation(options.rotationY ?? 34);
     this.rotationZ = normalizeRotation(options.rotationZ ?? 0);
-    this.shadowDistance = clamp(options.shadowDistance ?? 0.72, 0, 1.5);
-    this.shadowOpacity = clamp(options.shadowOpacity ?? 0.34, 0, 1);
-    this.shadowSoftness = clamp(options.shadowSoftness ?? 22, 0, 64);
+    this.shadowDistance = clamp(options.shadowDistance ?? 0, 0, 1.5);
+    this.shadowOpacity = clamp(options.shadowOpacity ?? 0, 0, 1);
+    this.shadowSoftness = clamp(options.shadowSoftness ?? 0, 0, 64);
     this.modelMaterials = normalizeObject3DMaterials(options.modelMaterials ?? []);
   }
 

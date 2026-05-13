@@ -2551,16 +2551,49 @@ async function loadImageElement(src: string) {
   image.decoding = "async";
   image.src = src;
 
-  try {
-    await image.decode();
-  } catch {
-    await new Promise<void>((resolve, reject) => {
-      image.onload = () => resolve();
-      image.onerror = () => reject(new Error("Unable to load model texture."));
-    });
-  }
+  await loadImageElementWithTimeout(image, "Unable to load model texture.");
 
   return image;
+}
+
+function loadImageElementWithTimeout(image: HTMLImageElement, errorMessage: string) {
+  return new Promise<void>((resolve, reject) => {
+    let finished = false;
+    const timeoutId = window.setTimeout(() => {
+      finish(new Error(`${errorMessage} The image load timed out.`));
+    }, 15000);
+
+    function finish(error?: Error) {
+      if (finished) {
+        return;
+      }
+
+      finished = true;
+      window.clearTimeout(timeoutId);
+      image.onload = null;
+      image.onerror = null;
+
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    }
+
+    image.onload = () => finish();
+    image.onerror = () => finish(new Error(errorMessage));
+
+    if (image.complete && (image.naturalWidth > 0 || image.width > 0)) {
+      finish();
+      return;
+    }
+
+    image.decode?.().then(() => finish(), () => {
+      if (image.complete && (image.naturalWidth > 0 || image.width > 0)) {
+        finish();
+      }
+    });
+  });
 }
 
 function decodeDataUri(uri: string) {
