@@ -179,11 +179,48 @@ export class CollaborationGateway
           )
         : 'viewer';
 
+    const assetsPrefix = `projects/${projectId}/assets/`;
+    const dbAssets = await this.prisma.projectAsset.findMany({
+      where: { projectId },
+      orderBy: { createdAt: 'asc' },
+    });
+    const assets = dbAssets.map((a) => {
+      const assetPath = a.storageKey.startsWith(assetsPrefix)
+        ? a.storageKey.slice(assetsPrefix.length)
+        : a.storageKey;
+      const encodedPath = assetPath.split('/').map(encodeURIComponent).join('/');
+
+      return {
+        assetId: a.id,
+        assetPath,
+        downloadUrl: `/shared-projects/${encodeURIComponent(projectId)}/assets/${encodedPath}`,
+        mimeType: a.mimeType ?? undefined,
+      };
+    });
+
+    const snapshotRows = await this.prisma.projectSnapshot.findMany({
+      where: { projectId },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      include: { creator: { select: { displayName: true, email: true } } },
+    });
+    const snapshots = snapshotRows.map((s) => ({
+      id: s.id,
+      version: (s.stateData as Record<string, unknown> | null)?.version as number ?? 0,
+      message: s.snapshotName ?? null,
+      authorName: s.creator.displayName ?? s.creator.email ?? null,
+      createdAt: s.createdAt.toISOString(),
+      type: 'manual' as const,
+    }));
+
     const statePayload: SharedProjectStatePayload = {
       projectId,
+      projectName: project.projectName,
       currentVersion: project.currentVersion,
       role: frontendRole,
       snapshot: (project.metadata ?? {}) as any,
+      assets,
+      snapshots,
       users: this.presenceService.getAll(projectId),
     };
 

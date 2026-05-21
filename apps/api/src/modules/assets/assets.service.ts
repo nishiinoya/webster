@@ -91,7 +91,8 @@ export class AssetsService {
         },
       });
 
-      const downloadUrl = `/api/shared-projects/${encodeURIComponent(projectId)}/assets/${assetPath}`;
+      const encodedPath = assetPath.split('/').map(encodeURIComponent).join('/');
+      const downloadUrl = `/shared-projects/${encodeURIComponent(projectId)}/assets/${encodedPath}`;
 
       results.push({
         assetId: item.assetId,

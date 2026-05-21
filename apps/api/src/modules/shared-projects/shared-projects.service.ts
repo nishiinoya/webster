@@ -153,10 +153,12 @@ export class SharedProjectsService {
         ? a.storageKey.slice(assetsPrefix.length)
         : a.storageKey;
 
+      const encodedPath = assetPath.split('/').map(encodeURIComponent).join('/');
+
       return {
         assetId: a.id,
         assetPath,
-        downloadUrl: `/api/shared-projects/${encodeURIComponent(projectId)}/assets/${assetPath}`,
+        downloadUrl: `/shared-projects/${encodeURIComponent(projectId)}/assets/${encodedPath}`,
         mimeType: a.mimeType ?? undefined,
       };
     });

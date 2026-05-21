@@ -11,6 +11,7 @@ import { AuthUser } from '../../common/types/auth-user';
 import {
   SharedProjectSnapshotSummary,
   SharedProjectLoadResponse,
+  SharedProjectAssetReference,
 } from '@webster/shared';
 import { CreateSnapshotDto } from './dto/create-snapshot.dto';
 
@@ -60,7 +61,7 @@ export class SnapshotsService {
     projectId: string,
     user: AuthUser,
     dto: CreateSnapshotDto,
-  ): Promise<SharedProjectSnapshotSummary> {
+  ): Promise<{ snapshot: SharedProjectSnapshotSummary }> {
     await this.requireRole(projectId, user.id, 'editor');
 
     const project = await this.prisma.project.findFirst({
@@ -81,12 +82,14 @@ export class SnapshotsService {
     });
 
     return {
-      id: snapshot.id,
-      version: project.currentVersion,
-      message: snapshot.snapshotName ?? null,
-      authorName: snapshot.creator.displayName ?? snapshot.creator.email ?? null,
-      createdAt: snapshot.createdAt.toISOString(),
-      type: 'manual',
+      snapshot: {
+        id: snapshot.id,
+        version: project.currentVersion,
+        message: snapshot.snapshotName ?? null,
+        authorName: snapshot.creator.displayName ?? snapshot.creator.email ?? null,
+        createdAt: snapshot.createdAt.toISOString(),
+        type: 'manual',
+      },
     };
   }
 
@@ -125,11 +128,51 @@ export class SnapshotsService {
       );
     }
 
+    const assetsPrefix = `projects/${projectId}/assets/`;
+    const dbAssets = await this.prisma.projectAsset.findMany({
+      where: { projectId },
+      orderBy: { createdAt: 'asc' },
+    });
+    const assets: SharedProjectAssetReference[] = dbAssets.map((a) => {
+      const assetPath = a.storageKey.startsWith(assetsPrefix)
+        ? a.storageKey.slice(assetsPrefix.length)
+        : a.storageKey;
+      const encodedPath = assetPath.split('/').map(encodeURIComponent).join('/');
+
+      return {
+        assetId: a.id,
+        assetPath,
+        downloadUrl: `/shared-projects/${encodeURIComponent(projectId)}/assets/${encodedPath}`,
+        mimeType: a.mimeType ?? undefined,
+      };
+    });
+
+    const snapshotRows = await this.prisma.projectSnapshot.findMany({
+      where: { projectId },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      include: { creator: { select: { displayName: true, email: true } } },
+    });
+    const snapshots: SharedProjectSnapshotSummary[] = snapshotRows.map((s) => ({
+      id: s.id,
+      version: (s.stateData as Record<string, unknown> | null)?.version as number ?? 0,
+      message: s.snapshotName ?? null,
+      authorName: s.creator.displayName ?? s.creator.email ?? null,
+      createdAt: s.createdAt.toISOString(),
+      type: 'manual' as const,
+    }));
+
+    const users = this.roomService ? this.roomService.getPresence(projectId) : [];
+
     return {
       projectId,
+      projectName: updated.projectName,
       currentVersion: newVersion,
       role: 'owner',
       snapshot: newManifest,
+      assets,
+      snapshots,
+      users,
     };
   }
 
