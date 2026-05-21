@@ -5,6 +5,10 @@ import { useEffect } from "react";
 import { Auth0Provider, useAuth0 } from "@auth0/auth0-react";
 import { setAccessTokenGetter } from "@/editor/collaboration/sharedProjectApi";
 import "./globals.css";
+import { Geist } from "next/font/google";
+import { cn } from "@/lib/utils";
+
+const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 const AUTH_SKIP_PATHS = ["/login", "/callback"];
 
@@ -54,7 +58,7 @@ export default function RootLayout({
       : "http://localhost:3000/callback");
 
   return (
-    <html lang="en">
+    <html lang="en" className={cn("font-sans", geist.variable)}>
       <body>
         <Auth0Provider
           domain={domain}

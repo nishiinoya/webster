@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
-import { useEffect, useRef, useState } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   DocumentCommand,
   EditorClipboardCommand,
@@ -12,131 +12,137 @@ import type {
   LayerAssetCommand,
   LayerCommand,
   LayerSummary,
-  SelectionCommand
-} from "@/editor/app/EditorApp";
-import type { Imported3DModel } from "../import3d/Imported3DModel";
-import type { MaskBrushOptions } from "../tools/mask-brush/MaskBrushTypes";
-import type { ShapeKind } from "../layers/ShapeLayer";
-import type { StrokeStyle } from "../layers/StrokeLayer";
-import type { Object3DKind } from "../layers/Layer";
-import type { SelectionMode } from "../selection/SelectionManager";
+  SelectionCommand,
+} from '@/editor/app/EditorApp';
+import type { Imported3DModel } from '../import3d/Imported3DModel';
+import type { MaskBrushOptions } from '../tools/mask-brush/MaskBrushTypes';
+import type { ShapeKind } from '../layers/ShapeLayer';
+import type { StrokeStyle } from '../layers/StrokeLayer';
+import type { Object3DKind } from '../layers/Layer';
+import type { SelectionMode } from '../selection/SelectionManager';
 import {
   canPickProjectFileHandle,
-  pickProjectFileWithHandle
-} from "../projects/projectFiles";
-import type { WebsterFileHandle } from "../projects/projectFiles";
+  pickProjectFileWithHandle,
+} from '../projects/projectFiles';
+import type { WebsterFileHandle } from '../projects/projectFiles';
 import {
   listRememberedProjectFiles,
-  readRememberedProjectFileHandle
-} from "../projects/projectFileHandleStore";
-import type { RecentProjectHandle } from "../projects/projectFileHandleStore";
+  readRememberedProjectFileHandle,
+} from '../projects/projectFileHandleStore';
+import type { RecentProjectHandle } from '../projects/projectFileHandleStore';
 import {
   builtInProjectTemplates,
   deleteUserProjectTemplate,
   getUserProjectTemplate,
   importUserProjectTemplate,
   listUserProjectTemplates,
-  renameUserProjectTemplate
-} from "../projects/projectTemplates";
-import type { UserProjectTemplateSummary } from "../projects/projectTemplates";
-import type { ProjectFilePendingState, SaveStatus } from "./hooks/useProjectFileActions";
-import { CanvasView } from "./CanvasView";
-import { cn } from "./classNames";
-import type { EditorDocumentTab, NewDocumentSize } from "./editorDocuments";
+  renameUserProjectTemplate,
+} from '../projects/projectTemplates';
+import type { UserProjectTemplateSummary } from '../projects/projectTemplates';
+import type {
+  ProjectFilePendingState,
+  SaveStatus,
+} from './hooks/useProjectFileActions';
+import { CanvasView } from './CanvasView';
+import { cn } from './classNames';
+import type { EditorDocumentTab, NewDocumentSize } from './editorDocuments';
 import type {
   ImageLayerCommandPendingState,
-  LayerAssetCommandPendingState
-} from "./hooks/useEditorSceneRequests";
-import { HistoryPanel } from "./panels/HistoryPanel";
-import { LayersPanel } from "./panels/LayersPanel";
-import { VersionHistoryPanel } from "./panels/VersionHistoryPanel";
-import { ExportImageDialog } from "./dialogs/ExportImageDialog";
-import { NewDocumentDialog } from "./dialogs/NewDocumentDialog";
-import { Object3DImportDialog } from "./dialogs/Object3DImportDialog";
-import { ResizeCanvasDialog } from "./dialogs/ResizeCanvasDialog";
-import { ResizeImageDialog } from "./dialogs/ResizeImageDialog";
-import { PropertiesPanel } from "./panels/PropertiesPanel";
-import { TabsBar } from "./toolbar/TabsBar";
-import { Toolbar } from "./toolbar/Toolbar";
-import { ToolsPanel } from "./toolbar/ToolsPanel";
-import type { ToolDefinition } from "./toolbar/ToolsPanel";
-import type { SharedProjectRequest, SharedProjectUiState } from "../collaboration/useCollaboration";
+  LayerAssetCommandPendingState,
+} from './hooks/useEditorSceneRequests';
+import { HistoryPanel } from './panels/HistoryPanel';
+import { LayersPanel } from './panels/LayersPanel';
+import { VersionHistoryPanel } from './panels/VersionHistoryPanel';
+import { ExportImageDialog } from './dialogs/ExportImageDialog';
+import { NewDocumentDialog } from './dialogs/NewDocumentDialog';
+import { Object3DImportDialog } from './dialogs/Object3DImportDialog';
+import { ResizeCanvasDialog } from './dialogs/ResizeCanvasDialog';
+import { ResizeImageDialog } from './dialogs/ResizeImageDialog';
+import { PropertiesPanel } from './panels/PropertiesPanel';
+import { TabsBar } from './toolbar/TabsBar';
+import { Toolbar } from './toolbar/Toolbar';
+import { ToolsPanel } from './toolbar/ToolsPanel';
+import type { ToolDefinition } from './toolbar/ToolsPanel';
+import type {
+  SharedProjectRequest,
+  SharedProjectUiState,
+} from '../collaboration/useCollaboration';
 
 const initialTabs: EditorDocumentTab[] = [];
 
 const editorTools: ToolDefinition[] = [
   {
-    description: "Pick and move layers only.",
-    icon: "M",
-    label: "Move",
-    value: "Move"
+    description: 'Pick and move layers only.',
+    icon: '/icons/move-icon.svg',
+    label: 'Move',
+    value: 'Move',
   },
   {
-    description: "Resize and rotate the selected layer.",
-    icon: "Q",
-    label: "Transform",
-    value: "Transform"
+    description: 'Resize and rotate the selected layer.',
+    icon: '/icons/cut-icon.svg',
+    label: 'Transform',
+    value: 'Transform',
   },
   {
-    description: "Cut layer bounds with crop handles.",
-    icon: "C",
-    label: "Crop",
-    value: "Crop"
+    description: 'Cut layer bounds with crop handles.',
+    icon: 'C',
+    label: 'Crop',
+    value: 'Crop',
   },
   {
-    description: "Drag the workspace without editing artwork.",
-    icon: "P",
-    label: "Pan",
-    value: "Pan"
+    description: 'Drag the workspace without editing artwork.',
+    icon: '/icons/hand-icon.svg',
+    label: 'Pan',
+    value: 'Pan',
   },
   {
-    description: "Paint the selected layer mask.",
-    icon: "B",
-    label: "Mask Brush",
-    value: "Mask Brush"
+    description: 'Paint the selected layer mask.',
+    icon: 'B',
+    label: 'Mask Brush',
+    value: 'Mask Brush',
   },
   {
-    description: "Click the canvas to place and edit live text.",
-    icon: "T",
-    label: "Text",
-    value: "Text"
+    description: 'Click the canvas to place and edit live text.',
+    icon: '/icons/text-icon.svg',
+    label: 'Text',
+    value: 'Text',
   },
   {
-    description: "Sketch freehand strokes with pencils and brushes.",
-    icon: "D",
-    label: "Draw",
-    value: "Draw"
+    description: 'Sketch freehand strokes with pencils and brushes.',
+    icon: '/icons/brush-icon.svg',
+    label: 'Draw',
+    value: 'Draw',
   },
   {
-    description: "Draw rectangles, circles, arrows, and custom shapes.",
-    icon: "S",
-    label: "Shape",
-    value: "Shape"
+    description: 'Draw rectangles, circles, arrows, and custom shapes.',
+    icon: '/icons/cube-geometry-shape-icon.svg',
+    label: 'Shape',
+    value: 'Shape',
   },
   {
-    description: "Drag a box selection.",
-    icon: "R",
-    label: "Rectangle Select",
-    value: "Rectangle Select"
+    description: 'Drag a box selection.',
+    icon: '/icons/select-icon.svg',
+    label: 'Rectangle Select',
+    value: 'Rectangle Select',
   },
   {
-    description: "Drag an oval selection.",
-    icon: "E",
-    label: "Ellipse Select",
-    value: "Ellipse Select"
+    description: 'Drag an oval selection.',
+    icon: 'E',
+    label: 'Ellipse Select',
+    value: 'Ellipse Select',
   },
   {
-    description: "Draw a freehand selection.",
-    icon: "L",
-    label: "Lasso Select",
-    value: "Lasso Select"
+    description: 'Draw a freehand selection.',
+    icon: '/icons/lasso-icon.svg',
+    label: 'Lasso Select',
+    value: 'Lasso Select',
   },
   {
-    description: "Pick similar image colors.",
-    icon: "W",
-    label: "Magic Select",
-    value: "Magic Select"
-  }
+    description: 'Pick similar image colors.',
+    icon: '/icons/magic-wand-icon.svg',
+    label: 'Magic Select',
+    value: 'Magic Select',
+  },
 ];
 
 const initialLayers: LayerSummary[] = [];
@@ -144,7 +150,7 @@ const documentPresets: Array<NewDocumentSize & { label: string }> =
   builtInProjectTemplates.map((template) => ({
     height: template.height,
     label: `${template.name} ${template.width} x ${template.height}`,
-    width: template.width
+    width: template.width,
   }));
 const layersPanelMinHeight = 170;
 const propertiesPanelMinHeight = 260;
@@ -152,13 +158,13 @@ const historyPanelMinHeight = 72;
 const sidePanelHandleHeight = 12;
 const collapsedSidePanelHeight = 42;
 
-type SidePanelId = "history" | "layers" | "properties" | "versions";
+type SidePanelId = 'history' | 'layers' | 'properties' | 'versions';
 
 type EditorLayoutVars = CSSProperties & {
-  "--tools-panel-width": string;
-  "--right-panel-width": string;
-  "--layers-panel-height": string;
-  "--properties-panel-height": string;
+  '--tools-panel-width': string;
+  '--right-panel-width': string;
+  '--layers-panel-height': string;
+  '--properties-panel-height': string;
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -170,7 +176,7 @@ const emptyHistoryState: HistoryStateSnapshot = {
   canUndo: false,
   entries: [],
   redoLabel: null,
-  undoLabel: null
+  undoLabel: null,
 };
 
 const initialSharedProjectState: SharedProjectUiState = {
@@ -179,19 +185,19 @@ const initialSharedProjectState: SharedProjectUiState = {
     canDownloadWebster: false,
     canEdit: true,
     canManageMembers: false,
-    canRestoreSnapshots: false
+    canRestoreSnapshots: false,
   },
-  connectionStatus: "disconnected",
+  connectionStatus: 'disconnected',
   currentVersion: null,
   error: null,
   isBusy: false,
-  mode: "local",
+  mode: 'local',
   pendingCommitCount: 0,
   projectId: null,
   projectName: null,
   role: null,
   snapshots: [],
-  users: []
+  users: [],
 };
 
 export function EditorPage() {
@@ -199,37 +205,46 @@ export function EditorPage() {
   const emptyProjectInputRef = useRef<HTMLInputElement | null>(null);
   const sidePanelsRef = useRef<HTMLElement | null>(null);
   const documentCounterRef = useRef(1);
-  const [selectedTool, setSelectedTool] = useState("Move");
+  const [selectedTool, setSelectedTool] = useState('Move');
   const [showCanvasBorder, setShowCanvasBorder] = useState(true);
-  const [selectedShape, setSelectedShape] = useState<ShapeKind>("rectangle");
-  const [selectedSelectionMode, setSelectedSelectionMode] = useState<SelectionMode>("replace");
+  const [selectedShape, setSelectedShape] = useState<ShapeKind>('rectangle');
+  const [selectedSelectionMode, setSelectedSelectionMode] =
+    useState<SelectionMode>('replace');
   const [magicSelectionTolerance, setMagicSelectionTolerance] = useState(12);
-  const [selectedStrokeStyle, setSelectedStrokeStyle] = useState<StrokeStyle>("pencil");
-  const [selectedStrokeColor, setSelectedStrokeColor] = useState<[number, number, number, number]>(
-    [0.07, 0.08, 0.09, 0.82]
-  );
-  const [selectedStrokeMode, setSelectedStrokeMode] = useState<"draw" | "erase">("draw");
-  const [selectedStrokeTargetLayerId, setSelectedStrokeTargetLayerId] = useState<string | null>(
-    null
-  );
+  const [selectedStrokeStyle, setSelectedStrokeStyle] =
+    useState<StrokeStyle>('pencil');
+  const [selectedStrokeColor, setSelectedStrokeColor] = useState<
+    [number, number, number, number]
+  >([0.07, 0.08, 0.09, 0.82]);
+  const [selectedStrokeMode, setSelectedStrokeMode] = useState<
+    'draw' | 'erase'
+  >('draw');
+  const [selectedStrokeTargetLayerId, setSelectedStrokeTargetLayerId] =
+    useState<string | null>(null);
   const [selectedStrokeTargetMode, setSelectedStrokeTargetMode] = useState<
-    "layer" | "new" | "selected"
-  >("new");
+    'layer' | 'new' | 'selected'
+  >('new');
   const [selectedStrokeWidth, setSelectedStrokeWidth] = useState(3);
   const [maskBrushOptions, setMaskBrushOptions] = useState<MaskBrushOptions>({
-    mode: "hide",
+    mode: 'hide',
     opacity: 1,
-    size: 48
+    size: 48,
   });
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [zoomPercentage, setZoomPercentage] = useState(100);
   const [tabs, setTabs] = useState<EditorDocumentTab[]>(initialTabs);
   const [isExportImageDialogOpen, setIsExportImageDialogOpen] = useState(false);
   const [isNewDocumentDialogOpen, setIsNewDocumentDialogOpen] = useState(false);
-  const [isObject3DImportDialogOpen, setIsObject3DImportDialogOpen] = useState(false);
-  const [object3DImportInitialFiles, setObject3DImportInitialFiles] = useState<File[]>([]);
-  const [object3DImportMode, setObject3DImportMode] = useState<"add" | "replace">("add");
-  const [isResizeCanvasDialogOpen, setIsResizeCanvasDialogOpen] = useState(false);
+  const [isObject3DImportDialogOpen, setIsObject3DImportDialogOpen] =
+    useState(false);
+  const [object3DImportInitialFiles, setObject3DImportInitialFiles] = useState<
+    File[]
+  >([]);
+  const [object3DImportMode, setObject3DImportMode] = useState<
+    'add' | 'replace'
+  >('add');
+  const [isResizeCanvasDialogOpen, setIsResizeCanvasDialogOpen] =
+    useState(false);
   const [isResizeImageDialogOpen, setIsResizeImageDialogOpen] = useState(false);
   const [imageLayerCommandPendingState, setImageLayerCommandPendingState] =
     useState<ImageLayerCommandPendingState | null>(null);
@@ -237,15 +252,27 @@ export function EditorPage() {
     useState<LayerAssetCommandPendingState | null>(null);
   const [projectFilePendingState, setProjectFilePendingState] =
     useState<ProjectFilePendingState | null>(null);
-  const [recentProjects, setRecentProjects] = useState<RecentProjectHandle[]>([]);
-  const [recentProjectError, setRecentProjectError] = useState<string | null>(null);
-  const [userTemplates, setUserTemplates] = useState<UserProjectTemplateSummary[]>([]);
-  const [historyState, setHistoryState] = useState<HistoryStateSnapshot>(emptyHistoryState);
+  const [recentProjects, setRecentProjects] = useState<RecentProjectHandle[]>(
+    [],
+  );
+  const [recentProjectError, setRecentProjectError] = useState<string | null>(
+    null,
+  );
+  const [userTemplates, setUserTemplates] = useState<
+    UserProjectTemplateSummary[]
+  >([]);
+  const [historyState, setHistoryState] =
+    useState<HistoryStateSnapshot>(emptyHistoryState);
   const [layers, setLayers] = useState<LayerSummary[]>(initialLayers);
   const [sharedProjectState, setSharedProjectState] =
     useState<SharedProjectUiState>(initialSharedProjectState);
-  const [importedFontFamilies, setImportedFontFamilies] = useState<string[]>([]);
-  const [uploadRequest, setUploadRequest] = useState<{ file: File; id: number } | null>(null);
+  const [importedFontFamilies, setImportedFontFamilies] = useState<string[]>(
+    [],
+  );
+  const [uploadRequest, setUploadRequest] = useState<{
+    file: File;
+    id: number;
+  } | null>(null);
   const [imageDocumentRequest, setImageDocumentRequest] = useState<{
     file: File;
     id: number;
@@ -279,7 +306,7 @@ export function EditorPage() {
   } | null>(null);
   const [projectSaveRequest, setProjectSaveRequest] = useState<{
     id: number;
-    mode: "save" | "save-as";
+    mode: 'save' | 'save-as';
   } | null>(null);
   const [templateSaveRequest, setTemplateSaveRequest] = useState<{
     id: number;
@@ -302,7 +329,7 @@ export function EditorPage() {
     title: string;
   } | null>(null);
   const [historyCommandRequest, setHistoryCommandRequest] = useState<{
-    command: "redo" | "undo";
+    command: 'redo' | 'undo';
     id: number;
   } | null>(null);
   const [selectionCommandRequest, setSelectionCommandRequest] = useState<{
@@ -319,51 +346,64 @@ export function EditorPage() {
     id: number;
     tabId: string;
   } | null>(null);
-  const [toolsPanelWidth, setToolsPanelWidth] = useState(220);
-  const [rightPanelWidth, setRightPanelWidth] = useState(420);
+  const [toolsPanelWidth, setToolsPanelWidth] = useState(55);
+  const [rightPanelWidth, setRightPanelWidth] = useState(380);
   const [layersPanelHeight, setLayersPanelHeight] = useState(280);
   const [propertiesPanelHeight, setPropertiesPanelHeight] = useState(360);
-  const [collapsedSidePanels, setCollapsedSidePanels] = useState<Record<SidePanelId, boolean>>({
+  const [collapsedSidePanels, setCollapsedSidePanels] = useState<
+    Record<SidePanelId, boolean>
+  >({
     history: false,
     layers: false,
     properties: false,
-    versions: false
+    versions: false,
   });
 
   const layoutStyle: EditorLayoutVars = {
-    "--tools-panel-width": `${toolsPanelWidth}px`,
-    "--right-panel-width": `${rightPanelWidth}px`,
-    "--layers-panel-height": `${layersPanelHeight}px`,
-    "--properties-panel-height": `${propertiesPanelHeight}px`
+    '--tools-panel-width': `${toolsPanelWidth}px`,
+    '--right-panel-width': `${rightPanelWidth}px`,
+    '--layers-panel-height': `${layersPanelHeight}px`,
+    '--properties-panel-height': `${propertiesPanelHeight}px`,
   };
   const selectedLayers = layers.filter((layer) => layer.isSelected);
   const selectedLayer = selectedLayers.length === 1 ? selectedLayers[0] : null;
   const selectedLayerIds = new Set(selectedLayers.map((layer) => layer.id));
   const groupableSelectedLayerIds = selectedLayers
-    .filter((layer) => !hasSelectedAncestorLayer(layer, layers, selectedLayerIds))
+    .filter(
+      (layer) => !hasSelectedAncestorLayer(layer, layers, selectedLayerIds),
+    )
     .map((layer) => layer.id);
   const canGroupSelectedLayers = groupableSelectedLayerIds.length > 1;
-  const selectedImageLayer = isImageLayerSummary(selectedLayer) ? selectedLayer : null;
-  const selectedTextLayer = selectedLayer?.type === "text" ? selectedLayer : null;
-  const selectedObject3DLayer = isObject3DLayerSummary(selectedLayer) ? selectedLayer : null;
+  const selectedImageLayer = isImageLayerSummary(selectedLayer)
+    ? selectedLayer
+    : null;
+  const selectedTextLayer =
+    selectedLayer?.type === 'text' ? selectedLayer : null;
+  const selectedObject3DLayer = isObject3DLayerSummary(selectedLayer)
+    ? selectedLayer
+    : null;
   const activeDocument = tabs.find((tab) => tab.isActive) ?? tabs[0] ?? null;
   const activeHistoryState = activeDocument ? historyState : emptyHistoryState;
   const canEditDocument =
     Boolean(activeDocument) &&
-    (sharedProjectState.mode === "local" || sharedProjectState.capabilities.canEdit);
-  const strokeLayers = layers.filter((layer) => layer.type === "stroke");
+    (sharedProjectState.mode === 'local' ||
+      sharedProjectState.capabilities.canEdit);
+  const strokeLayers = layers.filter((layer) => layer.type === 'stroke');
   const textLayerFontFamilies = layers
-    .filter((layer): layer is LayerSummary & { fontFamily: string } => layer.type === "text")
+    .filter(
+      (layer): layer is LayerSummary & { fontFamily: string } =>
+        layer.type === 'text',
+    )
     .map((layer) => layer.fontFamily);
 
   useEffect(() => {
     if (
-      selectedStrokeTargetMode === "layer" &&
+      selectedStrokeTargetMode === 'layer' &&
       selectedStrokeTargetLayerId &&
       !strokeLayers.some((layer) => layer.id === selectedStrokeTargetLayerId)
     ) {
       setSelectedStrokeTargetLayerId(null);
-      setSelectedStrokeTargetMode("new");
+      setSelectedStrokeTargetMode('new');
     }
   }, [selectedStrokeTargetLayerId, selectedStrokeTargetMode, strokeLayers]);
 
@@ -379,7 +419,7 @@ export function EditorPage() {
     async function loadRecentProjects() {
       const [projects, templates] = await Promise.all([
         listRememberedProjectFiles().catch(() => []),
-        listUserProjectTemplates().catch(() => [])
+        listUserProjectTemplates().catch(() => []),
       ]);
 
       if (!didCancel) {
@@ -412,13 +452,13 @@ export function EditorPage() {
   }
 
   function switchToLocalMode() {
-    if (sharedProjectState.mode === "local") {
+    if (sharedProjectState.mode === 'local') {
       return;
     }
 
     setCollaborationRequest({
       id: Date.now(),
-      type: "switch-local"
+      type: 'switch-local',
     });
   }
 
@@ -426,17 +466,22 @@ export function EditorPage() {
     setImportedFontFamilies((currentFamilies) =>
       currentFamilies.includes(fontFamily)
         ? currentFamilies
-        : [...currentFamilies, fontFamily].sort((a, b) => a.localeCompare(b))
+        : [...currentFamilies, fontFamily].sort((a, b) => a.localeCompare(b)),
     );
   }
 
-  function addBasicObject3DLayer(objectKind: Exclude<Object3DKind, "imported">) {
-    runLayerCommand({ objectKind, type: "add-object3d" });
+  function addBasicObject3DLayer(
+    objectKind: Exclude<Object3DKind, 'imported'>,
+  ) {
+    runLayerCommand({ objectKind, type: 'add-object3d' });
     setLayerAssetCommandPendingState(null);
     setIsObject3DImportDialogOpen(false);
   }
 
-  function openObject3DImportDialog(mode: "add" | "replace", initialFiles: File[] = []) {
+  function openObject3DImportDialog(
+    mode: 'add' | 'replace',
+    initialFiles: File[] = [],
+  ) {
     setObject3DImportMode(mode);
     setObject3DImportInitialFiles(initialFiles);
     setLayerAssetCommandPendingState(null);
@@ -445,23 +490,23 @@ export function EditorPage() {
 
   function useLoadedObject3DModel(model: Imported3DModel) {
     if (
-      object3DImportMode === "replace" &&
+      object3DImportMode === 'replace' &&
       selectedObject3DLayer &&
       !selectedObject3DLayer.locked
     ) {
       runLayerAssetCommand({
         layerId: selectedObject3DLayer.id,
         model,
-        type: "replace-loaded-3d-model"
+        type: 'replace-loaded-3d-model',
       });
     } else {
-      runLayerAssetCommand({ model, type: "create-loaded-3d-model-layer" });
+      runLayerAssetCommand({ model, type: 'create-loaded-3d-model-layer' });
     }
 
     setLayerAssetCommandPendingState(null);
     setIsObject3DImportDialogOpen(false);
     setObject3DImportInitialFiles([]);
-    setObject3DImportMode("add");
+    setObject3DImportMode('add');
   }
 
   function runClipboardCommand(command: EditorClipboardCommand) {
@@ -479,8 +524,8 @@ export function EditorPage() {
 
     runLayerCommand({
       layerIds: groupableSelectedLayerIds,
-      name: "Group",
-      type: "group"
+      name: 'Group',
+      type: 'group',
     });
   }
 
@@ -492,8 +537,8 @@ export function EditorPage() {
     setTabs((currentTabs) =>
       currentTabs.map((tab) => ({
         ...tab,
-        isActive: tab.id === tabId
-      }))
+        isActive: tab.id === tabId,
+      })),
     );
   }
 
@@ -506,54 +551,60 @@ export function EditorPage() {
       id: `document-${documentCounterRef.current}`,
       isActive: true,
       title: `Untitled ${documentCounterRef.current}`,
-      width: size.width
+      width: size.width,
     };
 
     setTabs((currentTabs) => [
       ...currentTabs.map((currentTab) => ({ ...currentTab, isActive: false })),
-      tab
+      tab,
     ]);
     setImageDocumentRequest(null);
     setIsNewDocumentDialogOpen(false);
   }
 
-  async function createDocumentFromUserTemplate(template: UserProjectTemplateSummary) {
+  async function createDocumentFromUserTemplate(
+    template: UserProjectTemplateSummary,
+  ) {
     const storedTemplate = await getUserProjectTemplate(template.id);
 
     if (!storedTemplate) {
-      window.alert("Template is no longer available.");
+      window.alert('Template is no longer available.');
       await refreshUserTemplates();
       return;
     }
 
     documentCounterRef.current += 1;
 
-    const title = storedTemplate.name || `Template ${documentCounterRef.current}`;
+    const title =
+      storedTemplate.name || `Template ${documentCounterRef.current}`;
     const tab: EditorDocumentTab = {
       height: storedTemplate.height,
       id: `document-${documentCounterRef.current}`,
       isActive: true,
       title,
-      width: storedTemplate.width
+      width: storedTemplate.width,
     };
 
     setTabs((currentTabs) => [
       ...currentTabs.map((currentTab) => ({ ...currentTab, isActive: false })),
-      tab
+      tab,
     ]);
     setTemplateInsertRequest({
       file: new File([storedTemplate.projectBlob], getProjectFilename(title), {
-        type: "application/vnd.webster.project"
+        type: 'application/vnd.webster.project',
       }),
       id: Date.now(),
       name: storedTemplate.name,
-      tabId: tab.id
+      tabId: tab.id,
     });
     setRecentProjectError(null);
     setIsNewDocumentDialogOpen(false);
   }
 
-  async function renameUserTemplate(template: UserProjectTemplateSummary, name: string) {
+  async function renameUserTemplate(
+    template: UserProjectTemplateSummary,
+    name: string,
+  ) {
     await renameUserProjectTemplate(template.id, name).catch(() => null);
     await refreshUserTemplates();
   }
@@ -568,7 +619,9 @@ export function EditorPage() {
       await importUserProjectTemplate(file);
       await refreshUserTemplates();
     } catch {
-      window.alert("Unable to import template. Please choose a valid .webster project file.");
+      window.alert(
+        'Unable to import template. Please choose a valid .webster project file.',
+      );
     }
   }
 
@@ -576,12 +629,15 @@ export function EditorPage() {
     const storedTemplate = await getUserProjectTemplate(template.id);
 
     if (!storedTemplate) {
-      window.alert("Template is no longer available.");
+      window.alert('Template is no longer available.');
       await refreshUserTemplates();
       return;
     }
 
-    downloadBlob(storedTemplate.projectBlob, getProjectFilename(storedTemplate.name));
+    downloadBlob(
+      storedTemplate.projectBlob,
+      getProjectFilename(storedTemplate.name),
+    );
   }
 
   async function insertUserTemplate(template: UserProjectTemplateSummary) {
@@ -593,24 +649,31 @@ export function EditorPage() {
     }
 
     if (!storedTemplate) {
-      window.alert("Template is no longer available.");
+      window.alert('Template is no longer available.');
       await refreshUserTemplates();
       return;
     }
 
     setTemplateInsertRequest({
-      file: new File([storedTemplate.projectBlob], getProjectFilename(storedTemplate.name), {
-        type: "application/vnd.webster.project"
-      }),
+      file: new File(
+        [storedTemplate.projectBlob],
+        getProjectFilename(storedTemplate.name),
+        {
+          type: 'application/vnd.webster.project',
+        },
+      ),
       id: Date.now(),
       name: storedTemplate.name,
-      tabId: activeDocument.id
+      tabId: activeDocument.id,
     });
     setIsNewDocumentDialogOpen(false);
   }
 
   function saveCurrentProjectAsTemplate() {
-    const name = window.prompt("Template name", activeDocument?.title ?? "Template");
+    const name = window.prompt(
+      'Template name',
+      activeDocument?.title ?? 'Template',
+    );
 
     if (name === null) {
       return;
@@ -618,12 +681,15 @@ export function EditorPage() {
 
     setTemplateSaveRequest({
       id: Date.now(),
-      name
+      name,
     });
   }
 
   function exportCurrentProjectAsTemplate() {
-    const name = window.prompt("Template name", activeDocument?.title ?? "Template");
+    const name = window.prompt(
+      'Template name',
+      activeDocument?.title ?? 'Template',
+    );
 
     if (name === null) {
       return;
@@ -631,25 +697,25 @@ export function EditorPage() {
 
     setTemplateExportRequest({
       id: Date.now(),
-      name
+      name,
     });
   }
 
   function shareCurrentProject() {
     if (!activeDocument) {
-      window.alert("Open or create a project before sharing it.");
+      window.alert('Open or create a project before sharing it.');
       return;
     }
 
     setCollaborationRequest({
       id: Date.now(),
       title: activeDocument.title,
-      type: "share-local"
+      type: 'share-local',
     });
   }
 
   function openSharedProject() {
-    const projectId = window.prompt("Shared project ID");
+    const projectId = window.prompt('Shared project ID');
 
     if (!projectId?.trim()) {
       return;
@@ -662,31 +728,34 @@ export function EditorPage() {
         id: `document-${documentCounterRef.current}`,
         isActive: true,
         title: `Shared ${projectId.trim()}`,
-        width: 800
+        width: 800,
       };
 
       setTabs((currentTabs) => [
-        ...currentTabs.map((currentTab) => ({ ...currentTab, isActive: false })),
-        tab
+        ...currentTabs.map((currentTab) => ({
+          ...currentTab,
+          isActive: false,
+        })),
+        tab,
       ]);
     }
 
     setCollaborationRequest({
       id: Date.now(),
       projectId: projectId.trim(),
-      type: "open-shared"
+      type: 'open-shared',
     });
   }
 
   function downloadSharedProject() {
     setCollaborationRequest({
       id: Date.now(),
-      type: "download-webster"
+      type: 'download-webster',
     });
   }
 
   function createSharedSnapshot() {
-    const message = window.prompt("Snapshot message", "");
+    const message = window.prompt('Snapshot message', '');
 
     if (message === null) {
       return;
@@ -695,7 +764,7 @@ export function EditorPage() {
     setCollaborationRequest({
       id: Date.now(),
       message,
-      type: "create-snapshot"
+      type: 'create-snapshot',
     });
   }
 
@@ -703,14 +772,14 @@ export function EditorPage() {
     setCollaborationRequest({
       id: Date.now(),
       snapshotId,
-      type: "restore-snapshot"
+      type: 'restore-snapshot',
     });
   }
 
   function refreshSharedSnapshots() {
     setCollaborationRequest({
       id: Date.now(),
-      type: "refresh-snapshots"
+      type: 'refresh-snapshots',
     });
   }
 
@@ -726,10 +795,10 @@ export function EditorPage() {
               ...tab,
               height: document.height,
               title: document.title,
-              width: document.width
+              width: document.width,
             }
-          : tab
-      )
+          : tab,
+      ),
     );
   }
 
@@ -759,7 +828,7 @@ export function EditorPage() {
 
       return remainingTabs.map((tab, index) => ({
         ...tab,
-        isActive: index === nextActiveIndex
+        isActive: index === nextActiveIndex,
       }));
     });
     setClosedDocumentRequest({ id: Date.now(), tabId });
@@ -767,7 +836,7 @@ export function EditorPage() {
 
   function renameDocumentTab(tabId: string, title: string) {
     const currentTab = tabs.find((tab) => tab.id === tabId);
-    const nextTitle = title.trim() || "Untitled";
+    const nextTitle = title.trim() || 'Untitled';
 
     if (!currentTab || currentTab.title === nextTitle) {
       return;
@@ -778,17 +847,17 @@ export function EditorPage() {
         tab.id === tabId
           ? {
               ...tab,
-              title: nextTitle
+              title: nextTitle,
             }
-          : tab
-      )
+          : tab,
+      ),
     );
 
     if (
       currentTab.isActive &&
       window.confirm(`Save this project as "${getProjectFilename(nextTitle)}"?`)
     ) {
-      setProjectSaveRequest({ id: Date.now(), mode: "save-as" });
+      setProjectSaveRequest({ id: Date.now(), mode: 'save-as' });
     }
   }
 
@@ -800,19 +869,21 @@ export function EditorPage() {
       height: 800,
       id: `document-${documentCounterRef.current}`,
       isActive: true,
-      title: file.name.replace(/\.webster$/i, "") || `Untitled ${documentCounterRef.current}`,
-      width: 1200
+      title:
+        file.name.replace(/\.webster$/i, '') ||
+        `Untitled ${documentCounterRef.current}`,
+      width: 1200,
     };
 
     setTabs((currentTabs) => [
       ...currentTabs.map((currentTab) => ({ ...currentTab, isActive: false })),
-      tab
+      tab,
     ]);
     setProjectFileRequest({
       file,
       handle,
       id: Date.now(),
-      tabId: tab.id
+      tabId: tab.id,
     });
     setRecentProjectError(null);
   }
@@ -824,54 +895,63 @@ export function EditorPage() {
 
       documentCounterRef.current += 1;
 
-      const title = file.name.replace(/\.[^.]+$/u, "") || `Image ${documentCounterRef.current}`;
+      const title =
+        file.name.replace(/\.[^.]+$/u, '') ||
+        `Image ${documentCounterRef.current}`;
       const tab: EditorDocumentTab = {
         height: dimensions.height,
         id: `document-${documentCounterRef.current}`,
         isActive: true,
         title,
-        width: dimensions.width
+        width: dimensions.width,
       };
 
       setTabs((currentTabs) => [
-        ...currentTabs.map((currentTab) => ({ ...currentTab, isActive: false })),
-        tab
+        ...currentTabs.map((currentTab) => ({
+          ...currentTab,
+          isActive: false,
+        })),
+        tab,
       ]);
       setImageDocumentRequest({
         file,
         id: Date.now(),
-        tabId: tab.id
+        tabId: tab.id,
       });
       setRecentProjectError(null);
     } catch {
-      setRecentProjectError("Unable to open image.");
+      setRecentProjectError('Unable to open image.');
     }
   }
 
   async function openProjectHandle(handle: WebsterFileHandle | null) {
     try {
       if (!handle?.getFile) {
-        setRecentProjectError("No recent project is saved in this browser yet.");
+        setRecentProjectError(
+          'No recent project is saved in this browser yet.',
+        );
         return;
       }
 
       const permission = handle.queryPermission
-        ? await handle.queryPermission({ mode: "read" })
-        : "granted";
+        ? await handle.queryPermission({ mode: 'read' })
+        : 'granted';
       const grantedPermission =
-        permission === "granted" ||
+        permission === 'granted' ||
         (handle.requestPermission
-          ? (await handle.requestPermission({ mode: "read" })) === "granted"
+          ? (await handle.requestPermission({ mode: 'read' })) === 'granted'
           : false);
 
       if (!grantedPermission) {
-        setRecentProjectError("Browser permission is needed to reopen the recent project.");
+        setRecentProjectError(
+          'Browser permission is needed to reopen the recent project.',
+        );
         return;
       }
 
       openProjectInNewTab(await handle.getFile(), handle);
     } catch {
-      setRecentProjectError("Unable to open the recent project.");
+      setRecentProjectError('Unable to open the recent project.');
     }
   }
 
@@ -892,11 +972,11 @@ export function EditorPage() {
 
         return;
       } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") {
+        if (error instanceof DOMException && error.name === 'AbortError') {
           return;
         }
 
-        setRecentProjectError("Unable to open project.");
+        setRecentProjectError('Unable to open project.');
         return;
       }
     }
@@ -905,16 +985,27 @@ export function EditorPage() {
   }
 
   function getSidePanelHeight() {
-    return sidePanelsRef.current?.getBoundingClientRect().height ?? window.innerHeight - 64;
+    return (
+      sidePanelsRef.current?.getBoundingClientRect().height ??
+      window.innerHeight - 64
+    );
   }
 
   function getMaxLayersPanelHeight() {
     return Math.max(
       layersPanelMinHeight,
       getSidePanelHeight() -
-        getPanelHeightForResize("properties", propertiesPanelHeight, propertiesPanelMinHeight) -
-        getPanelHeightForResize("history", historyPanelMinHeight, historyPanelMinHeight) -
-        sidePanelHandleHeight
+        getPanelHeightForResize(
+          'properties',
+          propertiesPanelHeight,
+          propertiesPanelMinHeight,
+        ) -
+        getPanelHeightForResize(
+          'history',
+          historyPanelMinHeight,
+          historyPanelMinHeight,
+        ) -
+        sidePanelHandleHeight,
     );
   }
 
@@ -922,34 +1013,48 @@ export function EditorPage() {
     return Math.max(
       propertiesPanelMinHeight,
       getSidePanelHeight() -
-        getPanelHeightForResize("layers", layersPanelHeight, layersPanelMinHeight) -
-        getPanelHeightForResize("history", historyPanelMinHeight, historyPanelMinHeight) -
-        sidePanelHandleHeight
+        getPanelHeightForResize(
+          'layers',
+          layersPanelHeight,
+          layersPanelMinHeight,
+        ) -
+        getPanelHeightForResize(
+          'history',
+          historyPanelMinHeight,
+          historyPanelMinHeight,
+        ) -
+        sidePanelHandleHeight,
     );
   }
 
-  function getPanelHeightForResize(id: SidePanelId, height: number, minHeight: number) {
-    return collapsedSidePanels[id] ? collapsedSidePanelHeight : Math.max(height, minHeight);
+  function getPanelHeightForResize(
+    id: SidePanelId,
+    height: number,
+    minHeight: number,
+  ) {
+    return collapsedSidePanels[id]
+      ? collapsedSidePanelHeight
+      : Math.max(height, minHeight);
   }
 
   function toggleSidePanelCollapsed(id: SidePanelId) {
     setCollapsedSidePanels((currentPanels) => ({
       ...currentPanels,
-      [id]: !currentPanels[id]
+      [id]: !currentPanels[id],
     }));
   }
 
   function startResize(onMove: (moveEvent: PointerEvent) => void) {
-    document.body.classList.add("is-resizing-editor");
+    document.body.classList.add('is-resizing-editor');
 
     function stopResize() {
-      document.body.classList.remove("is-resizing-editor");
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", stopResize);
+      document.body.classList.remove('is-resizing-editor');
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', stopResize);
     }
 
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", stopResize, { once: true });
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', stopResize, { once: true });
   }
 
   function startToolsResize(event: ReactPointerEvent<HTMLButtonElement>) {
@@ -957,7 +1062,9 @@ export function EditorPage() {
     const startWidth = toolsPanelWidth;
 
     function resize(moveEvent: PointerEvent) {
-      setToolsPanelWidth(clamp(startWidth + moveEvent.clientX - startX, 150, 280));
+      setToolsPanelWidth(
+        clamp(startWidth + moveEvent.clientX - startX, 68, 320),
+      );
     }
 
     startResize(resize);
@@ -968,7 +1075,9 @@ export function EditorPage() {
     const startWidth = rightPanelWidth;
 
     function resize(moveEvent: PointerEvent) {
-      setRightPanelWidth(clamp(startWidth - (moveEvent.clientX - startX), 320, 760));
+      setRightPanelWidth(
+        clamp(startWidth - (moveEvent.clientX - startX), 320, 760),
+      );
     }
 
     startResize(resize);
@@ -980,7 +1089,11 @@ export function EditorPage() {
 
     function resize(moveEvent: PointerEvent) {
       setLayersPanelHeight(
-        clamp(startHeight + moveEvent.clientY - startY, layersPanelMinHeight, getMaxLayersPanelHeight())
+        clamp(
+          startHeight + moveEvent.clientY - startY,
+          layersPanelMinHeight,
+          getMaxLayersPanelHeight(),
+        ),
       );
     }
 
@@ -996,8 +1109,8 @@ export function EditorPage() {
         clamp(
           startHeight + moveEvent.clientY - startY,
           propertiesPanelMinHeight,
-          getMaxPropertiesPanelHeight()
-        )
+          getMaxPropertiesPanelHeight(),
+        ),
       );
     }
 
@@ -1005,9 +1118,11 @@ export function EditorPage() {
   }
 
   return (
-    <main className="grid h-screen min-h-0 grid-rows-[64px_1fr] overflow-hidden bg-[#101113] text-[13px] text-[#e7e9ec] min-[1400px]:text-[14px] max-[760px]:h-[100svh] max-[760px]:grid-rows-[118px_1fr]">
+    <main className='grid h-screen min-h-0 grid-rows-[64px_1fr] overflow-hidden bg-[#101113] text-[13px] text-[#e7e9ec] min-[1400px]:text-[14px] max-[760px]:h-[100svh] max-[760px]:grid-rows-[118px_1fr]'>
       <Toolbar
-        canDownloadSharedProject={sharedProjectState.capabilities.canDownloadWebster}
+        canDownloadSharedProject={
+          sharedProjectState.capabilities.canDownloadWebster
+        }
         canEditDocument={canEditDocument}
         canGroupSelectedLayers={canGroupSelectedLayers}
         canRedo={canEditDocument && activeHistoryState.canRedo}
@@ -1016,24 +1131,24 @@ export function EditorPage() {
           activeDocument
             ? {
                 height: activeDocument.height,
-                width: activeDocument.width
+                width: activeDocument.width,
               }
             : null
         }
         collaborationStatus={sharedProjectState.connectionStatus}
-        documentTitle={activeDocument?.title ?? "No document"}
-        isSharedMode={sharedProjectState.mode === "shared"}
-        onCopy={() => runClipboardCommand("copy")}
-        onCut={() => runClipboardCommand("cut")}
+        documentTitle={activeDocument?.title ?? 'No document'}
+        isSharedMode={sharedProjectState.mode === 'shared'}
+        onCopy={() => runClipboardCommand('copy')}
+        onCut={() => runClipboardCommand('cut')}
         onDeleteSelectedLayer={() => {
           if (selectedLayer) {
-            runLayerCommand({ layerId: selectedLayer.id, type: "delete" });
+            runLayerCommand({ layerId: selectedLayer.id, type: 'delete' });
           }
         }}
         onDownloadSharedProject={downloadSharedProject}
         onDuplicateSelectedLayer={() => {
           if (selectedLayer) {
-            runLayerCommand({ layerId: selectedLayer.id, type: "duplicate" });
+            runLayerCommand({ layerId: selectedLayer.id, type: 'duplicate' });
           }
         }}
         onGroupSelectedLayers={groupSelectedLayers}
@@ -1044,11 +1159,16 @@ export function EditorPage() {
         onOpenProject={openProjectInNewTab}
         onOpenSharedProject={openSharedProject}
         onOpenVersionHistory={() =>
-          setCollapsedSidePanels((currentPanels) => ({ ...currentPanels, versions: false }))
+          setCollapsedSidePanels((currentPanels) => ({
+            ...currentPanels,
+            versions: false,
+          }))
         }
-        onPaste={() => runClipboardCommand("paste")}
+        onPaste={() => runClipboardCommand('paste')}
         onOpenImageDocument={(file) => void openImageAsNewDocument(file)}
-        onRedo={() => setHistoryCommandRequest({ command: "redo", id: Date.now() })}
+        onRedo={() =>
+          setHistoryCommandRequest({ command: 'redo', id: Date.now() })
+        }
         onRestoreImageOriginal={() => {
           if (!selectedImageLayer) {
             return;
@@ -1057,28 +1177,40 @@ export function EditorPage() {
           setImageLayerCommandRequest({
             command: {
               layerId: selectedImageLayer.id,
-              type: "restore-original"
+              type: 'restore-original',
             },
-            id: Date.now()
+            id: Date.now(),
           });
         }}
-        onSaveAsProject={() => setProjectSaveRequest({ id: Date.now(), mode: "save-as" })}
-        onSaveProject={() => setProjectSaveRequest({ id: Date.now(), mode: "save" })}
+        onSaveAsProject={() =>
+          setProjectSaveRequest({ id: Date.now(), mode: 'save-as' })
+        }
+        onSaveProject={() =>
+          setProjectSaveRequest({ id: Date.now(), mode: 'save' })
+        }
         onShareProject={shareCurrentProject}
         onExportTemplate={exportCurrentProjectAsTemplate}
         onSaveTemplate={saveCurrentProjectAsTemplate}
-        onAddAdjustmentLayer={() => runLayerCommand({ type: "add-adjustment" })}
-        onAddObject3DLayer={() => openObject3DImportDialog("add")}
-        onSelectionCommand={(command) => setSelectionCommandRequest({ command, id: Date.now() })}
+        onAddAdjustmentLayer={() => runLayerCommand({ type: 'add-adjustment' })}
+        onAddObject3DLayer={() => openObject3DImportDialog('add')}
+        onSelectionCommand={(command) =>
+          setSelectionCommandRequest({ command, id: Date.now() })
+        }
         onSelectionModeChange={setSelectedSelectionMode}
         onSelectTool={setSelectedTool}
+        onSelectShape={setSelectedShape}
         onShowCanvasBorderChange={setShowCanvasBorder}
-        onUndo={() => setHistoryCommandRequest({ command: "undo", id: Date.now() })}
+        onUndo={() =>
+          setHistoryCommandRequest({ command: 'undo', id: Date.now() })
+        }
         onImportFont={(file) =>
           runLayerAssetCommand({
             file,
-            layerId: selectedTextLayer && !selectedTextLayer.locked ? selectedTextLayer.id : null,
-            type: "import-font"
+            layerId:
+              selectedTextLayer && !selectedTextLayer.locked
+                ? selectedTextLayer.id
+                : null,
+            type: 'import-font',
           })
         }
         onUploadImage={(file) => setUploadRequest({ file, id: Date.now() })}
@@ -1086,7 +1218,7 @@ export function EditorPage() {
         onMaskBrushOptionsChange={(options) =>
           setMaskBrushOptions((currentOptions) => ({
             ...currentOptions,
-            ...options
+            ...options,
           }))
         }
         onStrokeColorChange={setSelectedStrokeColor}
@@ -1100,13 +1232,19 @@ export function EditorPage() {
           setSelectedStrokeTargetLayerId(target.layerId);
           setSelectedStrokeTargetMode(target.mode);
         }}
-        onStrokeWidthChange={(width) => setSelectedStrokeWidth(Math.max(1, width || 1))}
+        onStrokeWidthChange={(width) =>
+          setSelectedStrokeWidth(Math.max(1, width || 1))
+        }
         saveStatus={saveStatus}
-        onlineUserCount={sharedProjectState.users.length || (sharedProjectState.mode === "shared" ? 1 : 0)}
+        onlineUserCount={
+          sharedProjectState.users.length ||
+          (sharedProjectState.mode === 'shared' ? 1 : 0)
+        }
         pendingCommitCount={sharedProjectState.pendingCommitCount}
         projectRole={sharedProjectState.role}
         selectedLayer={selectedLayer}
         selectedSelectionMode={selectedSelectionMode}
+        selectedShape={selectedShape}
         selectedStrokeColor={selectedStrokeColor}
         selectedStrokeMode={selectedStrokeMode}
         selectedStrokeStyle={selectedStrokeStyle}
@@ -1124,14 +1262,14 @@ export function EditorPage() {
       />
       <section
         className={cn(
-          "grid min-h-0 transition-[grid-template-columns] duration-[220ms] ease-in-out",
-          activeDocument ? "has-document" : "has-no-document",
+          'grid min-h-0 transition-[grid-template-columns] duration-[220ms] ease-in-out',
+          activeDocument ? 'has-document' : 'has-no-document',
           activeDocument
-            ? "grid-cols-[var(--tools-panel-width)_6px_minmax(360px,1fr)_6px_var(--right-panel-width)] max-[980px]:grid-cols-[minmax(150px,var(--tools-panel-width))_6px_minmax(300px,1fr)_6px_minmax(280px,var(--right-panel-width))] max-[760px]:grid-cols-[68px_6px_minmax(0,1fr)] max-[760px]:grid-rows-[minmax(0,1fr)_220px]"
-            : "grid-cols-[0_0_minmax(360px,1fr)_0_0] max-[980px]:grid-cols-[0_0_minmax(300px,1fr)_0_0] max-[760px]:grid-cols-[0_0_minmax(0,1fr)_0_0]"
+            ? 'grid-cols-[var(--tools-panel-width)_6px_minmax(360px,1fr)_6px_var(--right-panel-width)] max-[980px]:grid-cols-[minmax(150px,var(--tools-panel-width))_6px_minmax(300px,1fr)_6px_minmax(280px,var(--right-panel-width))] max-[760px]:grid-cols-[68px_6px_minmax(0,1fr)] max-[760px]:grid-rows-[minmax(0,1fr)_220px]'
+            : 'grid-cols-[0_0_minmax(360px,1fr)_0_0] max-[980px]:grid-cols-[0_0_minmax(300px,1fr)_0_0] max-[760px]:grid-cols-[0_0_minmax(0,1fr)_0_0]',
         )}
         style={layoutStyle}
-        aria-label="Editor workspace"
+        aria-label='Editor workspace'
       >
         <ToolsPanel
           canEditDocument={canEditDocument}
@@ -1142,15 +1280,16 @@ export function EditorPage() {
           tools={editorTools}
         />
         <ResizeHandle
-          aria-label="Resize tools panel"
+          aria-label='Resize tools panel'
+          className='pointer-events-none'
           hidden={!activeDocument}
-          onPointerDown={startToolsResize}
-          orientation="vertical"
+          onPointerDown={() => {}}
+          orientation='vertical'
         />
         <div
           className={cn(
-            "grid min-h-0 min-w-0 transition-[grid-template-rows] duration-[220ms] ease-in-out",
-            activeDocument ? "grid-rows-[42px_1fr]" : "grid-rows-[0_1fr]"
+            'grid min-h-0 min-w-0 transition-[grid-template-rows] duration-[220ms] ease-in-out',
+            activeDocument ? 'grid-rows-[42px_1fr]' : 'grid-rows-[0_1fr]',
           )}
         >
           <TabsBar
@@ -1177,84 +1316,108 @@ export function EditorPage() {
               onFontImported={rememberImportedFontFamily}
               onCollaborationRequestHandled={(requestId) =>
                 setCollaborationRequest((request) =>
-                  request?.id === requestId ? null : request
+                  request?.id === requestId ? null : request,
                 )
               }
               onCollaborationStateChange={setSharedProjectState}
               onHistoryChange={setHistoryState}
               onLayersChange={setLayers}
-              onOpenObject3DImportFiles={(files) => openObject3DImportDialog("add", files)}
+              onOpenObject3DImportFiles={(files) =>
+                openObject3DImportDialog('add', files)
+              }
               onStrokeLayerCreated={(layerId) => {
                 setSelectedStrokeTargetLayerId(layerId);
-                setSelectedStrokeTargetMode("layer");
+                setSelectedStrokeTargetMode('layer');
               }}
               onHistoryCommandRequestHandled={(requestId) =>
-                setHistoryCommandRequest((request) => (request?.id === requestId ? null : request))
+                setHistoryCommandRequest((request) =>
+                  request?.id === requestId ? null : request,
+                )
               }
               onClipboardCommandRequestHandled={(requestId) =>
                 setClipboardCommandRequest((request) =>
-                  request?.id === requestId ? null : request
+                  request?.id === requestId ? null : request,
                 )
               }
               onLayerCommandRequestHandled={(requestId) =>
-                setLayerCommandRequest((request) => (request?.id === requestId ? null : request))
+                setLayerCommandRequest((request) =>
+                  request?.id === requestId ? null : request,
+                )
               }
               onLayerAssetCommandRequestHandled={(requestId) =>
                 setLayerAssetCommandRequest((request) =>
-                  request?.id === requestId ? null : request
+                  request?.id === requestId ? null : request,
                 )
               }
               onDocumentCommandRequestHandled={(requestId) =>
                 setDocumentCommandRequest((request) =>
-                  request?.id === requestId ? null : request
+                  request?.id === requestId ? null : request,
                 )
               }
               onImageDocumentRequestHandled={(requestId) =>
-                setImageDocumentRequest((request) => (request?.id === requestId ? null : request))
+                setImageDocumentRequest((request) =>
+                  request?.id === requestId ? null : request,
+                )
               }
               onImageLayerCommandRequestHandled={(requestId) =>
                 setImageLayerCommandRequest((request) =>
-                  request?.id === requestId ? null : request
+                  request?.id === requestId ? null : request,
                 )
               }
-              onImageLayerCommandPendingChange={setImageLayerCommandPendingState}
-              onLayerAssetCommandPendingChange={setLayerAssetCommandPendingState}
+              onImageLayerCommandPendingChange={
+                setImageLayerCommandPendingState
+              }
+              onLayerAssetCommandPendingChange={
+                setLayerAssetCommandPendingState
+              }
               onProjectFileRequestHandled={(requestId) =>
-                setProjectFileRequest((request) => (request?.id === requestId ? null : request))
+                setProjectFileRequest((request) =>
+                  request?.id === requestId ? null : request,
+                )
               }
               onProjectFilePendingChange={setProjectFilePendingState}
               onProjectSaveRequestHandled={(requestId) =>
-                setProjectSaveRequest((request) => (request?.id === requestId ? null : request))
+                setProjectSaveRequest((request) =>
+                  request?.id === requestId ? null : request,
+                )
               }
               onTemplateSaveRequestHandled={(requestId) => {
-                setTemplateSaveRequest((request) => (request?.id === requestId ? null : request));
+                setTemplateSaveRequest((request) =>
+                  request?.id === requestId ? null : request,
+                );
                 void refreshUserTemplates();
               }}
               onTemplateExportRequestHandled={(requestId) =>
                 setTemplateExportRequest((request) =>
-                  request?.id === requestId ? null : request
+                  request?.id === requestId ? null : request,
                 )
               }
               onTemplateInsertRequestHandled={(requestId) =>
                 setTemplateInsertRequest((request) =>
-                  request?.id === requestId ? null : request
+                  request?.id === requestId ? null : request,
                 )
               }
               onImageExportRequestHandled={(requestId) =>
-                setImageExportRequest((request) => (request?.id === requestId ? null : request))
+                setImageExportRequest((request) =>
+                  request?.id === requestId ? null : request,
+                )
               }
               onSaveStatusChange={setSaveStatus}
               onSelectionCommandRequestHandled={(requestId) =>
                 setSelectionCommandRequest((request) =>
-                  request?.id === requestId ? null : request
+                  request?.id === requestId ? null : request,
                 )
               }
               onSelectLayerRequestHandled={(requestId) =>
-                setSelectLayerRequest((request) => (request?.id === requestId ? null : request))
+                setSelectLayerRequest((request) =>
+                  request?.id === requestId ? null : request,
+                )
               }
               onSelectTool={setSelectedTool}
               onUploadRequestHandled={(requestId) =>
-                setUploadRequest((request) => (request?.id === requestId ? null : request))
+                setUploadRequest((request) =>
+                  request?.id === requestId ? null : request,
+                )
               }
               onZoomChange={setZoomPercentage}
               onSharedDocumentLoaded={updateActiveTabFromSharedDocument}
@@ -1279,135 +1442,147 @@ export function EditorPage() {
             />
           ) : (
             <section
-              className="grid min-h-0 min-w-0 place-items-center bg-[#101113] p-7"
-              aria-label="No open documents"
+              className=' min-h-0 min-w-0 place-items-center bg-[#101113] p-7 flex'
+              aria-label='No open documents'
             >
-              <div className="grid w-[min(680px,100%)] justify-items-center gap-[18px] text-center">
-                <p className="m-0 text-xs font-extrabold uppercase tracking-normal text-[#8b929b]">
-                  No open documents
-                </p>
-                <h2 className="m-0 text-[34px] font-bold leading-[1.12] text-[#f2f4f7]">
-                  Start a Webster project
-                </h2>
-                <div className="flex flex-wrap justify-center gap-2.5">
-                  <button
-                    className="min-w-40 rounded-lg border border-[#4aa391] bg-[#203731] px-[18px] py-3.5 font-extrabold text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]"
-                    onClick={openProjectPickerFromEmptyState}
-                    type="button"
-                  >
-                    Open...
-                  </button>
-                  <button
-                    className="min-w-40 rounded-lg border border-[#4aa391] bg-[#203731] px-[18px] py-3.5 font-extrabold text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]"
-                    onClick={() => emptyImageInputRef.current?.click()}
-                    type="button"
-                  >
-                    Open image...
-                  </button>
-                  <button
-                    className="min-w-40 rounded-lg border border-[#333941] bg-[#202329] px-[18px] py-3.5 font-extrabold text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]"
-                    onClick={() => setIsNewDocumentDialogOpen(true)}
-                    type="button"
-                  >
-                    New...
-                  </button>
+              <div className='flex-1 flex items-center justify-center'>
+                <div className='text-center'>
+                  <h2 className='bg-gradient-to-r from-[#4aa391] via-[#6fd6c1] to-[#d9f5ee] bg-clip-text text-6xl font-extrabold tracking-[0.22em] text-transparent'>
+                    WEBSTEER
+                  </h2>
+                  <div className='flex flex-col items-center'>
+                    <p className='mt-4 max-w-[420px] text-sm font-semibold uppercase tracking-[0.18em] text-[#a7b0b9]'>
+                      The next-gen image editor for everyone
+                    </p>
+                    <p className='mt-6 max-w-[460px] text-[13px] font-semibold leading-[1.65] text-[#9aa1ab]'>
+                      Welcome to the free advanced photo editor. Start editing
+                      by clicking the “Open Image” button, drag and drop a file,
+                      or paste it from the clipboard (Ctrl+V).
+                    </p>
+                  </div>
                 </div>
-                {recentProjectError ? (
-                  <p className="m-0 text-[13px] font-bold text-[#ffb9b9]">{recentProjectError}</p>
-                ) : null}
-                <div className="grid w-[min(540px,100%)] gap-2" aria-label="Create new presets">
-                  {documentPresets.map((preset) => (
+              </div>
+              <div className='flex-1 '>
+                <div className='grid w-[min(780px,100%)] justify-items-center gap-[18px] text-center border-2 border-dotted border-[#276f63] rounded-xl pt-20'>
+                  <p className='m-0 text-xs font-extrabold uppercase tracking-normal text-[#8b929b]'>
+                    No open documents
+                  </p>
+                  <h2 className='m-0 text-[34px] font-bold leading-[1.12] text-[#f2f4f7]'>
+                    Start a Webster project
+                  </h2>
+                  <div className='flex flex-col justify-center gap-4'>
                     <button
-                      className="flex min-h-[52px] items-center justify-between gap-4 rounded-lg border border-[#333941] bg-[#202329] px-3 py-2.5 text-left font-extrabold text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]"
-                      key={preset.label}
-                      onClick={() => createDocumentTab(preset)}
-                      type="button"
+                      className='min-w-60 border border-[#4aa391] bg-[#203731] px-[18px] py-3.5 font-extrabold text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731] rounded-4xl cursor-pointer mt-20'
+                      onClick={() => setIsNewDocumentDialogOpen(true)}
+                      type='button'
                     >
-                      <span className="truncate">{preset.label}</span>
-                      <strong className="whitespace-nowrap text-xs text-[#9aa1ab]">
-                        {preset.width} x {preset.height}
-                      </strong>
+                      Create new project
                     </button>
-                  ))}
-                </div>
-                <div
-                  className="mt-0.5 grid w-[min(540px,100%)] gap-2 text-left"
-                  aria-label="Previous projects"
-                >
-                  <h3 className="m-0 text-[13px] font-bold text-[#d9dde3]">Previous projects</h3>
-                  {recentProjects.length > 0 ? (
-                    <div className="grid gap-2">
-                      {recentProjects.map((project) => (
-                        <button
-                          className="flex min-h-[52px] w-full items-center justify-between gap-4 rounded-lg border border-[#30353d] bg-[#17191d] px-3 py-2.5 text-left font-bold text-[#eef1f4]"
-                          key={project.id}
-                          onClick={() => openProjectHandle(project.handle)}
-                          type="button"
-                        >
-                          <span className="truncate">{project.filename}</span>
-                          <strong className="whitespace-nowrap text-xs text-[#9aa1ab]">
-                            {formatRecentProjectDate(project.savedAt)}
-                          </strong>
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="m-0 text-[13px] text-[#8b929b]">No previous projects yet.</p>
-                  )}
-                </div>
-                <input
-                  ref={emptyImageInputRef}
-                  accept="image/*"
-                  className="absolute h-px w-px overflow-hidden whitespace-nowrap [clip:rect(0_0_0_0)]"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
+                    <button
+                      className='min-w-70 border border-[#4aa391] bg-[#203731] px-[18px] py-3.5 font-extrabold text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731] rounded-4xl cursor-pointer'
+                      onClick={() => emptyImageInputRef.current?.click()}
+                      type='button'
+                    >
+                      Open image
+                    </button>
+                    <button
+                      className='min-w-40 rounded-4xl border border-[#4aa391] bg-[#203731] px-[18px] py-3.5 font-extrabold text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]'
+                      onClick={openProjectPickerFromEmptyState}
+                      type='button'
+                    >
+                      Open from file
+                    </button>
+                  </div>
+                  {recentProjectError ? (
+                    <p className='m-0 text-[13px] font-bold text-[#ffb9b9]'>
+                      {recentProjectError}
+                    </p>
+                  ) : null}
+                  <div
+                    className='mt-12 mb-12 grid w-[min(540px,100%)] gap-2 text-center'
+                    aria-label='Previous projects'
+                  >
+                    <h3 className='m-0 text-[13px] font-bold text-[#d9dde3]'>
+                      Previous projects
+                    </h3>
+                    {recentProjects.length > 0 ? (
+                      <div className='grid gap-2'>
+                        {recentProjects.map((project) => (
+                          <button
+                            className='flex min-h-[52px] w-full items-center justify-between gap-4 rounded-lg border border-[#30353d] bg-[#17191d] px-3 py-2.5 text-left font-bold text-[#eef1f4]'
+                            key={project.id}
+                            onClick={() => openProjectHandle(project.handle)}
+                            type='button'
+                          >
+                            <span className='truncate'>{project.filename}</span>
+                            <strong className='whitespace-nowrap text-xs text-[#9aa1ab]'>
+                              {formatRecentProjectDate(project.savedAt)}
+                            </strong>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className='m-0 text-[13px] text-[#8b929b]'>
+                        No previous projects yet.
+                      </p>
+                    )}
+                  </div>
+                  <input
+                    ref={emptyImageInputRef}
+                    accept='image/*'
+                    className='absolute h-px w-px overflow-hidden whitespace-nowrap [clip:rect(0_0_0_0)]'
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
 
-                    if (file) {
-                      void openImageAsNewDocument(file);
-                      event.target.value = "";
-                    }
-                  }}
-                  type="file"
-                />
-                <input
-                  ref={emptyProjectInputRef}
-                  accept=".webster,application/zip,application/vnd.webster.project"
-                  className="absolute h-px w-px overflow-hidden whitespace-nowrap [clip:rect(0_0_0_0)]"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
+                      if (file) {
+                        void openImageAsNewDocument(file);
+                        event.target.value = '';
+                      }
+                    }}
+                    type='file'
+                  />
+                  <input
+                    ref={emptyProjectInputRef}
+                    accept='.webster,application/zip,application/vnd.webster.project'
+                    className='absolute h-px w-px overflow-hidden whitespace-nowrap [clip:rect(0_0_0_0)]'
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
 
-                    if (file) {
-                      openProjectInNewTab(file, null);
-                      event.target.value = "";
-                    }
-                  }}
-                  type="file"
-                />
+                      if (file) {
+                        openProjectInNewTab(file, null);
+                        event.target.value = '';
+                      }
+                    }}
+                    type='file'
+                  />
+                </div>
               </div>
             </section>
           )}
         </div>
         <ResizeHandle
-          aria-label="Resize side panels"
-          className="max-[760px]:hidden"
+          aria-label='Resize side panels'
+          className='max-[760px]:hidden'
           hidden={!activeDocument}
           onPointerDown={startRightPanelResize}
-          orientation="vertical"
+          orientation='vertical'
         />
         <aside
           className={cn(
-            "flex min-h-0 flex-col overflow-x-hidden overflow-y-auto bg-[#17191d] opacity-100 overscroll-contain transition-[opacity,transform] duration-[220ms] ease-in-out max-[760px]:col-[1/-1] max-[760px]:row-start-2 max-[760px]:grid max-[760px]:grid-cols-3 max-[760px]:grid-rows-[220px] max-[760px]:overflow-x-auto max-[760px]:overflow-y-hidden max-[760px]:border-t max-[760px]:border-[#2a2d31]",
+            'flex min-h-0 flex-col overflow-x-hidden overflow-y-auto bg-[#17191d] opacity-100 overscroll-contain transition-[opacity,transform] duration-[220ms] ease-in-out max-[760px]:col-[1/-1] max-[760px]:row-start-2 max-[760px]:grid max-[760px]:grid-cols-3 max-[760px]:grid-rows-[220px] max-[760px]:overflow-x-auto max-[760px]:overflow-y-hidden max-[760px]:border-t max-[760px]:border-[#2a2d31]',
             activeDocument
-              ? ""
-              : "pointer-events-none translate-x-3 opacity-0 max-[760px]:col-start-5 max-[760px]:row-start-1"
+              ? ''
+              : 'pointer-events-none translate-x-3 opacity-0 max-[760px]:col-start-5 max-[760px]:row-start-1',
           )}
-          aria-label="Editor panels"
+          aria-label='Editor panels'
           ref={sidePanelsRef}
         >
           <div
             className={cn(
-              "flex-none overflow-hidden max-[760px]:min-h-0",
-              collapsedSidePanels.layers ? "h-[42px]" : "h-[var(--layers-panel-height)]"
+              'flex-none overflow-hidden max-[760px]:min-h-0',
+              collapsedSidePanels.layers
+                ? 'h-[42px]'
+                : 'h-[var(--layers-panel-height)]',
             )}
           >
             <LayersPanel
@@ -1417,62 +1592,67 @@ export function EditorPage() {
               layers={layers}
               onGroupSelectedLayers={groupSelectedLayers}
               onLayerCommand={runLayerCommand}
-              onSelectLayers={(layerIds) => setSelectLayerRequest({ id: Date.now(), layerIds })}
-              onToggleCollapsed={() => toggleSidePanelCollapsed("layers")}
+              onSelectLayers={(layerIds) =>
+                setSelectLayerRequest({ id: Date.now(), layerIds })
+              }
+              onToggleCollapsed={() => toggleSidePanelCollapsed('layers')}
             />
           </div>
           <ResizeHandle
-            aria-label="Resize layers panel"
-            className="flex-none max-[760px]:hidden"
+            aria-label='Resize layers panel'
+            className='flex-none max-[760px]:hidden'
             hidden={collapsedSidePanels.layers}
             onPointerDown={startLayersResize}
-            orientation="horizontal"
+            orientation='horizontal'
           />
           <div
             className={cn(
-              "flex-none overflow-hidden max-[760px]:min-h-0",
+              'flex-none overflow-hidden max-[760px]:min-h-0',
               collapsedSidePanels.properties
-                ? "h-[42px]"
-                : "h-[var(--properties-panel-height)]"
+                ? 'h-[42px]'
+                : 'h-[var(--properties-panel-height)]',
             )}
           >
             <PropertiesPanel
               canEditDocument={canEditDocument}
               isCollapsed={collapsedSidePanels.properties}
-              importedFontFamilies={[...importedFontFamilies, ...textLayerFontFamilies]}
+              importedFontFamilies={[
+                ...importedFontFamilies,
+                ...textLayerFontFamilies,
+              ]}
               onGroupSelectedLayers={groupSelectedLayers}
-              onChangeObject3DModel={() => openObject3DImportDialog("replace")}
+              onChangeObject3DModel={() => openObject3DImportDialog('replace')}
               onLayerAssetCommand={runLayerAssetCommand}
               onLayerCommand={runLayerCommand}
-              onToggleCollapsed={() => toggleSidePanelCollapsed("properties")}
+              onToggleCollapsed={() => toggleSidePanelCollapsed('properties')}
               selectedLayer={selectedLayer}
               selectedLayers={selectedLayers}
               selectedTool={selectedTool}
             />
           </div>
           <ResizeHandle
-            aria-label="Resize properties panel"
-            className="flex-none max-[760px]:hidden"
+            aria-label='Resize properties panel'
+            className='flex-none max-[760px]:hidden'
             hidden={collapsedSidePanels.properties}
             onPointerDown={startPropertiesResize}
-            orientation="horizontal"
+            orientation='horizontal'
           />
           <div
             className={cn(
-              "flex-none overflow-hidden max-[760px]:min-h-0",
-              collapsedSidePanels.versions ? "h-[42px]" : "h-[248px]"
+              'flex-none overflow-hidden max-[760px]:min-h-0',
+              collapsedSidePanels.versions ? 'h-[42px]' : 'h-[248px]',
             )}
           >
             <VersionHistoryPanel
               capabilities={sharedProjectState.capabilities}
               currentVersion={sharedProjectState.currentVersion}
               isCollapsed={collapsedSidePanels.versions}
-              isSharedMode={sharedProjectState.mode === "shared"}
+              isSharedMode={sharedProjectState.mode === 'shared'}
               onCreateSnapshot={createSharedSnapshot}
               onDownloadWebster={downloadSharedProject}
               onRefreshSnapshots={refreshSharedSnapshots}
               onRestoreSnapshot={restoreSharedSnapshot}
-              onToggleCollapsed={() => toggleSidePanelCollapsed("versions")}
+              onToggleCollapsed={() => toggleSidePanelCollapsed('versions')}
               pendingCommitCount={sharedProjectState.pendingCommitCount}
               projectId={sharedProjectState.projectId}
               role={sharedProjectState.role}
@@ -1482,14 +1662,14 @@ export function EditorPage() {
           </div>
           <div
             className={cn(
-              "flex-none overflow-hidden",
-              collapsedSidePanels.history ? "h-[42px]" : ""
+              'flex-none overflow-hidden',
+              collapsedSidePanels.history ? 'h-[42px]' : '',
             )}
           >
             <HistoryPanel
               entries={activeHistoryState.entries}
               isCollapsed={collapsedSidePanels.history}
-              onToggleCollapsed={() => toggleSidePanelCollapsed("history")}
+              onToggleCollapsed={() => toggleSidePanelCollapsed('history')}
             />
           </div>
         </aside>
@@ -1498,12 +1678,16 @@ export function EditorPage() {
         <NewDocumentDialog
           onClose={() => setIsNewDocumentDialogOpen(false)}
           onCreate={createDocumentTab}
-          onCreateFromUserTemplate={(template) => void createDocumentFromUserTemplate(template)}
+          onCreateFromUserTemplate={(template) =>
+            void createDocumentFromUserTemplate(template)
+          }
           onDeleteUserTemplate={(template) => void deleteUserTemplate(template)}
           onExportUserTemplate={(template) => void exportUserTemplate(template)}
           onImportUserTemplate={(file) => void importUserTemplateFile(file)}
           onInsertUserTemplate={(template) => void insertUserTemplate(template)}
-          onRenameUserTemplate={(template, name) => void renameUserTemplate(template, name)}
+          onRenameUserTemplate={(template, name) =>
+            void renameUserTemplate(template, name)
+          }
           canInsertUserTemplate={Boolean(activeDocument)}
           userTemplates={userTemplates}
         />
@@ -1515,11 +1699,13 @@ export function EditorPage() {
             setIsObject3DImportDialogOpen(false);
             setLayerAssetCommandPendingState(null);
             setObject3DImportInitialFiles([]);
-            setObject3DImportMode("add");
+            setObject3DImportMode('add');
           }}
           onUseModel={useLoadedObject3DModel}
           replaceLayerName={
-            object3DImportMode === "replace" && selectedObject3DLayer && !selectedObject3DLayer.locked
+            object3DImportMode === 'replace' &&
+            selectedObject3DLayer &&
+            !selectedObject3DLayer.locked
               ? selectedObject3DLayer.name
               : null
           }
@@ -1536,19 +1722,19 @@ export function EditorPage() {
                   ? {
                       ...tab,
                       height,
-                      width
+                      width,
                     }
-                  : tab
-              )
+                  : tab,
+              ),
             );
             setDocumentCommandRequest({
               command: {
                 anchor,
                 height,
-                type: "resize",
-                width
+                type: 'resize',
+                width,
               },
-              id: Date.now()
+              id: Date.now(),
             });
             setIsResizeCanvasDialogOpen(false);
           }}
@@ -1566,10 +1752,10 @@ export function EditorPage() {
               command: {
                 height,
                 layerId: selectedImageLayer.id,
-                type: "resample",
-                width
+                type: 'resample',
+                width,
               },
-              id: Date.now()
+              id: Date.now(),
             });
             setIsResizeImageDialogOpen(false);
           }}
@@ -1577,9 +1763,9 @@ export function EditorPage() {
             setImageLayerCommandRequest({
               command: {
                 layerId: selectedImageLayer.id,
-                type: "restore-original"
+                type: 'restore-original',
               },
-              id: Date.now()
+              id: Date.now(),
             });
             setIsResizeImageDialogOpen(false);
           }}
@@ -1596,7 +1782,7 @@ export function EditorPage() {
               background,
               format,
               id: Date.now(),
-              title: activeDocument?.title ?? "untitled"
+              title: activeDocument?.title ?? 'untitled',
             });
             setIsExportImageDialogOpen(false);
           }}
@@ -1605,14 +1791,16 @@ export function EditorPage() {
       {layerAssetCommandPendingState ? (
         <ProgressOverlay state={layerAssetCommandPendingState} />
       ) : null}
-      {projectFilePendingState ? <ProgressOverlay state={projectFilePendingState} /> : null}
+      {projectFilePendingState ? (
+        <ProgressOverlay state={projectFilePendingState} />
+      ) : null}
       {imageLayerCommandPendingState ? (
         <ImageLayerCommandOverlay state={imageLayerCommandPendingState} />
       ) : null}
       {sharedProjectState.error ? (
         <p
-          className="fixed bottom-4 left-1/2 z-50 m-0 max-w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-lg border border-[#b96a6a] bg-[rgba(28,20,20,0.96)] px-4 py-3 text-center text-[13px] font-bold text-[#ffd0d0] shadow-[0_18px_36px_rgba(0,0,0,0.42)]"
-          role="status"
+          className='fixed bottom-4 left-1/2 z-50 m-0 max-w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-lg border border-[#b96a6a] bg-[rgba(28,20,20,0.96)] px-4 py-3 text-center text-[13px] font-bold text-[#ffd0d0] shadow-[0_18px_36px_rgba(0,0,0,0.42)]'
+          role='status'
         >
           {sharedProjectState.error}
         </p>
@@ -1622,60 +1810,72 @@ export function EditorPage() {
 }
 
 function ProgressOverlay({
-  state
+  state,
 }: {
   state: {
     message: string;
     progress: number;
-    status?: "complete" | "error" | "importing" | "loading" | "saving";
+    status?: 'complete' | 'error' | 'importing' | 'loading' | 'saving';
     title: string;
   };
 }) {
   const progress = Math.max(0, Math.min(100, Math.round(state.progress)));
-  const barColor = state.status === "error" ? "#e76f6f" : "#4aa391";
+  const barColor = state.status === 'error' ? '#e76f6f' : '#4aa391';
 
   return (
     <div
-      aria-live="polite"
-      aria-modal="true"
-      className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-6"
-      role="dialog"
+      aria-live='polite'
+      aria-modal='true'
+      className='fixed inset-0 z-50 grid place-items-center bg-black/55 p-6'
+      role='dialog'
     >
-      <div className="grid w-[min(420px,100%)] gap-4 rounded-xl border border-[#3a414a] bg-[rgba(23,25,29,0.98)] px-5 py-5 shadow-[0_24px_48px_rgba(0,0,0,0.48)]">
+      <div className='grid w-[min(420px,100%)] gap-4 rounded-xl border border-[#3a414a] bg-[rgba(23,25,29,0.98)] px-5 py-5 shadow-[0_24px_48px_rgba(0,0,0,0.48)]'>
         <div>
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <p className="m-0 text-[15px] font-extrabold text-[#f2f4f7]">{state.title}</p>
-            <strong className="text-xs font-extrabold text-[#cfd4da]">{progress}%</strong>
+          <div className='mb-2 flex items-center justify-between gap-3'>
+            <p className='m-0 text-[15px] font-extrabold text-[#f2f4f7]'>
+              {state.title}
+            </p>
+            <strong className='text-xs font-extrabold text-[#cfd4da]'>
+              {progress}%
+            </strong>
           </div>
-          <div className="h-2 overflow-hidden rounded-full bg-[#111418]">
+          <div className='h-2 overflow-hidden rounded-full bg-[#111418]'>
             <div
-              className="h-full rounded-full transition-[width] duration-200"
+              className='h-full rounded-full transition-[width] duration-200'
               style={{ backgroundColor: barColor, width: `${progress}%` }}
             />
           </div>
         </div>
-        <p className="m-0 text-xs font-bold text-[#9aa1ab]">{state.message}</p>
+        <p className='m-0 text-xs font-bold text-[#9aa1ab]'>{state.message}</p>
       </div>
     </div>
   );
 }
 
-function ImageLayerCommandOverlay({ state }: { state: ImageLayerCommandPendingState }) {
+function ImageLayerCommandOverlay({
+  state,
+}: {
+  state: ImageLayerCommandPendingState;
+}) {
   return (
     <div
-      aria-live="polite"
-      aria-modal="true"
-      className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-6"
-      role="dialog"
+      aria-live='polite'
+      aria-modal='true'
+      className='fixed inset-0 z-50 grid place-items-center bg-black/55 p-6'
+      role='dialog'
     >
-      <div className="grid w-[min(360px,100%)] justify-items-center gap-3 rounded-xl border border-[#3a414a] bg-[rgba(23,25,29,0.98)] px-5 py-5 text-center shadow-[0_24px_48px_rgba(0,0,0,0.48)]">
+      <div className='grid w-[min(360px,100%)] justify-items-center gap-3 rounded-xl border border-[#3a414a] bg-[rgba(23,25,29,0.98)] px-5 py-5 text-center shadow-[0_24px_48px_rgba(0,0,0,0.48)]'>
         <span
-          className="h-9 w-9 animate-spin rounded-full border-2 border-[#4aa391] border-t-transparent"
-          aria-hidden="true"
+          className='h-9 w-9 animate-spin rounded-full border-2 border-[#4aa391] border-t-transparent'
+          aria-hidden='true'
         />
         <div>
-          <p className="m-0 text-[15px] font-extrabold text-[#f2f4f7]">{state.title}</p>
-          <p className="m-0 mt-1 text-xs font-bold text-[#8b929b]">{state.message}</p>
+          <p className='m-0 text-[15px] font-extrabold text-[#f2f4f7]'>
+            {state.title}
+          </p>
+          <p className='m-0 mt-1 text-xs font-bold text-[#8b929b]'>
+            {state.message}
+          </p>
         </div>
       </div>
     </div>
@@ -1683,7 +1883,7 @@ function ImageLayerCommandOverlay({ state }: { state: ImageLayerCommandPendingSt
 }
 
 function isImageLayerSummary(
-  layer: LayerSummary | null
+  layer: LayerSummary | null,
 ): layer is LayerSummary & {
   canRestoreOriginalPixels: boolean;
   imagePixelHeight: number;
@@ -1691,17 +1891,17 @@ function isImageLayerSummary(
   originalImagePixelHeight: number;
   originalImagePixelWidth: number;
 } {
-  return Boolean(layer && layer.type === "image" && "imagePixelWidth" in layer);
+  return Boolean(layer && layer.type === 'image' && 'imagePixelWidth' in layer);
 }
 
 function isObject3DLayerSummary(layer: LayerSummary | null) {
-  return Boolean(layer && layer.type === "object3d");
+  return Boolean(layer && layer.type === 'object3d');
 }
 
 function hasSelectedAncestorLayer(
   layer: LayerSummary,
   layers: LayerSummary[],
-  selectedLayerIds: Set<string>
+  selectedLayerIds: Set<string>,
 ) {
   const visitedGroupIds = new Set<string>();
   let groupId = layer.groupId;
@@ -1712,7 +1912,8 @@ function hasSelectedAncestorLayer(
     }
 
     visitedGroupIds.add(groupId);
-    groupId = layers.find((candidate) => candidate.id === groupId)?.groupId ?? null;
+    groupId =
+      layers.find((candidate) => candidate.id === groupId)?.groupId ?? null;
   }
 
   return false;
@@ -1722,12 +1923,12 @@ function formatRecentProjectDate(savedAt: string) {
   const date = new Date(savedAt);
 
   if (Number.isNaN(date.getTime())) {
-    return "recent";
+    return 'recent';
   }
 
   return date.toLocaleDateString(undefined, {
-    day: "numeric",
-    month: "short"
+    day: 'numeric',
+    month: 'short',
   });
 }
 
@@ -1750,25 +1951,30 @@ function loadImageDimensions(file: File) {
         return;
       }
 
-      reject(new Error("Image has no dimensions."));
+      reject(new Error('Image has no dimensions.'));
     };
     image.onerror = () => {
       cleanup();
-      reject(new Error("Unable to load image dimensions."));
+      reject(new Error('Unable to load image dimensions.'));
     };
     image.src = objectUrl;
   });
 }
 
 function getProjectFilename(title: string) {
-  const safeTitle = (title.trim() || "untitled").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-");
+  const safeTitle = (title.trim() || 'untitled').replace(
+    /[<>:"/\\|?*\u0000-\u001f]/g,
+    '-',
+  );
 
-  return safeTitle.toLowerCase().endsWith(".webster") ? safeTitle : `${safeTitle}.webster`;
+  return safeTitle.toLowerCase().endsWith('.webster')
+    ? safeTitle
+    : `${safeTitle}.webster`;
 }
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
+  const anchor = document.createElement('a');
 
   anchor.href = url;
   anchor.download = filename;
@@ -1778,30 +1984,32 @@ function downloadBlob(blob: Blob, filename: string) {
 
 function getDefaultStrokeWidth(style: StrokeStyle) {
   switch (style) {
-    case "brush":
+    case 'brush':
       return 14;
-    case "highlighter":
+    case 'highlighter':
       return 30;
-    case "marker":
+    case 'marker':
       return 22;
-    case "pen":
+    case 'pen':
       return 6;
-    case "pencil":
+    case 'pencil':
       return 3;
   }
 }
 
-function getDefaultStrokeColor(style: StrokeStyle): [number, number, number, number] {
+function getDefaultStrokeColor(
+  style: StrokeStyle,
+): [number, number, number, number] {
   switch (style) {
-    case "brush":
+    case 'brush':
       return [0.05, 0.06, 0.07, 0.88];
-    case "highlighter":
+    case 'highlighter':
       return [1, 0.78, 0.22, 0.36];
-    case "marker":
+    case 'marker':
       return [0.1, 0.42, 0.88, 0.95];
-    case "pen":
+    case 'pen':
       return [0.07, 0.08, 0.09, 1];
-    case "pencil":
+    case 'pencil':
       return [0.07, 0.08, 0.09, 0.82];
   }
 }
@@ -1813,32 +2021,34 @@ function ResizeHandle({
   orientation,
   ...buttonProps
 }: {
-  "aria-label": string;
+  'aria-label': string;
   className?: string;
   hidden?: boolean;
   onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void;
-  orientation: "horizontal" | "vertical";
+  orientation: 'horizontal' | 'vertical';
 }) {
   return (
     <button
       className={cn(
-        "group relative z-[3] border-0 bg-[#2a2d31] p-0 opacity-100 transition-[background,opacity] duration-150 hover:bg-[#39404a] focus-visible:bg-[#39404a] [.is-resizing-editor_&]:bg-[#39404a]",
-        hidden && "pointer-events-none opacity-0",
-        orientation === "vertical" ? "w-1.5 cursor-col-resize" : "h-1.5 cursor-row-resize",
-        className
+        'group relative z-[3] border-0 bg-[#2a2d31] p-0 opacity-100 transition-[background,opacity] duration-150 hover:bg-[#39404a] focus-visible:bg-[#39404a] [.is-resizing-editor_&]:bg-[#39404a]',
+        hidden && 'pointer-events-none opacity-0',
+        orientation === 'vertical'
+          ? 'w-1.5 cursor-col-resize'
+          : 'h-1.5 cursor-row-resize',
+        className,
       )}
       onPointerDown={onPointerDown}
-      type="button"
+      type='button'
       {...buttonProps}
     >
       <span
         className={cn(
-          "absolute rounded-full bg-[#777f8a] opacity-0 transition-opacity duration-150 group-hover:opacity-100",
-          orientation === "vertical"
-            ? "left-0.5 top-1/2 h-9 w-0.5 -translate-y-1/2"
-            : "left-1/2 top-0.5 h-0.5 w-[42px] -translate-x-1/2"
+          'absolute rounded-full bg-[#777f8a] opacity-0 transition-opacity duration-150 group-hover:opacity-100',
+          orientation === 'vertical'
+            ? 'left-0.5 top-1/2 h-9 w-0.5 -translate-y-1/2'
+            : 'left-1/2 top-0.5 h-0.5 w-[42px] -translate-x-1/2',
         )}
-        aria-hidden="true"
+        aria-hidden='true'
       />
     </button>
   );
