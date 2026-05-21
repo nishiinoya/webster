@@ -18,6 +18,12 @@ type CreateSnapshotInput = {
 
 const defaultApiBaseUrl = "/api";
 
+let _getToken: (() => Promise<string>) | null = null;
+
+export function setAccessTokenGetter(fn: () => Promise<string>) {
+  _getToken = fn;
+}
+
 export function getSharedProjectApiBaseUrl() {
   return trimTrailingSlash(process.env.NEXT_PUBLIC_WEBSTER_API_URL ?? defaultApiBaseUrl);
 }
@@ -180,7 +186,18 @@ export async function fetchSharedProjectAssets(
 }
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${getSharedProjectApiBaseUrl()}${path}`, init);
+  const headers: Record<string, string> = {};
+
+  if (_getToken) {
+    headers["Authorization"] = "Bearer " + (await _getToken());
+  }
+
+  const mergedInit: RequestInit = {
+    ...init,
+    headers: { ...headers, ...(init?.headers as Record<string, string> | undefined) }
+  };
+
+  const response = await fetch(`${getSharedProjectApiBaseUrl()}${path}`, mergedInit);
 
   if (!response.ok) {
     throw new Error(await readApiError(response, "Shared project request failed."));

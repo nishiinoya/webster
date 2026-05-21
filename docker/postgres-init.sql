@@ -1,0 +1,4 @@
+-- Webster PostgreSQL initialization script.
+-- Schema management is handled entirely by Prisma migrations.
+-- This file exists as the docker-entrypoint-initdb.d entry point so the
+-- container starts cleanly; no manual DDL is defined here.

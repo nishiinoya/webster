@@ -461,6 +461,67 @@ Hosting/domain status:
 - Production hosting is not configured in this repository.
 - No deployed domain is documented yet.
 
+## Backend
+
+The backend API lives in `apps/api` (NestJS, TypeScript, Prisma, PostgreSQL 16). Object storage is provided by MinIO. The full stack is orchestrated by `docker-compose.yml` at the repo root.
+
+### Services
+
+| Service | Image / Build | Port(s) | Purpose |
+| --- | --- | --- | --- |
+| `postgres` | `postgres:16` | — (internal) | Primary relational database |
+| `minio` | `minio/minio:latest` | 9000 (S3), 9001 (console) | S3-compatible object storage |
+| `minio-init` | `minio/mc:latest` | — | One-shot job: creates the `webster` bucket |
+| `api` | `docker/api.Dockerfile` | 4000 | NestJS REST + Socket.IO backend |
+| `web` | `docker/web.Dockerfile` | 3000 | Next.js frontend |
+
+### Quick start
+
+```bash
+# Copy and fill in the required secrets (see Environment variables below)
+cp apps/api/.env.example .env
+
+docker compose build
+docker compose up
+```
+
+The API is available at `http://localhost:4000/api` and the web app at `http://localhost:3000`.
+
+### Environment variables
+
+Variables with defaults are pre-filled in `docker-compose.yml`. The following **must** be set before running the stack (copy `apps/api/.env.example` to `.env` in the repo root and fill them in):
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `AUTH0_DOMAIN` | Yes | Auth0 tenant domain, e.g. `yourapp.eu.auth0.com` |
+| `AUTH0_AUDIENCE` | Yes | Auth0 API audience, e.g. `https://api.webster.app` |
+| `STRIPE_SECRET_KEY` | For payments | Stripe secret key (`sk_test_…`) |
+| `STRIPE_WEBHOOK_SECRET` | For payments | Stripe webhook signing secret (`whsec_…`) |
+| `STRIPE_PRICE_PRO_MONTHLY` | For payments | Stripe price ID for monthly Pro plan |
+| `STRIPE_PRICE_PRO_YEARLY` | For payments | Stripe price ID for yearly Pro plan |
+
+All other variables (database credentials, MinIO credentials, S3 endpoint) are pre-configured for the docker-compose network and do not need to be changed for local development.
+
+### Database migrations
+
+Prisma migrations run automatically when the `api` container starts (`npx prisma migrate deploy`). To run migrations manually during development:
+
+```bash
+cd apps/api
+npx prisma migrate dev
+```
+
+### MinIO console
+
+The MinIO web console is available at `http://localhost:9001`. Default credentials: `minioadmin` / `minioadmin`.
+
+### API health check
+
+```bash
+curl http://localhost:4000/api/health
+# {"status":"ok"}
+```
+
 ## Course/Demo Checklist
 
 This section maps the expected demo requirements to current project status.

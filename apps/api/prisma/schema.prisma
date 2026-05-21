@@ -1,0 +1,201 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// ENUMS
+// ==========================================
+
+enum SubscriptionStatus {
+  active
+  canceled
+  past_due
+  trialing
+
+  @@map("subscription_status")
+}
+
+enum PermissionLevel {
+  viewer
+  editor
+  commenter
+
+  @@map("permission_level")
+}
+
+enum AssetType {
+  image
+  vector
+  font
+  audio
+  other
+
+  @@map("asset_type")
+}
+
+// ==========================================
+// MODELS
+// ==========================================
+
+model User {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  auth0Subject String   @unique @map("auth0_subject") @db.VarChar
+  email        String   @unique @db.VarChar
+  displayName  String?  @map("display_name") @db.VarChar
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  subscription      Subscription?
+  payments          Payment[]
+  ownedProjects     Project[]          @relation("ProjectOwner")
+  uploadedAssets    ProjectAsset[]     @relation("AssetUploader")
+  createdSnapshots  ProjectSnapshot[]  @relation("SnapshotCreator")
+  grantedAccesses   ProjectAccess[]    @relation("AccessCreator")
+  receivedAccesses  ProjectAccess[]    @relation("AccessReceiver")
+  comments          ProjectComment[]   @relation("CommentAuthor")
+  resolvedComments  ProjectComment[]   @relation("CommentResolver")
+
+  @@map("users")
+}
+
+model Subscription {
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId           String             @unique @map("user_id") @db.Uuid
+  status           SubscriptionStatus @default(trialing)
+  providerSubId    String?            @unique @map("provider_sub_id") @db.VarChar
+  currentPeriodEnd DateTime?          @map("current_period_end") @db.Timestamptz
+  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  user     User      @relation(fields: [userId], references: [id])
+  payments Payment[]
+
+  @@map("subscriptions")
+}
+
+model Payment {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  subscriptionId String?  @map("subscription_id") @db.Uuid
+  amount         Decimal  @db.Decimal(10, 2)
+  currency       String   @default("USD") @db.VarChar(3)
+  providerTxId   String   @unique @map("provider_tx_id") @db.VarChar
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  user         User          @relation(fields: [userId], references: [id])
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  @@map("payments")
+}
+
+model Project {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ownerId      String   @map("owner_id") @db.Uuid
+  projectName  String   @map("project_name") @db.VarChar
+  storageKey   String   @map("storage_key") @db.VarChar
+  sizeBytes    BigInt   @default(0) @map("size_bytes")
+  mimeType     String   @default("image/png") @map("mime_type") @db.VarChar
+  metadata     Json?
+  /// Increments on every committed shared-edit operation. Used for optimistic concurrency.
+  currentVersion Int    @default(0) @map("current_version")
+  isDeleted    Boolean  @default(false) @map("is_deleted")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  owner     User              @relation("ProjectOwner", fields: [ownerId], references: [id])
+  assets    ProjectAsset[]
+  snapshots ProjectSnapshot[]
+  accesses  ProjectAccess[]
+  comments  ProjectComment[]
+
+  @@map("projects")
+}
+
+model ProjectAsset {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId  String    @map("project_id") @db.Uuid
+  uploadedBy String    @map("uploaded_by") @db.Uuid
+  assetName  String    @map("asset_name") @db.VarChar
+  type       AssetType @default(image)
+  storageKey String    @map("storage_key") @db.VarChar
+  sizeBytes  BigInt    @map("size_bytes")
+  mimeType   String?   @map("mime_type") @db.VarChar
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  project    Project @relation(fields: [projectId], references: [id])
+  uploader   User    @relation("AssetUploader", fields: [uploadedBy], references: [id])
+
+  @@unique([projectId, storageKey])
+  @@map("project_assets")
+}
+
+model ProjectSnapshot {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId           String   @map("project_id") @db.Uuid
+  createdBy           String   @map("created_by") @db.Uuid
+  snapshotName        String?  @map("snapshot_name") @db.VarChar
+  stateData           Json?    @map("state_data")
+  thumbnailStorageKey String?  @map("thumbnail_storage_key") @db.VarChar
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  project Project @relation(fields: [projectId], references: [id])
+  creator User    @relation("SnapshotCreator", fields: [createdBy], references: [id])
+
+  @@map("project_snapshots")
+}
+
+model ProjectAccess {
+  id               String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId        String          @map("project_id") @db.Uuid
+  sharedWithUserId String?         @map("shared_with_user_id") @db.Uuid
+  permission       PermissionLevel @default(viewer)
+  expiresAt        DateTime?       @map("expires_at") @db.Timestamptz
+  createdBy        String          @map("created_by") @db.Uuid
+  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  project        Project @relation(fields: [projectId], references: [id])
+  sharedWithUser User?   @relation("AccessReceiver", fields: [sharedWithUserId], references: [id])
+  creator        User    @relation("AccessCreator", fields: [createdBy], references: [id])
+
+  @@map("project_accesses")
+}
+
+model ProjectComment {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId       String    @map("project_id") @db.Uuid
+  parentCommentId String?   @map("parent_comment_id") @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  content         String    @db.Text
+  xCoordinate     Decimal?  @map("x_coordinate") @db.Decimal(8, 4)
+  yCoordinate     Decimal?  @map("y_coordinate") @db.Decimal(8, 4)
+  isResolved      Boolean   @default(false) @map("is_resolved")
+  resolvedAt      DateTime? @map("resolved_at") @db.Timestamptz
+  resolvedBy      String?   @map("resolved_by") @db.Uuid
+  isDeleted       Boolean   @default(false) @map("is_deleted")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  project       Project          @relation(fields: [projectId], references: [id])
+  author        User             @relation("CommentAuthor", fields: [userId], references: [id])
+  resolver      User?            @relation("CommentResolver", fields: [resolvedBy], references: [id])
+  parentComment ProjectComment?  @relation("CommentThread", fields: [parentCommentId], references: [id])
+  replies       ProjectComment[] @relation("CommentThread")
+
+  @@map("project_comments")
+}
