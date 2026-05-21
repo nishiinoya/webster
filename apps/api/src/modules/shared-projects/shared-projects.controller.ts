@@ -15,7 +15,7 @@ import { Response } from 'express';
 import { SharedProjectsService } from './shared-projects.service';
 import { CurrentUser } from '../../common/auth/current-user.decorator';
 import { AuthUser } from '../../common/types/auth-user';
-import type { SharedProjectStatePayload } from '@webster/shared';
+import type { SharedProjectLoadResponse, SharedProjectStatePayload } from '@webster/shared';
 
 @Controller('shared-projects')
 export class SharedProjectsController {
@@ -31,7 +31,7 @@ export class SharedProjectsController {
   async importWebster(
     @CurrentUser() user: AuthUser,
     @UploadedFiles() files: Express.Multer.File[],
-  ): Promise<{ projectId: string; projectName: string }> {
+  ): Promise<SharedProjectLoadResponse> {
     const file = files?.[0];
     if (!file) {
       const { BadRequestException } = await import('@nestjs/common');

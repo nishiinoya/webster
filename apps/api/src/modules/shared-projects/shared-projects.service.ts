@@ -13,6 +13,7 @@ import { ProjectAccessService } from '../projects/project-access.service';
 import { RoomService } from '../collaboration/room.service';
 import { AuthUser } from '../../common/types/auth-user';
 import type {
+  SharedProjectLoadResponse,
   SharedProjectStatePayload,
   SharedProjectAssetReference,
   SharedProjectSnapshotSummary,
@@ -37,7 +38,7 @@ export class SharedProjectsService {
     user: AuthUser,
     buffer: Buffer,
     originalFilename: string,
-  ): Promise<{ projectId: string; projectName: string }> {
+  ): Promise<SharedProjectLoadResponse> {
     if (!this.websterPackage) {
       throw new ServiceUnavailableException('WebsterPackageService is not available');
     }
@@ -50,66 +51,86 @@ export class SharedProjectsService {
       originalFilename.replace(/\.webster$/i, '').trim() ||
       'Untitled Project';
 
-    // Wrap all writes in a transaction
-    const result = await this.prisma.$transaction(async (tx) => {
-      // INSERT project row
-      const project = await tx.project.create({
-        data: {
-          ownerId: user.id,
-          projectName,
-          metadata: manifest as object,
-          currentVersion: 0,
-          mimeType: 'application/zip',
-          sizeBytes: BigInt(buffer.length),
-          storageKey: `projects/placeholder/manifest.json`, // will be updated after we have the id
-        },
-      });
+    if (!this.storage) {
+      throw new ServiceUnavailableException('StorageService is not available');
+    }
 
-      // Update storageKey with the real id
+    // BUG 5 fix: upload all assets to S3 BEFORE opening the transaction so we
+    // don't exceed Prisma's default 5 s transaction timeout on slow MinIO.
+    type UploadedAsset = {
+      assetPath: string;
+      storageKey: string;
+      sizeBytes: number;
+      mimeType: string;
+    };
+
+    // We need the project id to build storage keys, so create a temporary
+    // placeholder project first, then do a single transaction for DB writes only.
+    const tempProject = await this.prisma.project.create({
+      data: {
+        ownerId: user.id,
+        projectName,
+        metadata: manifest as object,
+        currentVersion: 0,
+        mimeType: 'application/zip',
+        sizeBytes: BigInt(buffer.length),
+        storageKey: `projects/placeholder/manifest.json`,
+      },
+    });
+
+    const projectId = tempProject.id;
+
+    const uploadedAssets: UploadedAsset[] = [];
+
+    for (const asset of assets) {
+      const assetPath = asset.path.replace(/\\/g, '/');
+      const storageKey = `projects/${projectId}/assets/${assetPath}`;
+      let sizeBytes = asset.data.length;
+
+      try {
+        const uploadResult = await this.storage.putObject(
+          storageKey,
+          asset.data,
+          asset.mimeType,
+        );
+        sizeBytes = uploadResult.size;
+      } catch (err) {
+        this.logger.warn(
+          `Failed to upload asset ${assetPath}: ${(err as Error).message}`,
+        );
+      }
+
+      uploadedAssets.push({
+        assetPath,
+        storageKey,
+        sizeBytes,
+        mimeType: asset.mimeType,
+      });
+    }
+
+    // DB-only transaction: update storageKey and insert asset rows
+    await this.prisma.$transaction(async (tx) => {
       await tx.project.update({
-        where: { id: project.id },
-        data: { storageKey: `projects/${project.id}/manifest.json` },
+        where: { id: projectId },
+        data: { storageKey: `projects/${projectId}/manifest.json` },
       });
 
-      // Upload each asset to S3 and insert project_assets rows
-      for (const asset of assets) {
-        const assetPath = asset.path.replace(/\\/g, '/');
-        const storageKey = `projects/${project.id}/assets/${assetPath}`;
-        let sizeBytes = asset.data.length;
-
-        if (this.storage) {
-          try {
-            const uploadResult = await this.storage.putObject(
-              storageKey,
-              asset.data,
-              asset.mimeType,
-            );
-            sizeBytes = uploadResult.size;
-          } catch (err) {
-            this.logger.warn(
-              `Failed to upload asset ${assetPath}: ${(err as Error).message}`,
-            );
-          }
-        } else {
-          this.logger.warn('StorageService not available — skipping S3 upload for assets');
-        }
-
+      for (const ua of uploadedAssets) {
         await tx.projectAsset.create({
           data: {
-            projectId: project.id,
+            projectId,
             uploadedBy: user.id,
-            assetName: assetPath.split('/').at(-1) ?? assetPath,
-            storageKey,
-            sizeBytes: BigInt(sizeBytes),
-            mimeType: asset.mimeType,
+            assetName: ua.assetPath.split('/').at(-1) ?? ua.assetPath,
+            storageKey: ua.storageKey,
+            sizeBytes: BigInt(ua.sizeBytes),
+            mimeType: ua.mimeType,
           },
         });
       }
-
-      return { projectId: project.id, projectName };
     });
 
-    return result;
+    // BUG 1 fix: return full SharedProjectLoadResponse instead of bare {projectId, projectName}
+    return this.loadProject(projectId, user);
   }
 
   /** GET /api/shared-projects/:projectId */

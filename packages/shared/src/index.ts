@@ -152,6 +152,17 @@ export type ProjectOperationKind =
   | "stroke:commit"
   | "text:edit";
 
+/**
+ * RFC 6902 JSON Patch op. Kept loose on purpose so we don't pull in
+ * `fast-json-patch`'s types from the shared package.
+ */
+export type ProjectScenePatchOp = {
+  op: "add" | "remove" | "replace" | "move" | "copy" | "test";
+  path: string;
+  from?: string;
+  value?: unknown;
+};
+
 export type ProjectOperation = {
   assetReferences?: SharedProjectAssetReference[];
   baseVersion: number;
@@ -163,7 +174,18 @@ export type ProjectOperation = {
   payload: Record<string, unknown>;
   phase: ProjectOperationPhase;
   projectId: string;
+  /**
+   * Full scene snapshot. Sent for the FIRST commit in a session, after a
+   * resync, or on import. For incremental updates use `scenePatch`.
+   */
   scene?: WebsterProjectManifest;
+  /**
+   * RFC 6902 patch describing the change from the previous scene to this
+   * commit's scene. Massively smaller than `scene` for keystroke-level edits.
+   * Server applies it to the stored manifest; receivers apply it to their
+   * local copy.
+   */
+  scenePatch?: ProjectScenePatchOp[];
 };
 
 export type AppliedProjectOperation = {

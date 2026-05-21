@@ -51,17 +51,21 @@ export class AccessesService {
   ) {
     await this.requireOwner(projectId, currentUser.id);
 
+    // Normalize email so pending invites always compare equal to the address
+    // that arrives later inside the JWT's email claim.
+    const normalizedEmail = dto.email.trim().toLowerCase();
+
     // Find or create pending user
     let targetUser = await this.prisma.user.findUnique({
-      where: { email: dto.email },
+      where: { email: normalizedEmail },
     });
 
     if (!targetUser) {
       // Create pending row: auth0_subject will be set on first login
       targetUser = await this.prisma.user.create({
         data: {
-          email: dto.email,
-          auth0Subject: `pending:${dto.email}:${Date.now()}`,
+          email: normalizedEmail,
+          auth0Subject: `pending:${normalizedEmail}:${Date.now()}`,
         },
       });
     }

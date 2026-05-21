@@ -26,10 +26,8 @@ import {
 } from '../projects/projectFiles';
 import type { WebsterFileHandle } from '../projects/projectFiles';
 import {
-  listRememberedProjectFiles,
   readRememberedProjectFileHandle,
 } from '../projects/projectFileHandleStore';
-import type { RecentProjectHandle } from '../projects/projectFileHandleStore';
 import {
   builtInProjectTemplates,
   deleteUserProjectTemplate,
@@ -55,6 +53,9 @@ import { LayersPanel } from './panels/LayersPanel';
 import { VersionHistoryPanel } from './panels/VersionHistoryPanel';
 import { ExportImageDialog } from './dialogs/ExportImageDialog';
 import { NewDocumentDialog } from './dialogs/NewDocumentDialog';
+import { ShareProjectDialog } from './dialogs/ShareProjectDialog';
+import { HomeProjects } from './HomeProjects';
+import { recordOpenedProject } from '../projects/recentSharedProjects';
 import { Object3DImportDialog } from './dialogs/Object3DImportDialog';
 import { ResizeCanvasDialog } from './dialogs/ResizeCanvasDialog';
 import { ResizeImageDialog } from './dialogs/ResizeImageDialog';
@@ -235,6 +236,7 @@ export function EditorPage() {
   const [tabs, setTabs] = useState<EditorDocumentTab[]>(initialTabs);
   const [isExportImageDialogOpen, setIsExportImageDialogOpen] = useState(false);
   const [isNewDocumentDialogOpen, setIsNewDocumentDialogOpen] = useState(false);
+  const [isShareProjectDialogOpen, setIsShareProjectDialogOpen] = useState(false);
   const [isObject3DImportDialogOpen, setIsObject3DImportDialogOpen] =
     useState(false);
   const [object3DImportInitialFiles, setObject3DImportInitialFiles] = useState<
@@ -252,9 +254,6 @@ export function EditorPage() {
     useState<LayerAssetCommandPendingState | null>(null);
   const [projectFilePendingState, setProjectFilePendingState] =
     useState<ProjectFilePendingState | null>(null);
-  const [recentProjects, setRecentProjects] = useState<RecentProjectHandle[]>(
-    [],
-  );
   const [recentProjectError, setRecentProjectError] = useState<string | null>(
     null,
   );
@@ -414,21 +413,76 @@ export function EditorPage() {
   }, [activeDocument]);
 
   useEffect(() => {
+    // Mirror the active shared projectId into ?projectId=... so refreshing the
+    // page restores the same project. Use history.replaceState to avoid the
+    // Next.js router reloading the editor. We only WRITE the param — never
+    // delete it on local mode, because on initial mount we briefly are in
+    // local mode while the URL still carries the projectId we want to load.
+    if (typeof window === 'undefined') return;
+
+    if (sharedProjectState.mode !== 'shared' || !sharedProjectState.projectId) {
+      return;
+    }
+
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('projectId') !== sharedProjectState.projectId) {
+      url.searchParams.set('projectId', sharedProjectState.projectId);
+      window.history.replaceState(null, '', url.toString());
+    }
+
+    // Remember this open for the home "Recently opened" catalog.
+    recordOpenedProject(
+      sharedProjectState.projectId,
+      sharedProjectState.projectName ?? 'Untitled project',
+    );
+  }, [sharedProjectState.mode, sharedProjectState.projectId, sharedProjectState.projectName]);
+
+  const didApplyUrlProjectIdRef = useRef(false);
+
+  useEffect(() => {
+    // On first mount, if ?projectId=<id> is in the URL, auto-open that shared
+    // project. Runs exactly once so user actions don't get clobbered.
+    if (didApplyUrlProjectIdRef.current) return;
+    if (typeof window === 'undefined') return;
+    didApplyUrlProjectIdRef.current = true;
+
+    const urlProjectId = new URL(window.location.href).searchParams.get('projectId');
+    if (!urlProjectId) return;
+    if (sharedProjectState.mode === 'shared' && sharedProjectState.projectId === urlProjectId) {
+      return;
+    }
+
+    documentCounterRef.current += 1;
+    const tab: EditorDocumentTab = {
+      height: 600,
+      id: `document-${documentCounterRef.current}`,
+      isActive: true,
+      title: `Shared ${urlProjectId}`,
+      width: 800,
+    };
+    setTabs((currentTabs) => [
+      ...currentTabs.map((currentTab) => ({ ...currentTab, isActive: false })),
+      tab,
+    ]);
+    setCollaborationRequest({
+      id: Date.now(),
+      projectId: urlProjectId,
+      type: 'open-shared',
+    });
+  }, [sharedProjectState.mode, sharedProjectState.projectId]);
+
+  useEffect(() => {
     let didCancel = false;
 
-    async function loadRecentProjects() {
-      const [projects, templates] = await Promise.all([
-        listRememberedProjectFiles().catch(() => []),
-        listUserProjectTemplates().catch(() => []),
-      ]);
+    async function loadUserTemplates() {
+      const templates = await listUserProjectTemplates().catch(() => []);
 
       if (!didCancel) {
-        setRecentProjects(projects);
         setUserTemplates(templates);
       }
     }
 
-    void loadRecentProjects();
+    void loadUserTemplates();
 
     return () => {
       didCancel = true;
@@ -560,6 +614,14 @@ export function EditorPage() {
     ]);
     setImageDocumentRequest(null);
     setIsNewDocumentDialogOpen(false);
+
+    // Every new project lives on the server: auto-upload it so it gets a
+    // projectId. shareLocalProject waits for the editor to be ready.
+    setCollaborationRequest({
+      id: Date.now(),
+      title: tab.title,
+      type: 'share-local',
+    });
   }
 
   async function createDocumentFromUserTemplate(
@@ -707,10 +769,49 @@ export function EditorPage() {
       return;
     }
 
+    // Already in shared mode: just reopen the dialog instead of re-uploading.
+    if (
+      sharedProjectState.mode === 'shared' &&
+      sharedProjectState.projectId
+    ) {
+      setIsShareProjectDialogOpen(true);
+      return;
+    }
+
     setCollaborationRequest({
       id: Date.now(),
       title: activeDocument.title,
       type: 'share-local',
+    });
+  }
+
+  function openSharedProjectById(projectId: string, title?: string) {
+    const trimmed = projectId.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    documentCounterRef.current += 1;
+    const tab: EditorDocumentTab = {
+      height: 600,
+      id: `document-${documentCounterRef.current}`,
+      isActive: true,
+      title: title?.trim() || `Shared ${trimmed}`,
+      width: 800,
+    };
+
+    setTabs((currentTabs) => [
+      ...currentTabs.map((currentTab) => ({
+        ...currentTab,
+        isActive: false,
+      })),
+      tab,
+    ]);
+
+    setCollaborationRequest({
+      id: Date.now(),
+      projectId: trimmed,
+      type: 'open-shared',
     });
   }
 
@@ -721,30 +822,7 @@ export function EditorPage() {
       return;
     }
 
-    if (!activeDocument) {
-      documentCounterRef.current += 1;
-      const tab: EditorDocumentTab = {
-        height: 600,
-        id: `document-${documentCounterRef.current}`,
-        isActive: true,
-        title: `Shared ${projectId.trim()}`,
-        width: 800,
-      };
-
-      setTabs((currentTabs) => [
-        ...currentTabs.map((currentTab) => ({
-          ...currentTab,
-          isActive: false,
-        })),
-        tab,
-      ]);
-    }
-
-    setCollaborationRequest({
-      id: Date.now(),
-      projectId: projectId.trim(),
-      type: 'open-shared',
-    });
+    openSharedProjectById(projectId);
   }
 
   function downloadSharedProject() {
@@ -1499,33 +1577,14 @@ export function EditorPage() {
                     </p>
                   ) : null}
                   <div
-                    className='mt-12 mb-12 grid w-[min(540px,100%)] gap-2 text-center'
-                    aria-label='Previous projects'
+                    className='mt-12 mb-12 grid w-[min(620px,100%)] justify-items-center gap-2'
+                    aria-label='Your projects'
                   >
-                    <h3 className='m-0 text-[13px] font-bold text-[#d9dde3]'>
-                      Previous projects
-                    </h3>
-                    {recentProjects.length > 0 ? (
-                      <div className='grid gap-2'>
-                        {recentProjects.map((project) => (
-                          <button
-                            className='flex min-h-[52px] w-full items-center justify-between gap-4 rounded-lg border border-[#30353d] bg-[#17191d] px-3 py-2.5 text-left font-bold text-[#eef1f4]'
-                            key={project.id}
-                            onClick={() => openProjectHandle(project.handle)}
-                            type='button'
-                          >
-                            <span className='truncate'>{project.filename}</span>
-                            <strong className='whitespace-nowrap text-xs text-[#9aa1ab]'>
-                              {formatRecentProjectDate(project.savedAt)}
-                            </strong>
-                          </button>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className='m-0 text-[13px] text-[#8b929b]'>
-                        No previous projects yet.
-                      </p>
-                    )}
+                    <HomeProjects
+                      onOpenProject={(projectId, projectName) =>
+                        openSharedProjectById(projectId, projectName)
+                      }
+                    />
                   </div>
                   <input
                     ref={emptyImageInputRef}
@@ -1788,6 +1847,14 @@ export function EditorPage() {
           }}
         />
       ) : null}
+      {isShareProjectDialogOpen &&
+      sharedProjectState.mode === 'shared' &&
+      sharedProjectState.projectId ? (
+        <ShareProjectDialog
+          onClose={() => setIsShareProjectDialogOpen(false)}
+          projectId={sharedProjectState.projectId}
+        />
+      ) : null}
       {layerAssetCommandPendingState ? (
         <ProgressOverlay state={layerAssetCommandPendingState} />
       ) : null}
@@ -1917,19 +1984,6 @@ function hasSelectedAncestorLayer(
   }
 
   return false;
-}
-
-function formatRecentProjectDate(savedAt: string) {
-  const date = new Date(savedAt);
-
-  if (Number.isNaN(date.getTime())) {
-    return 'recent';
-  }
-
-  return date.toLocaleDateString(undefined, {
-    day: 'numeric',
-    month: 'short',
-  });
 }
 
 function loadImageDimensions(file: File) {

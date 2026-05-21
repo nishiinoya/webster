@@ -1,9 +1,11 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
   Optional,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { StorageService } from '../storage/storage.service';
@@ -19,7 +21,10 @@ export class AssetsService {
   constructor(
     private readonly prisma: PrismaService,
     @Optional() private readonly storage: StorageService | null,
-    @Optional() private readonly projectAccess: ProjectAccessService | null,
+    // BUG 6 fix: no longer @Optional — ProjectsModule is imported so this is
+    // always provided. Kept as nullable type defensively; requireRole throws
+    // ServiceUnavailableException if somehow null at runtime.
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async uploadAssets(
@@ -28,6 +33,9 @@ export class AssetsService {
     metadataItems: AssetMetadataItemDto[],
     files: Express.Multer.File[],
   ): Promise<SharedProjectAssetReference[]> {
+    // BUG 6 fix: enforce editor role before accepting any upload.
+    await this.requireRole(projectId, userId, 'editor');
+
     // Build a map from fileField → file
     const fileMap = new Map<string, Express.Multer.File>();
     for (const file of files) {
@@ -108,7 +116,11 @@ export class AssetsService {
   async streamAsset(
     projectId: string,
     assetPath: string,
+    userId: string,
   ): Promise<{ body: Readable; mimeType: string; size: number }> {
+    // BUG 6 fix: enforce viewer role before streaming any asset.
+    await this.requireRole(projectId, userId, 'viewer');
+
     const storageKey = `projects/${projectId}/assets/${assetPath}`;
 
     // Look up mime type from DB
@@ -131,5 +143,27 @@ export class AssetsService {
       mimeType: asset.mimeType ?? 'application/octet-stream',
       size,
     };
+  }
+
+  /** BUG 6 fix: copied from SnapshotsService — enforces minimum role for projectId/userId. */
+  private async requireRole(
+    projectId: string,
+    userId: string,
+    min: 'viewer' | 'editor' | 'owner',
+  ): Promise<void> {
+    if (!this.projectAccess) {
+      throw new ServiceUnavailableException('ProjectAccessService is not available');
+    }
+
+    const role = await this.projectAccess.resolveRole(projectId, userId);
+
+    if (!role) throw new NotFoundException('Project not found');
+
+    const rank = { viewer: 1, commenter: 1, editor: 2, owner: 3 } as Record<string, number>;
+    const minRank = rank[min] ?? 0;
+
+    if ((rank[role] ?? 0) < minRank) {
+      throw new ForbiddenException('Insufficient permissions');
+    }
   }
 }

@@ -66,6 +66,7 @@ export class AssetsController {
   async getAsset(
     @Param('projectId') projectId: string,
     @Param('0') wildcardPath: string,
+    @CurrentUser() user: AuthUser,
     @Res() res: Response,
   ) {
     // Reject path traversal
@@ -74,9 +75,11 @@ export class AssetsController {
     }
 
     const assetPath = wildcardPath.replace(/\\/g, '/');
+    // BUG 6 fix: pass userId so streamAsset can enforce viewer role.
     const { body, mimeType, size } = await this.assetsService.streamAsset(
       projectId,
       assetPath,
+      user.id,
     );
 
     res.setHeader('Content-Type', mimeType);

@@ -2,10 +2,12 @@ import type {
   ProjectOperation,
   ProjectOperationKind,
   ProjectOperationPhase,
+  ProjectScenePatchOp,
   SharedProjectAssetReference,
   WebsterProjectManifest,
   WebsterSerializedLayer
 } from "@webster/shared";
+import { compare, applyPatch, deepClone } from "fast-json-patch";
 import type { EditorApp } from "../app/EditorApp";
 import type { SharedEditorAction } from "../app/history/SharedEditorAction";
 import { serializeScenePackageAssets } from "../projects/ProjectPackage";
@@ -15,16 +17,20 @@ import type { SharedProjectAssetUpload } from "./sharedProjectApi";
 
 type CreateOperationOptions = {
   action: SharedEditorAction;
+  alreadyUploadedAssetPaths?: ReadonlySet<string>;
   clientId: string;
   editorApp: EditorApp;
   phase: ProjectOperationPhase;
+  previousScene: WebsterProjectManifest | null;
   projectId: string;
   projectVersion: number;
 };
 
 type CreatePreviewOperationOptions = {
+  alreadyUploadedAssetPaths?: ReadonlySet<string>;
   clientId: string;
   editorApp: EditorApp;
+  previousScene: WebsterProjectManifest | null;
   projectId: string;
   projectVersion: number;
   tool: string;
@@ -32,22 +38,29 @@ type CreatePreviewOperationOptions = {
 
 export type PreparedProjectOperation = {
   assetUploads: SharedProjectAssetUpload[];
+  /** The fully-serialised current scene — caller stores this as the next previousScene. */
+  manifest: WebsterProjectManifest;
   operation: ProjectOperation;
 };
 
 export async function createOperationFromEditorAction({
   action,
+  alreadyUploadedAssetPaths,
   clientId,
   editorApp,
   phase,
+  previousScene,
   projectId,
   projectVersion
 }: CreateOperationOptions): Promise<PreparedProjectOperation> {
   const { assetReferences, assetUploads, manifest } =
-    await createCollaborationSceneSnapshot(editorApp, projectId);
+    await createCollaborationSceneSnapshot(editorApp, projectId, alreadyUploadedAssetPaths);
+
+  const { scene, scenePatch } = buildSceneFields(previousScene, manifest);
 
   return {
     assetUploads,
+    manifest,
     operation: {
       assetReferences,
       baseVersion: projectVersion,
@@ -59,23 +72,29 @@ export async function createOperationFromEditorAction({
       payload: getOperationPayload(action),
       phase,
       projectId,
-      scene: manifest
+      ...(scene ? { scene } : {}),
+      ...(scenePatch ? { scenePatch } : {})
     }
   };
 }
 
 export async function createPreviewOperationFromEditorScene({
+  alreadyUploadedAssetPaths,
   clientId,
   editorApp,
+  previousScene,
   projectId,
   projectVersion,
   tool
 }: CreatePreviewOperationOptions): Promise<PreparedProjectOperation> {
   const { assetReferences, assetUploads, manifest } =
-    await createCollaborationSceneSnapshot(editorApp, projectId);
+    await createCollaborationSceneSnapshot(editorApp, projectId, alreadyUploadedAssetPaths);
+
+  const { scene, scenePatch } = buildSceneFields(previousScene, manifest);
 
   return {
     assetUploads,
+    manifest,
     operation: {
       assetReferences,
       baseVersion: projectVersion,
@@ -90,9 +109,55 @@ export async function createPreviewOperationFromEditorScene({
       },
       phase: "preview",
       projectId,
-      scene: manifest
+      ...(scene ? { scene } : {}),
+      ...(scenePatch ? { scenePatch } : {})
     }
   };
+}
+
+/**
+ * Decide whether to send a full scene snapshot or just a JSON Patch diff.
+ *
+ * - No previousScene (first op of session, post-resync): include full scene.
+ * - Small diff: send only scenePatch.
+ * - Large diff (more ops than scene size justifies): send full scene to keep
+ *   things simple and avoid huge patch lists.
+ */
+function buildSceneFields(
+  previousScene: WebsterProjectManifest | null,
+  currentScene: WebsterProjectManifest
+): { scene?: WebsterProjectManifest; scenePatch?: ProjectScenePatchOp[] } {
+  if (!previousScene) {
+    return { scene: currentScene };
+  }
+
+  const patch = compare(previousScene, currentScene) as ProjectScenePatchOp[];
+  if (patch.length === 0) {
+    // No change — but still need to ship the op so the server bumps version.
+    return { scenePatch: [] };
+  }
+
+  // Heuristic: if the patch is more than ~25% the size of the scene, just
+  // send the scene — patches stop being a win at that point.
+  const sceneSize = JSON.stringify(currentScene).length;
+  const patchSize = JSON.stringify(patch).length;
+  if (patchSize * 4 > sceneSize) {
+    return { scene: currentScene };
+  }
+
+  return { scenePatch: patch };
+}
+
+/**
+ * Re-export so the receiver hook can apply incoming patches to its local
+ * manifest before importing into the editor.
+ */
+export function applyScenePatch(
+  base: WebsterProjectManifest,
+  patch: ProjectScenePatchOp[]
+): WebsterProjectManifest {
+  const cloned = deepClone(base) as WebsterProjectManifest;
+  return applyPatch(cloned, patch as unknown as never[], false, true).newDocument as WebsterProjectManifest;
 }
 
 /**
@@ -100,27 +165,90 @@ export async function createPreviewOperationFromEditorScene({
  * `.webster` manifest shape the app already understands. Future granular
  * operations can be added here without leaking socket concerns into tools/UI.
  */
+export class ScenePatchApplyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ScenePatchApplyError";
+  }
+}
+
+/**
+ * Returns the applied manifest on success.
+ * Returns `null` when there is genuinely nothing to apply (no scene, no patch).
+ * THROWS `ScenePatchApplyError` when a patch was provided but couldn't be
+ * applied to the given base — the caller should resync from the server rather
+ * than silently dropping the update (which causes one client to fall behind).
+ */
 export async function applyOperationToScene(
   editorApp: EditorApp,
   operation: ProjectOperation,
-  assets = new Map<string, Blob>()
-) {
-  if (!operation.scene) {
-    return false;
+  assets = new Map<string, Blob>(),
+  currentManifest: WebsterProjectManifest | null = null
+): Promise<WebsterProjectManifest | null> {
+  let resolved: WebsterProjectManifest | null = null;
+
+  if (operation.scene) {
+    resolved = operation.scene;
+  } else if (operation.scenePatch && operation.scenePatch.length > 0) {
+    if (!currentManifest) {
+      throw new ScenePatchApplyError("No local base manifest to apply patch against");
+    }
+    try {
+      resolved = applyScenePatch(currentManifest, operation.scenePatch);
+    } catch (err) {
+      throw new ScenePatchApplyError(
+        `Failed to apply scene patch: ${(err as Error).message}`
+      );
+    }
   }
 
-  await editorApp.importSerializedScene(operation.scene as unknown as SerializedScene, assets, {
+  if (!resolved) {
+    return null;
+  }
+
+  await editorApp.importSerializedScene(resolved as unknown as SerializedScene, assets, {
     historyLabel: operation.phase === "preview" ? "Remote preview" : "Remote update"
   });
 
-  return true;
+  return resolved;
+}
+
+/**
+ * Removes per-user UI state from a manifest before it enters the sync
+ * pipeline. Returns a shallow copy with selection normalised to empty, so the
+ * field is always identical across users and never produces a diff.
+ */
+function stripVolatileManifestFields(
+  manifest: WebsterProjectManifest
+): WebsterProjectManifest {
+  return {
+    ...manifest,
+    selectedLayerId: null,
+    selectedLayerIds: []
+  };
 }
 
 async function createCollaborationSceneSnapshot(
   editorApp: EditorApp,
-  projectId: string
+  projectId: string,
+  alreadyUploadedAssetPaths?: ReadonlySet<string>
 ) {
-  const { assetEntries, manifest } = await serializeScenePackageAssets(editorApp.getScene());
+  // Skip re-encoding the binary for assets we already uploaded this session.
+  // The manifest still references them (this only skips the blob packing),
+  // and they're filtered out of the upload step anyway — so this just saves
+  // the CPU cost of re-reading every image/model/font on each keystroke.
+  const { assetEntries, manifest: rawManifest } = await serializeScenePackageAssets(
+    editorApp.getScene(),
+    undefined,
+    alreadyUploadedAssetPaths ? { skipAssetPaths: alreadyUploadedAssetPaths } : {}
+  );
+
+  // Selection is per-user UI state, NOT shared document state. Leaving it in
+  // the synced manifest means (a) every selection change produces a commit —
+  // and drawing inside a selection churns it constantly, which storms the
+  // socket and React — and (b) one user's selection would override another's
+  // on the remote canvas. Strip it so the synced scene is selection-free.
+  const manifest = stripVolatileManifestFields(rawManifest as WebsterProjectManifest);
   const assetUploads = assetEntries.map((entry) => {
     const mimeType = inferAssetMimeType(entry.name);
 

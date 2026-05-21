@@ -7,6 +7,7 @@ import type {
   SharedProjectPresence,
   SharedProjectStatePayload
 } from "@webster/shared";
+import { getAccessToken } from "./sharedProjectApi";
 
 export type CollaborationConnectionStatus = "connected" | "connecting" | "disconnected" | "reconnecting";
 
@@ -80,6 +81,13 @@ export class CollaborationClient {
 
     socket.on("reconnect_attempt", () => {
       this.options.onStatusChange("reconnecting");
+      // BUG 3 fix: refresh the auth token before reconnecting so the
+      // gateway doesn't reject stale or expired tokens.
+      void getAccessToken().then((token) => {
+        if (token) {
+          socket.auth = { token };
+        }
+      });
     });
 
     socket.on("project:state", (payload: SharedProjectStatePayload) => {

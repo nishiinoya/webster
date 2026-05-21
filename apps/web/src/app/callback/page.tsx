@@ -10,7 +10,17 @@ export default function CallbackPage() {
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      router.replace("/");
+      let target = "/";
+      try {
+        const stashed = window.sessionStorage.getItem("auth0:returnTo");
+        if (stashed) {
+          window.sessionStorage.removeItem("auth0:returnTo");
+          target = stashed;
+        }
+      } catch {
+        // ignore
+      }
+      router.replace(target);
     }
   }, [isLoading, isAuthenticated, router]);
 

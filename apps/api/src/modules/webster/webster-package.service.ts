@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import AdmZip from 'adm-zip';
+// adm-zip is CommonJS (module.exports = AdmZip); use require to avoid the .default interop wrapper.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const AdmZip = require('adm-zip') as typeof import('adm-zip');
 import type { WebsterProjectManifest } from '@webster/shared';
 
 export type UnpackedAsset = {

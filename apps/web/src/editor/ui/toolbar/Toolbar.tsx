@@ -418,7 +418,7 @@ export function Toolbar({
             </button>
             <button
               className={toolbarMenuItemClass}
-              disabled={!canEditDocument || isSharedMode}
+              disabled={!canEditDocument}
               onClick={(event) => {
                 closeMenu(event);
                 onShareProject();

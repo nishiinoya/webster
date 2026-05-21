@@ -1134,6 +1134,7 @@ export class EditorApp {
     this.pendingHistoryGesture = null;
     this.restoreAppSnapshot(snapshot);
     this.notifyHistoryChange();
+    this.notifyHistoryNavigation("undo");
 
     return true;
   }
@@ -1148,8 +1149,23 @@ export class EditorApp {
     this.pendingHistoryGesture = null;
     this.restoreAppSnapshot(snapshot);
     this.notifyHistoryChange();
+    this.notifyHistoryNavigation("redo");
 
     return true;
+  }
+
+  private notifyHistoryNavigation(operation: "undo" | "redo") {
+    // Synthesize a scene-kind action so the collab layer ships the new scene
+    // (as a JSON Patch) to other clients. Without this, undo/redo updates the
+    // local canvas but never propagates.
+    this.onLocalEditorAction?.({
+      id: crypto.randomUUID(),
+      kind: "scene",
+      label: operation === "undo" ? "Undo" : "Redo",
+      operation,
+      origin: "local",
+      timestamp: Date.now()
+    });
   }
 
   selectLayerAt(clientX: number, clientY: number) {

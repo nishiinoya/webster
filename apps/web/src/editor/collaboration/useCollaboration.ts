@@ -27,6 +27,7 @@ import {
   createProjectSnapshot,
   downloadSharedProjectFile,
   fetchSharedProjectAssets,
+  getAccessToken,
   getSharedProjectWebSocketUrl,
   listProjectSnapshots,
   loadSharedProject,
@@ -108,6 +109,19 @@ export function useCollaboration({
   const handledRequestIdRef = useRef<number | null>(null);
   const isApplyingRemoteRef = useRef(false);
   const latestStateRef = useRef(state);
+  // Optimistic baseVersion for outgoing commits. Each send bumps this so rapid
+  // typing doesn't ship N commits all with the same stale baseVersion (which
+  // would trip the gateway's version_conflict check on every one after the
+  // first). Reset whenever we re-sync from the server.
+  const nextBaseVersionRef = useRef(0);
+  // Last manifest we either sent to or received from the server. We diff
+  // against this to compute the JSON Patch for the next commit, instead of
+  // shipping the whole scene each time.
+  const lastSyncedSceneRef = useRef<import("@webster/shared").WebsterProjectManifest | null>(null);
+  // Commits are serialised through this chain so two rapid edits can't both
+  // read the same baseVersion / previousScene during their `await` window
+  // and ship inconsistent patches.
+  const commitChainRef = useRef<Promise<unknown>>(Promise.resolve());
   const pendingQueueRef = useRef(new PendingOperationsQueue());
   const resyncingRef = useRef(false);
   const uploadedAssetPathsRef = useRef(new Set<string>());
@@ -167,6 +181,12 @@ export function useCollaboration({
 
   const importSharedState = useCallback(
     async (payload: SharedProjectLoadResponse) => {
+      // The receiver-side flow opens a project from a URL with no tab/editor
+      // pre-mounted. Wait up to ~3s for the editor to mount before importing.
+      for (let attempts = 0; attempts < 30 && !editorAppRef.current; attempts += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+
       if (!editorAppRef.current) {
         return;
       }
@@ -192,12 +212,15 @@ export function useCollaboration({
     [activeDocumentTitle, editorAppRef, onDocumentLoaded, onLayersChange]
   );
 
-  const applySharedProjectState = useCallback(
-    async (payload: SharedProjectLoadResponse) => {
+  const applySharedProjectMeta = useCallback(
+    (payload: SharedProjectLoadResponse) => {
       const capabilities = getProjectRoleCapabilities(payload.role, payload.permissions);
 
+      // Resync the optimistic baseVersion counter to the server's truth.
+      nextBaseVersionRef.current = payload.currentVersion;
+      // The server's snapshot IS our new baseline — next commit diffs against it.
+      lastSyncedSceneRef.current = payload.snapshot ?? null;
       rememberUploadedAssets(payload.assets);
-      await importSharedState(payload);
       setState((currentState) => ({
         ...currentState,
         capabilities,
@@ -214,14 +237,27 @@ export function useCollaboration({
         users: payload.users ?? currentState.users
       }));
     },
-    [importSharedState, rememberUploadedAssets]
+    [rememberUploadedAssets]
+  );
+
+  const applySharedProjectState = useCallback(
+    async (payload: SharedProjectLoadResponse) => {
+      await importSharedState(payload);
+      applySharedProjectMeta(payload);
+    },
+    [applySharedProjectMeta, importSharedState]
   );
 
   const connectToSharedProject = useCallback(
-    (payload: SharedProjectLoadResponse) => {
+    async (payload: SharedProjectLoadResponse) => {
       clientRef.current?.disconnect();
 
+      // BUG 3 fix: fetch the access token before creating the client so the
+      // socket handshake auth.token is populated.
+      const accessToken = (await getAccessToken()) ?? "";
+
       const client = new CollaborationClient({
+        accessToken,
         clientId,
         onAppliedOperation: async (applied) => {
           await handleAppliedOperation(applied);
@@ -244,13 +280,20 @@ export function useCollaboration({
             const assets = await fetchSharedProjectAssets(operation.assetReferences);
 
             isApplyingRemoteRef.current = true;
-            await applyOperationToScene(editorAppRef.current, operation, assets);
+            // Previews are ephemeral in-progress visuals. We render them but
+            // must NOT advance lastSyncedSceneRef — only committed operations
+            // move the baseline the next diff is computed against.
+            await applyOperationToScene(
+              editorAppRef.current,
+              operation,
+              assets,
+              lastSyncedSceneRef.current
+            );
             onLayersChange(editorAppRef.current.getLayerSummaries());
-          } catch (error) {
-            setState((currentState) => ({
-              ...currentState,
-              error: error instanceof Error ? error.message : "Unable to apply preview update."
-            }));
+          } catch {
+            // A preview that can't apply to our base is harmless — the
+            // committed op (or a resync triggered by it) will correct the
+            // canvas. Don't surface an error or resync for previews.
           } finally {
             isApplyingRemoteRef.current = false;
           }
@@ -300,7 +343,13 @@ export function useCollaboration({
 
   const shareLocalProject = useCallback(
     async (title: string) => {
-      const editorApp = editorAppRef.current;
+      // Programmatic auto-share fires right after a new tab is created; the
+      // editor may not have mounted yet, so wait up to ~3s for it.
+      let editorApp = editorAppRef.current;
+      for (let attempts = 0; attempts < 30 && !editorApp; attempts += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        editorApp = editorAppRef.current;
+      }
 
       if (!editorApp) {
         return;
@@ -317,10 +366,12 @@ export function useCollaboration({
       const projectBlob = await editorApp.exportProjectFile();
       const payload = await uploadLocalWebsterProject(projectBlob, getWebsterFilename(title));
 
-      await applySharedProjectState(payload);
+      // Sharer already has the canonical scene in their editor — skip the
+      // re-import (which would call resetCurrentHistory and wipe undo).
+      applySharedProjectMeta(payload);
       connectToSharedProject(payload);
     },
-    [applySharedProjectState, connectToSharedProject, editorAppRef]
+    [applySharedProjectMeta, connectToSharedProject, editorAppRef]
   );
 
   const resyncProject = useCallback(async () => {
@@ -351,15 +402,45 @@ export function useCollaboration({
       pendingQueueRef.current.confirm(applied.operation.clientOperationId);
       updatePendingCount();
     } else if (editorAppRef.current) {
+      // A remote op's patch is computed against the version right before it
+      // (applied.version - 1). If our local version isn't that, we've missed
+      // an op — applying this patch to our stale base would corrupt the scene.
+      // Resync from the server (authoritative) instead.
+      const localVersion = latestStateRef.current.currentVersion ?? 0;
+      const expectedBase = applied.version - 1;
+
+      if (localVersion !== expectedBase) {
+        await resyncProject();
+        return;
+      }
+
       try {
         const assets = await fetchSharedProjectAssets(applied.operation.assetReferences);
 
         isApplyingRemoteRef.current = true;
-        await applyOperationToScene(editorAppRef.current, applied.operation, assets);
+        const appliedManifest = await applyOperationToScene(
+          editorAppRef.current,
+          applied.operation,
+          assets,
+          lastSyncedSceneRef.current
+        );
+        if (appliedManifest) {
+          lastSyncedSceneRef.current = appliedManifest;
+        }
         onLayersChange(editorAppRef.current.getLayerSummaries());
+      } catch (error) {
+        // Patch couldn't apply to our local base (drift) — pull the
+        // authoritative scene from the server to self-heal.
+        isApplyingRemoteRef.current = false;
+        await resyncProject();
+        return;
       } finally {
         isApplyingRemoteRef.current = false;
       }
+    }
+
+    if (applied.version > nextBaseVersionRef.current) {
+      nextBaseVersionRef.current = applied.version;
     }
 
     setState((currentState) => ({
@@ -381,7 +462,7 @@ export function useCollaboration({
   }
 
   const handleLocalEditorAction = useCallback(
-    async (action: SharedEditorAction) => {
+    (action: SharedEditorAction) => {
       const editorApp = editorAppRef.current;
       const currentState = latestStateRef.current;
 
@@ -396,26 +477,67 @@ export function useCollaboration({
         return;
       }
 
-      try {
-        const preparedOperation = await createOperationFromEditorAction({
-          action,
-          clientId,
-          editorApp,
-          phase: "commit",
-          projectId: currentState.projectId,
-          projectVersion: currentState.currentVersion ?? 0
-        });
-        const operation = await prepareOperationForSocket(preparedOperation);
+      // Capture the projectId at enqueue time. We re-check the live state
+      // when the chained task actually runs in case the user switched away.
+      const projectId = currentState.projectId;
 
-        pendingQueueRef.current.add(operation);
-        updatePendingCount();
-        clientRef.current?.sendCommit(operation);
-      } catch (error) {
-        setState((currentState) => ({
-          ...currentState,
-          error: error instanceof Error ? error.message : "Unable to prepare shared edit."
-        }));
-      }
+      // Commits are serialised through the chain, so only one task runs at a
+      // time. We compute baseVersion INSIDE the task (not synchronously here)
+      // so that we only consume a version number for commits that actually
+      // carry a change — selection-only / no-op actions are dropped.
+      commitChainRef.current = commitChainRef.current.then(async () => {
+        const editorAppNow = editorAppRef.current;
+        const stateNow = latestStateRef.current;
+        if (
+          !editorAppNow ||
+          stateNow.mode !== "shared" ||
+          stateNow.projectId !== projectId ||
+          resyncingRef.current
+        ) {
+          return;
+        }
+
+        try {
+          const previousScene = lastSyncedSceneRef.current;
+          const confirmedVersion = stateNow.currentVersion ?? 0;
+          const baseVersion = Math.max(nextBaseVersionRef.current, confirmedVersion);
+
+          const preparedOperation = await createOperationFromEditorAction({
+            action,
+            alreadyUploadedAssetPaths: uploadedAssetPathsRef.current,
+            clientId,
+            editorApp: editorAppNow,
+            phase: "commit",
+            previousScene,
+            projectId,
+            projectVersion: baseVersion
+          });
+
+          // No actual document change (e.g. a selection-only action, which is
+          // stripped from the synced scene) — don't burn a version or send.
+          const op = preparedOperation.operation;
+          const hasChange = Boolean(op.scene) || (op.scenePatch?.length ?? 0) > 0;
+          if (!hasChange) {
+            return;
+          }
+
+          nextBaseVersionRef.current = baseVersion + 1;
+          // Update the baseline immediately so the NEXT commit (already queued
+          // behind us) diffs against this manifest and not the stale one.
+          lastSyncedSceneRef.current = preparedOperation.manifest;
+
+          const operation = await prepareOperationForSocket(preparedOperation);
+
+          pendingQueueRef.current.add(operation);
+          updatePendingCount();
+          clientRef.current?.sendCommit(operation);
+        } catch (error) {
+          setState((cur) => ({
+            ...cur,
+            error: error instanceof Error ? error.message : "Unable to prepare shared edit."
+          }));
+        }
+      });
     },
     [clientId, editorAppRef, prepareOperationForSocket, updatePendingCount]
   );
@@ -438,8 +560,10 @@ export function useCollaboration({
 
       try {
         const preparedOperation = await createPreviewOperationFromEditorScene({
+          alreadyUploadedAssetPaths: uploadedAssetPathsRef.current,
           clientId,
           editorApp,
+          previousScene: lastSyncedSceneRef.current,
           projectId: currentState.projectId,
           projectVersion: currentState.currentVersion ?? 0,
           tool

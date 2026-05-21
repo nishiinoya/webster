@@ -24,24 +24,28 @@ export function setAccessTokenGetter(fn: () => Promise<string>) {
   _getToken = fn;
 }
 
+/** BUG 3 fix: exported helper so useCollaboration can fetch a token before connecting. */
+export async function getAccessToken(): Promise<string | null> {
+  return _getToken ? _getToken() : null;
+}
+
 export function getSharedProjectApiBaseUrl() {
   return trimTrailingSlash(process.env.NEXT_PUBLIC_WEBSTER_API_URL ?? defaultApiBaseUrl);
 }
 
-export function getSharedProjectWebSocketUrl(projectId: string) {
-  const configuredUrl = process.env.NEXT_PUBLIC_WEBSTER_WS_URL;
-
-  if (configuredUrl) {
-    return appendProjectId(configuredUrl, projectId);
+export function getSharedProjectWebSocketUrl(_projectId: string) {
+  // BUG 2 fix: socket.io-client interprets the URL path as a namespace.
+  // The gateway uses the default "/" namespace, so we must pass the host
+  // origin only — no path component. Room joining happens via project:join.
+  if (process.env.NEXT_PUBLIC_WEBSTER_WS_URL) {
+    return trimTrailingSlash(process.env.NEXT_PUBLIC_WEBSTER_WS_URL);
   }
 
   if (typeof window === "undefined") {
-    return `ws://localhost:3000/ws/projects/${encodeURIComponent(projectId)}`;
+    return "http://localhost:4000";
   }
 
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-
-  return `${protocol}//${window.location.host}/ws/projects/${encodeURIComponent(projectId)}`;
+  return window.location.origin;
 }
 
 /**
@@ -71,7 +75,8 @@ export async function loadSharedProject(projectId: string) {
  * realtime operations and never carries project archives or binary assets.
  */
 export async function downloadSharedProjectFile(projectId: string) {
-  const response = await fetch(
+  // BUG 4 fix: include Authorization header so JwtAuthGuard accepts the request.
+  const response = await authedFetch(
     `${getSharedProjectApiBaseUrl()}/shared-projects/${encodeURIComponent(projectId)}/export-webster`
   );
 
@@ -150,6 +155,57 @@ export async function createProjectSnapshot({ message, projectId }: CreateSnapsh
   );
 }
 
+export type ProjectSummary = {
+  id: string;
+  projectName: string;
+  mimeType: string;
+  sizeBytes: string;
+  updatedAt: string;
+  role: "owner" | "editor" | "viewer";
+};
+
+export async function listProjects() {
+  return fetchJson<{ projects: ProjectSummary[] }>("/projects");
+}
+
+export type ProjectAccessPermission = 'viewer' | 'editor' | 'commenter';
+
+export type ProjectAccessEntry = {
+  id: string;
+  permission: ProjectAccessPermission;
+  expiresAt: string | null;
+  sharedWithUser: { id: string; email: string; displayName: string | null } | null;
+};
+
+export async function listProjectAccesses(projectId: string) {
+  return fetchJson<{ accesses: ProjectAccessEntry[] }>(
+    `/projects/${encodeURIComponent(projectId)}/accesses`
+  );
+}
+
+export async function grantProjectAccess(
+  projectId: string,
+  email: string,
+  permission: ProjectAccessPermission
+) {
+  return fetchJson<ProjectAccessEntry>(`/projects/${encodeURIComponent(projectId)}/accesses`, {
+    body: JSON.stringify({ email, permission }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST"
+  });
+}
+
+export async function revokeProjectAccess(projectId: string, accessId: string) {
+  const response = await authedFetch(
+    `${getSharedProjectApiBaseUrl()}/projects/${encodeURIComponent(projectId)}/accesses/${encodeURIComponent(accessId)}`,
+    { method: "DELETE" }
+  );
+
+  if (!response.ok && response.status !== 204) {
+    throw new Error(await readApiError(response, "Unable to revoke access."));
+  }
+}
+
 export async function restoreProjectSnapshot(projectId: string, snapshotId: string) {
   return fetchJson<SharedProjectLoadResponse>(
     `/shared-projects/${encodeURIComponent(projectId)}/snapshots/${encodeURIComponent(snapshotId)}/restore`,
@@ -166,7 +222,8 @@ export async function fetchSharedProjectAssets(
 
   await Promise.all(
     references.map(async (asset) => {
-      const response = await fetch(toAbsoluteAssetUrl(asset.downloadUrl));
+      // BUG 4 fix: include Authorization header so JwtAuthGuard accepts the request.
+      const response = await authedFetch(toAbsoluteAssetUrl(asset.downloadUrl));
 
       if (!response.ok) {
         throw new Error(`Unable to load project asset: ${asset.assetPath}`);
@@ -183,6 +240,20 @@ export async function fetchSharedProjectAssets(
   );
 
   return assets;
+}
+
+/** BUG 4 fix: authenticated fetch — adds Bearer header the same way fetchJson does. */
+async function authedFetch(url: string, init?: RequestInit): Promise<Response> {
+  const headers: Record<string, string> = {};
+
+  if (_getToken) {
+    headers["Authorization"] = "Bearer " + (await _getToken());
+  }
+
+  return fetch(url, {
+    ...init,
+    headers: { ...headers, ...(init?.headers as Record<string, string> | undefined) }
+  });
 }
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {

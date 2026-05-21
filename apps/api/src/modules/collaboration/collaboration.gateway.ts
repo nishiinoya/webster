@@ -94,13 +94,90 @@ export class CollaborationGateway
       }
 
       const auth0Subject = payload.sub!;
-      const email = payload.email ?? '';
-      const displayName = payload.name ?? null;
+      let rawEmail = (payload.email ?? '').trim().toLowerCase();
+      let displayName: string | null = payload.name ?? null;
 
-      const dbUser = await this.prisma.user.upsert({
-        where: { auth0Subject },
-        create: { auth0Subject, email, displayName },
-        update: { email, displayName },
+      // If the JWT lacks the email claim (Google OAuth via Auth0 often does),
+      // either re-use what we already stored for this subject or fetch it from
+      // /userinfo so pending-invite reconciliation can find this user.
+      if (!rawEmail) {
+        const existing = await this.prisma.user.findUnique({
+          where: { auth0Subject },
+          select: { email: true, displayName: true },
+        });
+        if (existing && !existing.email.startsWith('noemail:')) {
+          rawEmail = existing.email;
+          displayName = displayName ?? existing.displayName;
+        } else {
+          const userInfo = await this.fetchUserInfo(token, domain);
+          if (userInfo) {
+            rawEmail = (userInfo.email ?? '').trim().toLowerCase();
+            displayName = displayName ?? userInfo.name ?? null;
+          }
+        }
+      }
+
+      const emailForRow = rawEmail || `noemail:${auth0Subject}`;
+
+      const dbUser = await this.prisma.$transaction(async (tx) => {
+        const bySubject = await tx.user.findUnique({ where: { auth0Subject } });
+        const byEmail = rawEmail
+          ? await tx.user.findUnique({ where: { email: rawEmail } })
+          : null;
+
+        // Merge pending-invite row into the real subject row.
+        if (bySubject && byEmail && bySubject.id !== byEmail.id) {
+          await tx.projectAccess.updateMany({
+            where: { sharedWithUserId: byEmail.id },
+            data: { sharedWithUserId: bySubject.id },
+          });
+          await tx.projectAccess.updateMany({
+            where: { createdBy: byEmail.id },
+            data: { createdBy: bySubject.id },
+          });
+          await tx.projectComment.updateMany({
+            where: { userId: byEmail.id },
+            data: { userId: bySubject.id },
+          });
+          await tx.projectComment.updateMany({
+            where: { resolvedBy: byEmail.id },
+            data: { resolvedBy: bySubject.id },
+          });
+          await tx.projectSnapshot.updateMany({
+            where: { createdBy: byEmail.id },
+            data: { createdBy: bySubject.id },
+          });
+          await tx.project.updateMany({
+            where: { ownerId: byEmail.id },
+            data: { ownerId: bySubject.id },
+          });
+          await tx.user.delete({ where: { id: byEmail.id } });
+          return tx.user.update({
+            where: { id: bySubject.id },
+            data: { email: emailForRow, displayName: displayName ?? bySubject.displayName },
+          });
+        }
+
+        if (!bySubject && byEmail) {
+          return tx.user.update({
+            where: { id: byEmail.id },
+            data: { auth0Subject, displayName: displayName ?? byEmail.displayName },
+          });
+        }
+
+        if (bySubject) {
+          if (bySubject.email !== emailForRow || bySubject.displayName !== displayName) {
+            return tx.user.update({
+              where: { id: bySubject.id },
+              data: { email: emailForRow, displayName: displayName ?? bySubject.displayName },
+            });
+          }
+          return bySubject;
+        }
+
+        return tx.user.create({
+          data: { auth0Subject, email: emailForRow, displayName },
+        });
       });
 
       socket.data.user = {
@@ -115,6 +192,21 @@ export class CollaborationGateway
     } catch (err) {
       this.logger.warn(`Socket ${socket.id} auth failed: ${(err as Error).message}`);
       socket.disconnect(true);
+    }
+  }
+
+  private async fetchUserInfo(
+    token: string,
+    domain: string,
+  ): Promise<{ email?: string; name?: string } | null> {
+    try {
+      const response = await fetch(`https://${domain}/userinfo`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) return null;
+      return (await response.json()) as { email?: string; name?: string };
+    } catch {
+      return null;
     }
   }
 

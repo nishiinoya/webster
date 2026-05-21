@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { Auth0Provider, useAuth0 } from "@auth0/auth0-react";
 import { setAccessTokenGetter } from "@/editor/collaboration/sharedProjectApi";
@@ -13,14 +13,27 @@ const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 const AUTH_SKIP_PATHS = ["/login", "/callback"];
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading, loginWithRedirect } = useAuth0();
+  const { isAuthenticated, isLoading } = useAuth0();
   const pathname = usePathname();
+  const router = useRouter();
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated && !AUTH_SKIP_PATHS.includes(pathname)) {
-      void loginWithRedirect();
+      // Stash the URL we wanted (path + query) so /login can restore it after
+      // Auth0 redirects back to /callback. Without this, ?projectId=... is lost.
+      if (typeof window !== "undefined") {
+        const target = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+        if (target && target !== "/") {
+          try {
+            window.sessionStorage.setItem("auth0:returnTo", target);
+          } catch {
+            // sessionStorage may be unavailable; fail open
+          }
+        }
+      }
+      router.replace("/login");
     }
-  }, [isLoading, isAuthenticated, pathname, loginWithRedirect]);
+  }, [isLoading, isAuthenticated, pathname, router]);
 
   if (AUTH_SKIP_PATHS.includes(pathname)) {
     return <>{children}</>;
@@ -65,8 +78,12 @@ export default function RootLayout({
           clientId={clientId}
           authorizationParams={{
             audience,
-            redirect_uri: redirectUri
+            redirect_uri: redirectUri,
+            scope: "openid profile email offline_access"
           }}
+          cacheLocation="localstorage"
+          useRefreshTokens={true}
+          useRefreshTokensFallback={true}
         >
           <AuthBridge />
           <RequireAuth>{children}</RequireAuth>
