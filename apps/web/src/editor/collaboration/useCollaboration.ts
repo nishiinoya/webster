@@ -240,14 +240,16 @@ export function useCollaboration({
   );
 
   const applySharedProjectMeta = useCallback(
-    (payload: SharedProjectLoadResponse) => {
+    (payload: SharedProjectLoadResponse, updateSceneRefs = true) => {
       const capabilities = getProjectRoleCapabilities(payload.role, payload.permissions);
 
-      // Resync the optimistic baseVersion counter to the server's truth.
-      nextBaseVersionRef.current = payload.currentVersion;
-      // The server's snapshot IS our new baseline — next commit diffs against it.
-      lastSyncedSceneRef.current = payload.snapshot ?? null;
-      serverBaseSceneRef.current = payload.snapshot ?? null;
+      if (updateSceneRefs) {
+        // Resync the optimistic baseVersion counter to the server's truth.
+        nextBaseVersionRef.current = payload.currentVersion;
+        // The server's snapshot IS our new baseline — next commit diffs against it.
+        lastSyncedSceneRef.current = payload.snapshot ?? null;
+        serverBaseSceneRef.current = payload.snapshot ?? null;
+      }
       rememberUploadedAssets(payload.assets);
       setState((currentState) => ({
         ...currentState,
@@ -330,7 +332,11 @@ export function useCollaboration({
           // import that can drop the presence list on reconnect.
           if (latestStateRef.current.projectId === projectState.projectId &&
               latestStateRef.current.mode === "shared") {
-            applySharedProjectMeta(projectState);
+            // Reconnect — only refresh presence/version/snapshots, do NOT reset
+            // lastSyncedSceneRef or serverBaseSceneRef. Resetting them to the
+            // server snapshot without importing it into the editor would make
+            // the next commit diff against the wrong base, producing corrupt patches.
+            applySharedProjectMeta(projectState, false);
           } else {
             await applySharedProjectState(projectState);
           }
