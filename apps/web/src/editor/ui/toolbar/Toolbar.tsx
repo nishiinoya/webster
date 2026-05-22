@@ -322,7 +322,19 @@ export function Toolbar({
     }
   }
 
-  const { user, isAuthenticated, loginWithRedirect } = useAuth0();
+  const { user, isAuthenticated, loginWithRedirect, logout } = useAuth0();
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    function closeUserMenu(event: PointerEvent) {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+        setIsUserMenuOpen(false);
+      }
+    }
+    document.addEventListener('pointerdown', closeUserMenu);
+    return () => document.removeEventListener('pointerdown', closeUserMenu);
+  }, []);
   const [profile, setProfile] = useState<{
     displayName: string | null;
     avatarUrl: string | null;
@@ -1449,19 +1461,39 @@ export function Toolbar({
         ) : null}
 
         {isAuthenticated ? (
-          <Link href='/profile' className='flex items-center gap-2 pl-2.5'>
-            <span className='text-[13px] text-[#c9cdd2]'>{displayName}</span>
-            <Avatar>
-              {avatarSrc ? (
-                <AvatarImage
-                  src={avatarSrc}
-                  alt={displayName}
-                  className='grayscale'
-                />
-              ) : null}
-              <AvatarFallback>{avatarFallback}</AvatarFallback>
-            </Avatar>
-          </Link>
+          <div className='relative pl-2.5' ref={userMenuRef}>
+            <button
+              type='button'
+              className='flex items-center gap-2'
+              onClick={() => setIsUserMenuOpen((o) => !o)}
+            >
+              <span className='text-[13px] text-[#c9cdd2]'>{displayName}</span>
+              <Avatar>
+                {avatarSrc ? (
+                  <AvatarImage src={avatarSrc} alt={displayName} className='grayscale' />
+                ) : null}
+                <AvatarFallback>{avatarFallback}</AvatarFallback>
+              </Avatar>
+            </button>
+            {isUserMenuOpen ? (
+              <div className='absolute right-0 top-[calc(100%+8px)] z-20 w-44 rounded-lg border border-[#33373d] bg-[#17191d] p-1.5 shadow-[0_18px_34px_rgba(0,0,0,0.35)]'>
+                <Link
+                  href='/profile'
+                  className={toolbarMenuItemClass}
+                  onClick={() => setIsUserMenuOpen(false)}
+                >
+                  Profile
+                </Link>
+                <button
+                  type='button'
+                  className={toolbarMenuItemClass}
+                  onClick={() => logout({ logoutParams: { returnTo: typeof window !== 'undefined' ? window.location.origin : '' } })}
+                >
+                  Sign out
+                </button>
+              </div>
+            ) : null}
+          </div>
         ) : (
           <button
             type='button'

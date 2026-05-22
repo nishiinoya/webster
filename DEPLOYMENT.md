@@ -44,14 +44,31 @@ In your Auth0 SPA settings (matches the defaults above):
 - Allowed Logout URLs: `http://localhost:3000`
 - Allowed Web Origins: `http://localhost:3000`
 
-### 2. Bring up the stack
+### 2. Run the stack
+
+**Recommended — hot reload (run infra in Docker, app servers locally):**
+
+```bash
+# Terminal 1 — infrastructure only
+docker compose up postgres minio minio-init
+
+# Terminal 2 — API with hot reload
+cd apps/api && npm run start:dev
+
+# Terminal 3 — frontend with hot reload
+cd apps/web && npm run dev
+```
+
+This gives you instant feedback on every save for both the API (NestJS watch mode) and the frontend (Next.js fast refresh).
+
+**Alternative — full stack in Docker (no hot reload):**
 
 ```bash
 docker compose up -d --build
 docker compose ps           # postgres, minio, api, web → healthy / up
 ```
 
-Open `http://localhost:3000`, log in via Auth0, edit a project. Prisma migrations run automatically on API boot.
+Both API and web are built and run as compiled containers — code changes require a rebuild. Useful for testing the production-like build locally.
 
 > Changed any `NEXT_PUBLIC_*`? Next inlines them at build time — rebuild the web image:
 > `docker compose up -d --build web`
