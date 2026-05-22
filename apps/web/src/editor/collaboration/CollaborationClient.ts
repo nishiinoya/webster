@@ -63,6 +63,13 @@ export class CollaborationClient {
 
     socket.on("connect", () => {
       this.options.onStatusChange("connected");
+    });
+
+    // The server authenticates asynchronously in handleConnection (JWT verify +
+    // DB lookups). If we joined on "connect", the join could arrive before
+    // socket.data.user was set and be silently dropped. We wait for the server
+    // to confirm auth is complete via "connection:ready" before joining.
+    socket.on("connection:ready", () => {
       socket.emit("project:join", {
         clientId: this.options.clientId,
         projectId: this.options.projectId

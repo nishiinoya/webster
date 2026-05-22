@@ -111,6 +111,8 @@ export class CollaborationGateway
         };
         socket.data.trackedPresence = new Map();
         this.logger.debug(`Socket ${socket.id} authenticated as ${knownUser.email}`);
+        // Signal the client that auth is complete and it is safe to join.
+        socket.emit('connection:ready');
         return;
       }
 
@@ -197,6 +199,8 @@ export class CollaborationGateway
       socket.data.trackedPresence = new Map();
 
       this.logger.debug(`Socket ${socket.id} authenticated as ${dbUser.email}`);
+      // Signal the client that auth is complete and it is safe to join.
+      socket.emit('connection:ready');
     } catch (err) {
       this.logger.warn(`Socket ${socket.id} auth failed: ${(err as Error).message}`);
       socket.disconnect(true);
