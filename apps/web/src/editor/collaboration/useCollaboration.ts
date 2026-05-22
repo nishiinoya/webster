@@ -287,46 +287,15 @@ export function useCollaboration({
             users
           }));
         },
-        onPreviewOperation: async (operation) => {
-          if (operation.clientId === clientId || !editorAppRef.current) {
-            return;
-          }
-
-          // Previews are ephemeral visuals — do NOT call importSerializedScene,
-          // which resets history and triggers setState inside a React update
-          // cycle (causes "Maximum update depth exceeded"). Just compute the
-          // manifest and skip if applying would be harmful.
-          if (isApplyingRemoteRef.current || resyncingRef.current) {
-            return;
-          }
-
-          try {
-            let previewManifest: import("@webster/shared").WebsterProjectManifest | null = null;
-            if (operation.scene) {
-              previewManifest = operation.scene;
-            } else if (operation.scenePatch?.length && lastSyncedSceneRef.current) {
-              try {
-                previewManifest = applyScenePatch(lastSyncedSceneRef.current, operation.scenePatch);
-              } catch {
-                return;
-              }
-            }
-
-            if (!previewManifest) return;
-
-            const assets = await fetchSharedProjectAssets(operation.assetReferences);
-            isApplyingRemoteRef.current = true;
-            await editorAppRef.current.importSerializedScene(
-              previewManifest as unknown as import("../scene/Scene").SerializedScene,
-              assets,
-              { historyLabel: "Remote preview" }
-            );
-            onLayersChange(editorAppRef.current.getLayerSummaries());
-          } catch {
-            // Preview failure is harmless — committed op will correct the canvas.
-          } finally {
-            isApplyingRemoteRef.current = false;
-          }
+        onPreviewOperation: (_operation) => {
+          // Previews intentionally do not call importSerializedScene.
+          // That path resets editor history and calls setState inside a React
+          // update cycle, causing "Maximum update depth exceeded" which crashes
+          // and remounts the component, creating a reconnect loop on all clients.
+          // Committed operations (operation:applied) already keep the canvas in
+          // sync; previews are an optional visual-only aid that isn't worth the
+          // instability. Re-enable once importSerializedScene has a preview-safe
+          // (no history reset) code path.
         },
         onReadyToResend: () => {
           // Commit operations stay in the pending queue until the backend
@@ -472,11 +441,12 @@ export function useCollaboration({
       if (newServerBase) {
         serverBaseSceneRef.current = newServerBase;
 
-        // Wait for any in-flight local commit to finish serialising before
-        // replaying. Without this, a stroke that is mid-serialisation in the
-        // commit chain hasn't been added to pendingQueue yet, so it would be
-        // missing from the replay and appear to vanish on the canvas.
-        await commitChainRef.current;
+        // Only wait for an in-flight commit if there are pending ops that need
+        // to be in the queue before we replay. Avoids blocking the apply chain
+        // on asset uploads when there is nothing pending to replay.
+        if (pendingQueueRef.current.size > 0) {
+          await commitChainRef.current;
+        }
 
         // 2. Replay all unconfirmed local ops on top of the new server base so
         // the user's in-progress strokes / edits are not wiped by the remote op.
