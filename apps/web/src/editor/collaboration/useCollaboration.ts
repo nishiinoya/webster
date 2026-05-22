@@ -134,6 +134,10 @@ export function useCollaboration({
   // read the same baseVersion / previousScene during their `await` window
   // and ship inconsistent patches.
   const commitChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  // Debounce timer for gesture actions (draw, transform, mask brush, shape).
+  // Instead of committing one op per pointer-move point, we wait for inactivity
+  // and send a single op capturing the full stroke/gesture result.
+  const gestureDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingQueueRef = useRef(new PendingOperationsQueue());
   // Stores the pure delta (diff from previousScene to manifest) for each
   // pending op, keyed by clientOperationId. Used during replay instead of
@@ -532,6 +536,20 @@ export function useCollaboration({
         !currentState.capabilities.canEdit ||
         resyncingRef.current
       ) {
+        return;
+      }
+
+      // Gesture actions (draw strokes, transforms, mask brush) fire on every
+      // pointer move. Debounce them so we send one op per completed gesture
+      // instead of one per intermediate point.
+      if (action.kind === "gesture") {
+        if (gestureDebounceRef.current) {
+          clearTimeout(gestureDebounceRef.current);
+        }
+        gestureDebounceRef.current = setTimeout(() => {
+          gestureDebounceRef.current = null;
+          handleLocalEditorAction(action);
+        }, 150);
         return;
       }
 

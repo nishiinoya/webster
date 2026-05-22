@@ -258,10 +258,9 @@ export function CanvasView({
     collaborationActionHandlerRef.current = (action) => {
       void handleLocalEditorAction(action);
     };
-    collaborationPreviewHandlerRef.current = (tool) => {
-      void sendPreviewFromCurrentScene(tool);
-    };
-  }, [handleLocalEditorAction, sendPreviewFromCurrentScene]);
+    // Previews are disabled — receiver ignores them and they flood the socket.
+    collaborationPreviewHandlerRef.current = () => {};
+  }, [handleLocalEditorAction]);
 
   useEffect(() => {
     if (!canEditSharedProject && selectedTool !== 'Pan') {
