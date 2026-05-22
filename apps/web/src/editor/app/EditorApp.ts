@@ -217,6 +217,7 @@ export class EditorApp {
   private readonly onLocalEditorAction?: (action: SharedEditorAction) => void;
   private animationFrameId: number | null = null;
   private isDisposed = false;
+  private pointerActive = false;
   private activeDocumentId: string | null = null;
   private lastCameraSnapshot: CameraSnapshot | null = null;
   private selectedTool = "Move";
@@ -1185,6 +1186,10 @@ export class EditorApp {
     const before = historyConfig ? this.captureAppSnapshot() : null;
     const didHandle = this.inputController.pointerDown(event);
 
+    if (didHandle) {
+      this.pointerActive = true;
+    }
+
     if (didHandle && before && historyConfig) {
       this.pendingHistoryGesture = {
         action: this.createHistoryAction({
@@ -1211,6 +1216,7 @@ export class EditorApp {
 
   pointerUp() {
     const didHandle = this.inputController.pointerUp();
+    this.pointerActive = false;
 
     if (!didHandle) {
       this.pendingHistoryGesture = null;
@@ -1231,7 +1237,13 @@ export class EditorApp {
 
   cancelInput() {
     this.pendingHistoryGesture = null;
+    this.pointerActive = false;
     this.inputController.cancel();
+  }
+
+  /** True while the user is actively interacting (pointer down on a tool). */
+  isInteracting() {
+    return this.pointerActive || this.pendingHistoryGesture !== null;
   }
 
   undoLastMaskStroke() {

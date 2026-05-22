@@ -142,6 +142,11 @@ export function useCollaboration({
   // True while the debounce timeout is flushing — prevents re-entering the
   // debounce branch and creating an infinite timeout loop.
   const gestureFlushingRef = useRef(false);
+  // The latest debounced gesture action, so we can flush it immediately on
+  // pointer-up (before replaying deferred remote ops) instead of waiting out
+  // the debounce — otherwise a deferred remote import could wipe the stroke
+  // before it lands in the pending queue.
+  const pendingGestureActionRef = useRef<SharedEditorAction | null>(null);
   const pendingQueueRef = useRef(new PendingOperationsQueue());
   // Stores the pure delta (diff from previousScene to manifest) for each
   // pending op, keyed by clientOperationId. Used during replay instead of
@@ -150,6 +155,11 @@ export function useCollaboration({
   const pendingOpReplaysRef = useRef(new Map<string, import("@webster/shared").ProjectScenePatchOp[]>());
   const resyncingRef = useRef(false);
   const uploadedAssetPathsRef = useRef(new Set<string>());
+  // Remote ops that arrived while the local user was mid-gesture. Importing a
+  // remote scene during an active stroke orphans the layer the tool is drawing
+  // into, so the user "can't do anything". We defer these and flush them when
+  // the user lifts the pointer.
+  const deferredRemoteOpsRef = useRef<AppliedProjectOperation[]>([]);
   // Serialise applied-operation handlers so a slow async handler (e.g. asset
   // fetch) doesn't let the next event run before the version counter advances.
   const applyChainRef = useRef<Promise<unknown>>(Promise.resolve());
@@ -455,6 +465,14 @@ export function useCollaboration({
         }
       }
     } else if (editorAppRef.current) {
+      // If the local user is mid-gesture, importing now would orphan the layer
+      // their tool is drawing into. Defer this op (in order) and flush when they
+      // lift the pointer.
+      if (editorAppRef.current.isInteracting()) {
+        deferredRemoteOpsRef.current.push(applied);
+        return;
+      }
+
       const remoteOp = applied.operation;
 
       // 1. Compute new confirmed server base.
@@ -477,12 +495,12 @@ export function useCollaboration({
       if (newServerBase) {
         serverBaseSceneRef.current = newServerBase;
 
-        // Only wait for an in-flight commit if there are pending ops that need
-        // to be in the queue before we replay. Avoids blocking the apply chain
-        // on asset uploads when there is nothing pending to replay.
-        if (pendingQueueRef.current.size > 0) {
-          await commitChainRef.current;
-        }
+        // Always wait for any in-flight commit to finish before replaying.
+        // A just-finished gesture may be queued on the commit chain but not yet
+        // in pendingQueue, so a size check is not enough — without this the
+        // import could run first and wipe the stroke. When nothing is in flight
+        // commitChainRef is already resolved, so this is effectively free.
+        await commitChainRef.current;
 
         // 2. Replay all unconfirmed local ops on top of the new server base so
         // the user's in-progress strokes / edits are not wiped by the remote op.
@@ -570,8 +588,10 @@ export function useCollaboration({
         if (gestureDebounceRef.current) {
           clearTimeout(gestureDebounceRef.current);
         }
+        pendingGestureActionRef.current = action;
         gestureDebounceRef.current = setTimeout(() => {
           gestureDebounceRef.current = null;
+          pendingGestureActionRef.current = null;
           gestureFlushingRef.current = true;
           handleLocalEditorAction(action);
           gestureFlushingRef.current = false;
@@ -653,6 +673,38 @@ export function useCollaboration({
     },
     [clientId, editorAppRef, prepareOperationForSocket, updatePendingCount]
   );
+
+  // Called when the local user lifts the pointer. First flushes the user's own
+  // debounced gesture commit (so the finished stroke lands in the pending queue
+  // and survives the replay), then replays any remote ops that were deferred
+  // during the gesture, in arrival order, through the apply chain.
+  const flushDeferredRemoteOps = useCallback(() => {
+    if (pendingGestureActionRef.current) {
+      const action = pendingGestureActionRef.current;
+      if (gestureDebounceRef.current) {
+        clearTimeout(gestureDebounceRef.current);
+        gestureDebounceRef.current = null;
+      }
+      pendingGestureActionRef.current = null;
+      gestureFlushingRef.current = true;
+      handleLocalEditorAction(action);
+      gestureFlushingRef.current = false;
+    }
+
+    if (deferredRemoteOpsRef.current.length === 0) {
+      return;
+    }
+    const deferred = deferredRemoteOpsRef.current;
+    deferredRemoteOpsRef.current = [];
+    for (const applied of deferred) {
+      applyChainRef.current = applyChainRef.current
+        .then(() => {
+          if (resyncingRef.current) return;
+          return handleAppliedOperation(applied);
+        })
+        .catch(() => {});
+    }
+  }, [handleLocalEditorAction]);
 
   const sendPreviewFromCurrentScene = useCallback(
     async (tool: string) => {
@@ -799,6 +851,7 @@ export function useCollaboration({
   return {
     canEditSharedProject: state.mode === "local" || state.capabilities.canEdit,
     currentUserIdRef,
+    flushDeferredRemoteOps,
     handleLocalEditorAction,
     sendPresenceCursor,
     sendPreviewFromCurrentScene,

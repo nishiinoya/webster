@@ -12,6 +12,7 @@ type UseCanvasPointerInputOptions = {
   canEditDocument: boolean;
   editorAppRef: MutableRefObject<EditorApp | null>;
   onLayersChange: (layers: LayerSummary[]) => void;
+  onInteractionEnd?: () => void;
   onPresenceCursor?: (cursor: { x: number; y: number }, tool: string) => void;
   onPreviewEditorAction?: (tool: string) => void;
   onTextToolPointerDown?: (event: ReactPointerEvent<HTMLCanvasElement>) => boolean;
@@ -22,6 +23,7 @@ export function useCanvasPointerInput({
   canEditDocument,
   editorAppRef,
   onLayersChange,
+  onInteractionEnd,
   onPresenceCursor,
   onPreviewEditorAction,
   onTextToolPointerDown,
@@ -72,6 +74,7 @@ export function useCanvasPointerInput({
         stopPan();
         editorAppRef.current?.cancelInput();
         setCanvasCursor("default");
+        onInteractionEnd?.();
       },
       onPointerDown: (event: ReactPointerEvent<HTMLCanvasElement>) => {
         if (event.button === 1 || selectedTool === "Pan") {
@@ -175,6 +178,7 @@ export function useCanvasPointerInput({
         }
 
         updateCanvasCursor(event.clientX, event.clientY);
+        onInteractionEnd?.();
       }
     }
   };

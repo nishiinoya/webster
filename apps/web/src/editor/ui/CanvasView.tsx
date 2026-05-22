@@ -240,6 +240,7 @@ export function CanvasView({
   const {
     canEditSharedProject,
     currentUserIdRef,
+    flushDeferredRemoteOps,
     handleLocalEditorAction,
     sendPresenceCursor,
     sendPreviewFromCurrentScene,
@@ -272,6 +273,7 @@ export function CanvasView({
     canEditDocument: canEditSharedProject,
     editorAppRef,
     onLayersChange,
+    onInteractionEnd: flushDeferredRemoteOps,
     onPresenceCursor: sendPresenceCursor,
     onPreviewEditorAction: (tool) =>
       collaborationPreviewHandlerRef.current(tool),
