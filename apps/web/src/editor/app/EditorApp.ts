@@ -1765,6 +1765,16 @@ export class EditorApp {
     return this.camera.screenToWorld(point.x, point.y);
   }
 
+  /** Convert client (viewport) coords to document world coords. */
+  clientToWorldPoint(clientX: number, clientY: number) {
+    return this.getClientWorldPoint(clientX, clientY);
+  }
+
+  /** Convert document world coords to canvas-relative screen pixels. */
+  worldToCanvasPoint(worldX: number, worldY: number) {
+    return this.camera.worldToScreen(worldX, worldY);
+  }
+
   private notifyCameraChange() {
     const snapshot = this.getCameraSnapshot();
 

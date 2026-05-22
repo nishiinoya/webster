@@ -925,9 +925,9 @@ export function CanvasView({
               ? collaborationState.users
                   .filter((u) => u.cursor != null && u.user.id !== currentUserIdRef.current)
                   .map((u) => {
-                    const canvasRect = canvasRef.current?.getBoundingClientRect();
-                    const x = u.cursor!.x * (canvasRect?.width ?? 0);
-                    const y = u.cursor!.y * (canvasRect?.height ?? 0);
+                    const screen = editorAppRef.current?.worldToCanvasPoint(u.cursor!.x, u.cursor!.y);
+                    const x = screen?.x ?? 0;
+                    const y = screen?.y ?? 0;
                     const color = userIdToColor(u.user.id);
                     return (
                       <div

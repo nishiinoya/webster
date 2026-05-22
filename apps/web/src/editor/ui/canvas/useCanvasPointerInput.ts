@@ -29,6 +29,7 @@ export function useCanvasPointerInput({
 }: UseCanvasPointerInputOptions) {
   const panStateRef = useRef<{ x: number; y: number } | null>(null);
   const textSelectionPointerIdRef = useRef<number | null>(null);
+  const lastCursorSendRef = useRef(0);
   const [canvasCursor, setCanvasCursor] = useState("default");
 
   function startPan(clientX: number, clientY: number) {
@@ -118,12 +119,11 @@ export function useCanvasPointerInput({
       },
       onPointerLeave: () => setCanvasCursor("default"),
       onPointerMove: (event: ReactPointerEvent<HTMLCanvasElement>) => {
-        const rect = event.currentTarget.getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0) {
-          onPresenceCursor?.({
-            x: (event.clientX - rect.left) / rect.width,
-            y: (event.clientY - rect.top) / rect.height,
-          }, selectedTool);
+        const now = Date.now();
+        if (onPresenceCursor && editorAppRef.current && now - lastCursorSendRef.current > 50) {
+          lastCursorSendRef.current = now;
+          const world = editorAppRef.current.clientToWorldPoint(event.clientX, event.clientY);
+          onPresenceCursor(world, selectedTool);
         }
         panTo(event.clientX, event.clientY);
 
