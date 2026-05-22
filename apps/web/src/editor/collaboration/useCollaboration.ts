@@ -167,7 +167,10 @@ export function useCollaboration({
   useEffect(() => {
     latestStateRef.current = state;
     onStateChange(state);
-  }, [onStateChange, state]);
+    // Scoped collaborative undo/redo is only correct in shared mode; in local
+    // mode undo restores full snapshots as usual.
+    editorAppRef.current?.setCollaborationMode(state.mode === "shared");
+  }, [editorAppRef, onStateChange, state]);
 
   useEffect(() => {
     return () => {

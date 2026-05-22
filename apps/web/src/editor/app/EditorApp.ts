@@ -15,6 +15,7 @@ import {
   areSceneSnapshotsEqual,
   captureSceneSnapshot,
   cloneSceneSnapshot,
+  mergeScopedSnapshot,
   restoreSceneSnapshot
 } from "../scene/sceneSnapshots";
 import type {
@@ -218,6 +219,10 @@ export class EditorApp {
   private animationFrameId: number | null = null;
   private isDisposed = false;
   private pointerActive = false;
+  // When true, undo/redo only reverse the local user's own action (scoped to
+  // the layers it touched) instead of restoring a full snapshot — so undo in a
+  // shared session never reverts another user's concurrent edits.
+  private sharedCollaborationMode = false;
   private activeDocumentId: string | null = null;
   private lastCameraSnapshot: CameraSnapshot | null = null;
   private selectedTool = "Move";
@@ -1136,8 +1141,47 @@ export class EditorApp {
     return this.getCurrentHistory()?.getState() ?? createEmptyHistoryState();
   }
 
+  /**
+   * Enable/disable scoped collaborative undo. In shared mode undo/redo reverse
+   * only the local user's own change, applied on top of the current (possibly
+   * remotely-updated) scene, so they never clobber another user's edits.
+   */
+  setCollaborationMode(shared: boolean) {
+    this.sharedCollaborationMode = shared;
+  }
+
   undo() {
-    const snapshot = this.getCurrentHistory()?.undo();
+    const history = this.getCurrentHistory();
+
+    if (!history) {
+      return false;
+    }
+
+    if (this.sharedCollaborationMode) {
+      const entry = history.peekUndoEntry();
+
+      if (!entry) {
+        return false;
+      }
+
+      // Apply only this action's reverse (before) onto the current scene, which
+      // may already contain other users' edits on other layers.
+      const current = this.captureAppSnapshot();
+      const mergedScene = mergeScopedSnapshot(current.scene, entry.before.scene, entry.after.scene);
+
+      history.undo();
+      this.pendingHistoryGesture = null;
+      this.restoreAppSnapshot({
+        scene: mergedScene,
+        textEditingState: current.textEditingState
+      });
+      this.notifyHistoryChange();
+      this.notifyHistoryNavigation("undo");
+
+      return true;
+    }
+
+    const snapshot = history.undo();
 
     if (!snapshot) {
       return false;
@@ -1152,7 +1196,35 @@ export class EditorApp {
   }
 
   redo() {
-    const snapshot = this.getCurrentHistory()?.redo();
+    const history = this.getCurrentHistory();
+
+    if (!history) {
+      return false;
+    }
+
+    if (this.sharedCollaborationMode) {
+      const entry = history.peekRedoEntry();
+
+      if (!entry) {
+        return false;
+      }
+
+      const current = this.captureAppSnapshot();
+      const mergedScene = mergeScopedSnapshot(current.scene, entry.after.scene, entry.before.scene);
+
+      history.redo();
+      this.pendingHistoryGesture = null;
+      this.restoreAppSnapshot({
+        scene: mergedScene,
+        textEditingState: current.textEditingState
+      });
+      this.notifyHistoryChange();
+      this.notifyHistoryNavigation("redo");
+
+      return true;
+    }
+
+    const snapshot = history.redo();
 
     if (!snapshot) {
       return false;

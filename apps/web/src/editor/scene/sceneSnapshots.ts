@@ -80,6 +80,106 @@ export function restoreSceneSnapshot(scene: Scene, snapshot: SceneSnapshot) {
   scene.selection.restoreSnapshot(nextSnapshot.selection);
 }
 
+/**
+ * Build a scene snapshot that moves only the layers an action touched to their
+ * `target` state, while leaving every other layer at its `current` state.
+ *
+ * Used for collaborative undo/redo: `target`/`other` are the two endpoints of
+ * the local user's action (before/after). We compute which layer ids that
+ * action changed, then apply only that change (forwards or in reverse) on top
+ * of the CURRENT scene — which also contains other users' edits. Those other
+ * edits are on different layer ids, so they are preserved untouched.
+ */
+export function mergeScopedSnapshot(
+  current: SceneSnapshot,
+  target: SceneSnapshot,
+  other: SceneSnapshot
+): SceneSnapshot {
+  const targetById = new Map(target.layers.map((layer) => [layer.id, layer]));
+  const otherById = new Map(other.layers.map((layer) => [layer.id, layer]));
+
+  // Layer ids the action changed (differ between target and other).
+  const touched = new Set<string>();
+  for (const layer of target.layers) {
+    const counterpart = otherById.get(layer.id);
+    if (!counterpart || !areLayersEqual(layer, counterpart)) {
+      touched.add(layer.id);
+    }
+  }
+  for (const layer of other.layers) {
+    if (!targetById.has(layer.id)) {
+      touched.add(layer.id);
+    }
+  }
+
+  // Keep current layers; for touched ids swap in the target state (or drop when
+  // the target no longer has that layer).
+  const resultLayers: Layer[] = [];
+  for (const layer of current.layers) {
+    if (!touched.has(layer.id)) {
+      resultLayers.push(cloneLayerForSnapshot(layer));
+      continue;
+    }
+    const targetLayer = targetById.get(layer.id);
+    if (targetLayer) {
+      resultLayers.push(cloneLayerForSnapshot(targetLayer));
+    }
+    // touched but absent in target → the action removed it → drop.
+  }
+
+  // Re-add touched layers that exist in target but are missing from current,
+  // inserting each after its nearest preceding target sibling to keep z-order.
+  for (let targetIndex = 0; targetIndex < target.layers.length; targetIndex += 1) {
+    const targetLayer = target.layers[targetIndex];
+    if (!touched.has(targetLayer.id)) {
+      continue;
+    }
+    if (resultLayers.some((layer) => layer.id === targetLayer.id)) {
+      continue;
+    }
+
+    let insertAt = 0;
+    for (let i = targetIndex - 1; i >= 0; i -= 1) {
+      const found = resultLayers.findIndex((layer) => layer.id === target.layers[i].id);
+      if (found >= 0) {
+        insertAt = found + 1;
+        break;
+      }
+    }
+    resultLayers.splice(insertAt, 0, cloneLayerForSnapshot(targetLayer));
+  }
+
+  // The document (canvas size/color) is global; only adopt the target's value
+  // if the action actually changed it, otherwise keep current (preserves a
+  // concurrent resize by another user).
+  const documentChanged = !areDocumentsEqual(target.document, other.document);
+  const sourceDocument = documentChanged ? target.document : current.document;
+
+  return {
+    document: {
+      color: [...sourceDocument.color],
+      height: sourceDocument.height,
+      width: sourceDocument.width,
+      x: sourceDocument.x,
+      y: sourceDocument.y
+    },
+    layers: resultLayers,
+    selectedLayerId: current.selectedLayerId,
+    selectedLayerIds: [...current.selectedLayerIds],
+    selection: cloneSelectionManagerState(current.selection)
+  };
+}
+
+function areDocumentsEqual(left: SceneSnapshot["document"], right: SceneSnapshot["document"]) {
+  return (
+    left.x === right.x &&
+    left.y === right.y &&
+    left.width === right.width &&
+    left.height === right.height &&
+    areColorArraysEqual(left.color, right.color)
+  );
+}
+
 export function areSceneSnapshotsEqual(
   left: SceneSnapshot,
   right: SceneSnapshot,

@@ -93,6 +93,16 @@ export class EditorHistory<TSnapshot> {
     return this.index + 1 < this.entries.length;
   }
 
+  /** The entry undo() would revert, without mutating the stack. */
+  peekUndoEntry(): EditorHistoryEntry<TSnapshot> | null {
+    return this.canUndo() ? this.entries[this.index] : null;
+  }
+
+  /** The entry redo() would apply, without mutating the stack. */
+  peekRedoEntry(): EditorHistoryEntry<TSnapshot> | null {
+    return this.canRedo() ? this.entries[this.index + 1] : null;
+  }
+
   undo() {
     if (!this.canUndo()) {
       return null;
