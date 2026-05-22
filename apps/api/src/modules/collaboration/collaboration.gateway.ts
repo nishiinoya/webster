@@ -60,6 +60,9 @@ export class CollaborationGateway
   /** Per-project mutex: Map<projectId, tail of promise chain> */
   private readonly projectLocks = new Map<string, Promise<void>>();
 
+  /** Singleton JWKS client — reusing it keeps the key cache warm across connections. */
+  private jwksClient: import('jwks-rsa').JwksClient | null = null;
+
   constructor(
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
@@ -389,6 +392,12 @@ export class CollaborationGateway
     const tail = this.projectLocks.get(projectId) ?? Promise.resolve();
     const next = tail.then(() => this.doCommit(socket, op)).catch(() => {});
     this.projectLocks.set(projectId, next);
+    // Clean up once this is the last pending commit so the map doesn't grow forever.
+    void next.then(() => {
+      if (this.projectLocks.get(projectId) === next) {
+        this.projectLocks.delete(projectId);
+      }
+    });
     await next;
   }
 
@@ -505,17 +514,19 @@ export class CollaborationGateway
     audience: string,
   ): Promise<JwtPayload> {
     return new Promise((resolve, reject) => {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const jwksRsa = require('jwks-rsa') as typeof import('jwks-rsa');
-      const client = jwksRsa({
-        cache: true,
-        rateLimit: true,
-        jwksRequestsPerMinute: 5,
-        jwksUri: `https://${domain}/.well-known/jwks.json`,
-      });
+      if (!this.jwksClient) {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const jwksRsa = require('jwks-rsa') as typeof import('jwks-rsa');
+        this.jwksClient = jwksRsa({
+          cache: true,
+          rateLimit: true,
+          jwksRequestsPerMinute: 5,
+          jwksUri: `https://${domain}/.well-known/jwks.json`,
+        });
+      }
 
       const getKey: GetPublicKeyOrSecret = (header, callback) => {
-        client.getSigningKey(header.kid, (err, key) => {
+        this.jwksClient!.getSigningKey(header.kid, (err, key) => {
           if (err || !key) {
             callback(err ?? new Error('Signing key not found'));
             return;

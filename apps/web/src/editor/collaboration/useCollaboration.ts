@@ -270,7 +270,12 @@ export function useCollaboration({
         clientId,
         onAppliedOperation: (applied) => {
           applyChainRef.current = applyChainRef.current
-            .then(() => handleAppliedOperation(applied))
+            .then(() => {
+              // Skip processing during resync — the resync will import the
+              // authoritative state and reset all refs itself.
+              if (resyncingRef.current) return;
+              return handleAppliedOperation(applied);
+            })
             .catch(() => {});
         },
         onError: async (error) => {
