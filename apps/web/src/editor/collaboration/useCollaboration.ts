@@ -520,7 +520,6 @@ export function useCollaboration({
 
       if (
         !editorApp ||
-        isApplyingRemoteRef.current ||
         currentState.mode !== "shared" ||
         !currentState.projectId ||
         !currentState.capabilities.canEdit ||
