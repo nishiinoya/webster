@@ -239,6 +239,7 @@ export function CanvasView({
     });
   const {
     canEditSharedProject,
+    currentUserIdRef,
     handleLocalEditorAction,
     sendPresenceCursor,
     sendPreviewFromCurrentScene,
@@ -922,10 +923,11 @@ export function CanvasView({
             ) : null}
             {collaborationState.mode === 'shared'
               ? collaborationState.users
-                  .filter((u) => u.cursor != null)
+                  .filter((u) => u.cursor != null && u.user.id !== currentUserIdRef.current)
                   .map((u) => {
-                    const x = u.cursor!.x;
-                    const y = u.cursor!.y;
+                    const canvasRect = canvasRef.current?.getBoundingClientRect();
+                    const x = u.cursor!.x * (canvasRect?.width ?? 0);
+                    const y = u.cursor!.y * (canvasRect?.height ?? 0);
                     const color = userIdToColor(u.user.id);
                     return (
                       <div

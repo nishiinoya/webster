@@ -30,6 +30,7 @@ import {
   downloadSharedProjectFile,
   fetchSharedProjectAssets,
   getAccessToken,
+  getCurrentUser,
   getSharedProjectWebSocketUrl,
   listProjectSnapshots,
   loadSharedProject,
@@ -107,6 +108,11 @@ export function useCollaboration({
 }: UseCollaborationOptions) {
   const [state, setState] = useState<SharedProjectUiState>(initialState);
   const clientId = useMemo(() => getOrCreateClientId(), []);
+  const currentUserIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    getCurrentUser().then((u) => { currentUserIdRef.current = u.id; }).catch(() => {});
+  }, []);
   const clientRef = useRef<CollaborationClient | null>(null);
   const handledRequestIdRef = useRef<number | null>(null);
   const isApplyingRemoteRef = useRef(false);
@@ -748,6 +754,7 @@ export function useCollaboration({
 
   return {
     canEditSharedProject: state.mode === "local" || state.capabilities.canEdit,
+    currentUserIdRef,
     handleLocalEditorAction,
     sendPresenceCursor,
     sendPreviewFromCurrentScene,
