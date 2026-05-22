@@ -242,6 +242,7 @@ export function CanvasView({
     handleLocalEditorAction,
     sendPresenceCursor,
     sendPreviewFromCurrentScene,
+    state: collaborationState,
   } = useCollaboration({
     activeDocumentTitle: activeDocument.title,
     editorAppRef,
@@ -919,6 +920,35 @@ export function CanvasView({
                 {webglError}
               </p>
             ) : null}
+            {collaborationState.mode === 'shared'
+              ? collaborationState.users
+                  .filter((u) => u.cursor != null)
+                  .map((u) => {
+                    const color = userIdToColor(u.user.id);
+                    return (
+                      <div
+                        key={u.user.id}
+                        className='pointer-events-none absolute z-[3]'
+                        style={{ left: u.cursor!.x, top: u.cursor!.y }}
+                      >
+                        <svg width='16' height='20' viewBox='0 0 16 20' fill='none'>
+                          <path
+                            d='M0 0L0 14L4 10L6.5 16L8.5 15L6 9L11 9Z'
+                            fill={color}
+                            stroke='#17191d'
+                            strokeWidth='1.2'
+                          />
+                        </svg>
+                        <span
+                          className='absolute left-4 top-3 whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] font-bold text-white'
+                          style={{ backgroundColor: color }}
+                        >
+                          {u.user.displayName}
+                        </span>
+                      </div>
+                    );
+                  })
+              : null}
           </div>
           <p className='pointer-events-none absolute left-1/2 top-12 z-[2] m-0 -translate-x-1/2 rounded-lg border border-white/10 bg-[rgba(23,25,29,0.9)] px-3 py-2 text-[13px] font-bold text-[#eef1f4]'>
             {activeDocument.title}
@@ -933,6 +963,19 @@ export function CanvasView({
       </div>
     </section>
   );
+}
+
+const CURSOR_COLORS = [
+  '#4aa391', '#e05c5c', '#e0a85c', '#5c8be0', '#b05ce0',
+  '#5ce08b', '#e05ca8', '#5cd4e0', '#e0d45c', '#a05ce0',
+];
+
+function userIdToColor(userId: string): string {
+  let hash = 0;
+  for (let i = 0; i < userId.length; i++) {
+    hash = (hash * 31 + userId.charCodeAt(i)) >>> 0;
+  }
+  return CURSOR_COLORS[hash % CURSOR_COLORS.length];
 }
 
 function downloadBlob(blob: Blob, filename: string) {

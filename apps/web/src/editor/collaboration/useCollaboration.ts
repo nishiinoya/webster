@@ -643,9 +643,15 @@ export function useCollaboration({
     [clientId, editorAppRef, prepareOperationForSocket]
   );
 
-  // Cursor presence disabled — was generating a presence:cursor event on every
-  // pointer move, flooding the socket with high-frequency noise.
-  const sendPresenceCursor = useCallback((_cursor: { x: number; y: number } | null, _tool: string) => {}, []);
+  const sendPresenceCursor = useCallback((cursor: { x: number; y: number } | null, tool: string) => {
+    const currentState = latestStateRef.current;
+
+    if (currentState.mode !== "shared" || !currentState.projectId || !clientRef.current?.isConnected) {
+      return;
+    }
+
+    clientRef.current.sendPresence(cursor, tool);
+  }, []);
 
   useEffect(() => {
     if (!request || handledRequestIdRef.current === request.id) {
