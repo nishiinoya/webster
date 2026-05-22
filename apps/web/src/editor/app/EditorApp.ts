@@ -568,7 +568,7 @@ export class EditorApp {
   async importSerializedScene(
     data: SerializedScene,
     assets = new Map<string, Blob>(),
-    options: { historyLabel?: string } = {}
+    options: { historyLabel?: string; preserveHistory?: boolean } = {}
   ) {
     const nextScene = await Scene.fromJSON(data, assets);
 
@@ -588,6 +588,17 @@ export class EditorApp {
       disposeCurrent: true,
       rememberActiveDocument: true
     });
+
+    // Remote collaboration updates pass preserveHistory so they swap the canvas
+    // without wiping the local user's undo stack or adding an undoable step.
+    // (Falls back to a reset if no history exists yet, e.g. very first load.)
+    const hasHistory = Boolean(
+      this.activeDocumentId && this.histories.get(this.activeDocumentId)
+    );
+    if (options.preserveHistory && hasHistory) {
+      return this.scene;
+    }
+
     this.resetCurrentHistory(options.historyLabel ?? "Loaded project");
 
     return this.scene;

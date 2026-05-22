@@ -533,7 +533,7 @@ export function useCollaboration({
           await editorAppRef.current.importSerializedScene(
             replayTarget as unknown as import("../scene/Scene").SerializedScene,
             assets,
-            { historyLabel: "Remote update" }
+            { historyLabel: "Remote update", preserveHistory: true }
           );
           lastSyncedSceneRef.current = replayTarget;
           onLayersChange(editorAppRef.current.getLayerSummaries());
