@@ -500,7 +500,8 @@ export class CollaborationGateway
 
     this.presenceService.set(projectId, clientId, presence);
 
-    this.server
+    // Exclude the sender — they already know where their own cursor is.
+    socket
       .to(`project:${projectId}`)
       .emit('presence:update', this.presenceService.getAll(projectId));
   }
