@@ -138,6 +138,9 @@ export function useCollaboration({
   // Instead of committing one op per pointer-move point, we wait for inactivity
   // and send a single op capturing the full stroke/gesture result.
   const gestureDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // True while the debounce timeout is flushing — prevents re-entering the
+  // debounce branch and creating an infinite timeout loop.
+  const gestureFlushingRef = useRef(false);
   const pendingQueueRef = useRef(new PendingOperationsQueue());
   // Stores the pure delta (diff from previousScene to manifest) for each
   // pending op, keyed by clientOperationId. Used during replay instead of
@@ -322,7 +325,15 @@ export function useCollaboration({
           }
         },
         onState: async (projectState) => {
-          await applySharedProjectState(projectState);
+          // If already showing this project, only refresh meta (users, version,
+          // snapshots) without re-importing the full scene — avoids a double
+          // import that can drop the presence list on reconnect.
+          if (latestStateRef.current.projectId === projectState.projectId &&
+              latestStateRef.current.mode === "shared") {
+            applySharedProjectMeta(projectState);
+          } else {
+            await applySharedProjectState(projectState);
+          }
         },
         onStatusChange: (connectionStatus) => {
           setState((currentState) => ({
@@ -541,14 +552,17 @@ export function useCollaboration({
 
       // Gesture actions (draw strokes, transforms, mask brush) fire on every
       // pointer move. Debounce them so we send one op per completed gesture
-      // instead of one per intermediate point.
-      if (action.kind === "gesture") {
+      // instead of one per intermediate point. gestureFlushingRef prevents
+      // the timeout callback from re-entering this branch (infinite loop).
+      if (action.kind === "gesture" && !gestureFlushingRef.current) {
         if (gestureDebounceRef.current) {
           clearTimeout(gestureDebounceRef.current);
         }
         gestureDebounceRef.current = setTimeout(() => {
           gestureDebounceRef.current = null;
+          gestureFlushingRef.current = true;
           handleLocalEditorAction(action);
+          gestureFlushingRef.current = false;
         }, 150);
         return;
       }
