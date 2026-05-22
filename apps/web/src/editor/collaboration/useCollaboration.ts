@@ -22,6 +22,7 @@ import {
   applyOperationToScene,
   applyScenePatch,
   computeSceneDiff,
+  dedupeManifestLayers,
   createOperationFromEditorAction,
   createPreviewOperationFromEditorScene
 } from "./operations";
@@ -501,6 +502,11 @@ export function useCollaboration({
             }
           }
         }
+
+        // Replay patches were diffed against the optimistic baseline, not against
+        // newServerBase, so merging them can produce duplicate layer ids. Enforce
+        // the uniqueness invariant before import to avoid crashing the layer list.
+        replayTarget = dedupeManifestLayers(replayTarget);
 
         // 3. Single import of the final replayed state.
         const assets = await fetchSharedProjectAssets(remoteOp.assetReferences);

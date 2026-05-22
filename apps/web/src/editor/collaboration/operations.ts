@@ -160,6 +160,44 @@ export function computeSceneDiff(
 }
 
 /**
+ * Enforce the layer-id uniqueness invariant of a manifest. Merging a remote
+ * op's scene base with the local pending-op replay patches can occasionally
+ * produce two layers with the same id (the replay patch was diffed against a
+ * different base than it is applied to). Two layers sharing an id crashes the
+ * React layer list ("two children with the same key"). We keep the LAST
+ * occurrence of each id (most recent state) in its position. Returns the same
+ * object when there is nothing to dedupe so callers don't churn React state.
+ */
+export function dedupeManifestLayers(
+  manifest: WebsterProjectManifest
+): WebsterProjectManifest {
+  const layers = manifest.layers;
+  if (!Array.isArray(layers) || layers.length === 0) {
+    return manifest;
+  }
+
+  const lastIndexById = new Map<string, number>();
+  layers.forEach((layer, index) => {
+    if (layer && typeof layer.id === "string") {
+      lastIndexById.set(layer.id, index);
+    }
+  });
+
+  const deduped = layers.filter((layer, index) => {
+    if (!layer || typeof layer.id !== "string") {
+      return true;
+    }
+    return lastIndexById.get(layer.id) === index;
+  });
+
+  if (deduped.length === layers.length) {
+    return manifest;
+  }
+
+  return { ...manifest, layers: deduped };
+}
+
+/**
  * Re-export so the receiver hook can apply incoming patches to its local
  * manifest before importing into the editor.
  */
