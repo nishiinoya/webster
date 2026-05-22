@@ -292,24 +292,38 @@ export function useCollaboration({
             return;
           }
 
-          try {
-            const assets = await fetchSharedProjectAssets(operation.assetReferences);
+          // Previews are ephemeral visuals — do NOT call importSerializedScene,
+          // which resets history and triggers setState inside a React update
+          // cycle (causes "Maximum update depth exceeded"). Just compute the
+          // manifest and skip if applying would be harmful.
+          if (isApplyingRemoteRef.current || resyncingRef.current) {
+            return;
+          }
 
+          try {
+            let previewManifest: import("@webster/shared").WebsterProjectManifest | null = null;
+            if (operation.scene) {
+              previewManifest = operation.scene;
+            } else if (operation.scenePatch?.length && lastSyncedSceneRef.current) {
+              try {
+                previewManifest = applyScenePatch(lastSyncedSceneRef.current, operation.scenePatch);
+              } catch {
+                return;
+              }
+            }
+
+            if (!previewManifest) return;
+
+            const assets = await fetchSharedProjectAssets(operation.assetReferences);
             isApplyingRemoteRef.current = true;
-            // Previews are ephemeral in-progress visuals. We render them but
-            // must NOT advance lastSyncedSceneRef — only committed operations
-            // move the baseline the next diff is computed against.
-            await applyOperationToScene(
-              editorAppRef.current,
-              operation,
+            await editorAppRef.current.importSerializedScene(
+              previewManifest as unknown as import("../scene/Scene").SerializedScene,
               assets,
-              lastSyncedSceneRef.current
+              { historyLabel: "Remote preview" }
             );
             onLayersChange(editorAppRef.current.getLayerSummaries());
           } catch {
-            // A preview that can't apply to our base is harmless — the
-            // committed op (or a resync triggered by it) will correct the
-            // canvas. Don't surface an error or resync for previews.
+            // Preview failure is harmless — committed op will correct the canvas.
           } finally {
             isApplyingRemoteRef.current = false;
           }
@@ -457,6 +471,12 @@ export function useCollaboration({
 
       if (newServerBase) {
         serverBaseSceneRef.current = newServerBase;
+
+        // Wait for any in-flight local commit to finish serialising before
+        // replaying. Without this, a stroke that is mid-serialisation in the
+        // commit chain hasn't been added to pendingQueue yet, so it would be
+        // missing from the replay and appear to vanish on the canvas.
+        await commitChainRef.current;
 
         // 2. Replay all unconfirmed local ops on top of the new server base so
         // the user's in-progress strokes / edits are not wiped by the remote op.
