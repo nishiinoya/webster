@@ -21,6 +21,7 @@ import { PendingOperationsQueue } from "./PendingOperationsQueue";
 import {
   applyOperationToScene,
   applyScenePatch,
+  computeSceneDiff,
   createOperationFromEditorAction,
   createPreviewOperationFromEditorScene
 } from "./operations";
@@ -128,6 +129,11 @@ export function useCollaboration({
   // and ship inconsistent patches.
   const commitChainRef = useRef<Promise<unknown>>(Promise.resolve());
   const pendingQueueRef = useRef(new PendingOperationsQueue());
+  // Stores the pure delta (diff from previousScene to manifest) for each
+  // pending op, keyed by clientOperationId. Used during replay instead of
+  // op.scene so the replay applies the op's change on top of the current
+  // replayTarget rather than replacing it — prevents duplicate layer IDs.
+  const pendingOpReplaysRef = useRef(new Map<string, import("@webster/shared").ProjectScenePatchOp[]>());
   const resyncingRef = useRef(false);
   const uploadedAssetPathsRef = useRef(new Set<string>());
   // Serialise applied-operation handlers so a slow async handler (e.g. asset
@@ -389,6 +395,7 @@ export function useCollaboration({
       // state and clear unconfirmed commits instead of trying to merge divergent
       // local edits against the new version.
       pendingQueueRef.current.clear();
+      pendingOpReplaysRef.current.clear();
       updatePendingCount();
       await applySharedProjectState(payload);
     } finally {
@@ -401,6 +408,7 @@ export function useCollaboration({
 
     if (isOwnOp) {
       pendingQueueRef.current.confirm(applied.operation.clientOperationId);
+      pendingOpReplaysRef.current.delete(applied.operation.clientOperationId);
       updatePendingCount();
 
       // Advance server base to include our confirmed op. This is an
@@ -450,16 +458,19 @@ export function useCollaboration({
 
         // 2. Replay all unconfirmed local ops on top of the new server base so
         // the user's in-progress strokes / edits are not wiped by the remote op.
+        // Always use the stored replayPatch (pure delta) rather than op.scene to
+        // avoid replacing replayTarget with a stale full-scene snapshot, which
+        // would cause the op's layers to be added again on the next replay cycle
+        // and produce duplicate layer keys.
         let replayTarget: import("@webster/shared").WebsterProjectManifest = newServerBase;
         for (const pendingOp of pendingQueueRef.current.list()) {
-          if (pendingOp.scene) {
-            replayTarget = pendingOp.scene;
-          } else if (pendingOp.scenePatch?.length) {
+          const replayPatch = pendingOpReplaysRef.current.get(pendingOp.clientOperationId);
+          const patchToApply = replayPatch ?? pendingOp.scenePatch;
+          if (patchToApply?.length) {
             try {
-              replayTarget = applyScenePatch(replayTarget, pendingOp.scenePatch);
+              replayTarget = applyScenePatch(replayTarget, patchToApply);
             } catch {
-              // Pending patch no longer applies cleanly — skip it in the
-              // replay; it will be dropped or retried when confirmed.
+              // Patch no longer applies cleanly — skip in replay.
             }
           }
         }
@@ -569,6 +580,16 @@ export function useCollaboration({
 
           const operation = await prepareOperationForSocket(preparedOperation);
 
+          // Store the pure delta for this op so replay can apply just this
+          // change on top of any replayTarget instead of replacing it with
+          // op.scene (which would lose concurrent remote changes).
+          if (previousScene) {
+            const replayPatch = computeSceneDiff(previousScene, preparedOperation.manifest);
+            if (replayPatch.length > 0) {
+              pendingOpReplaysRef.current.set(operation.clientOperationId, replayPatch);
+            }
+          }
+
           pendingQueueRef.current.add(operation);
           updatePendingCount();
           clientRef.current?.sendCommit(operation);
@@ -622,15 +643,9 @@ export function useCollaboration({
     [clientId, editorAppRef, prepareOperationForSocket]
   );
 
-  const sendPresenceCursor = useCallback((cursor: { x: number; y: number } | null, tool: string) => {
-    const currentState = latestStateRef.current;
-
-    if (currentState.mode !== "shared" || !currentState.projectId || !clientRef.current?.isConnected) {
-      return;
-    }
-
-    clientRef.current.sendPresence(cursor, tool);
-  }, []);
+  // Cursor presence disabled — was generating a presence:cursor event on every
+  // pointer move, flooding the socket with high-frequency noise.
+  const sendPresenceCursor = useCallback((_cursor: { x: number; y: number } | null, _tool: string) => {}, []);
 
   useEffect(() => {
     if (!request || handledRequestIdRef.current === request.id) {
@@ -652,6 +667,7 @@ export function useCollaboration({
         } else if (request.type === "switch-local") {
           clientRef.current?.disconnect();
           pendingQueueRef.current.clear();
+          pendingOpReplaysRef.current.clear();
           uploadedAssetPathsRef.current.clear();
           setState(initialState);
         } else if (request.type === "download-webster") {

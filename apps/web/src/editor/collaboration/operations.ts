@@ -149,6 +149,17 @@ function buildSceneFields(
 }
 
 /**
+ * Compute the patch between two manifests — used to derive a replay-safe
+ * delta for pending ops that were sent as full scenes.
+ */
+export function computeSceneDiff(
+  from: WebsterProjectManifest,
+  to: WebsterProjectManifest
+): ProjectScenePatchOp[] {
+  return compare(from, to) as ProjectScenePatchOp[];
+}
+
+/**
  * Re-export so the receiver hook can apply incoming patches to its local
  * manifest before importing into the editor.
  */
