@@ -20,6 +20,7 @@ import {
 import { PendingOperationsQueue } from "./PendingOperationsQueue";
 import {
   applyOperationToScene,
+  applyScenePatch,
   createOperationFromEditorAction,
   createPreviewOperationFromEditorScene
 } from "./operations";
@@ -118,6 +119,10 @@ export function useCollaboration({
   // against this to compute the JSON Patch for the next commit, instead of
   // shipping the whole scene each time.
   const lastSyncedSceneRef = useRef<import("@webster/shared").WebsterProjectManifest | null>(null);
+  // Confirmed server state — updated only on operation:applied, never by
+  // optimistic local commits. Used as the base when replaying pending ops
+  // on top of an incoming remote operation.
+  const serverBaseSceneRef = useRef<import("@webster/shared").WebsterProjectManifest | null>(null);
   // Commits are serialised through this chain so two rapid edits can't both
   // read the same baseVersion / previousScene during their `await` window
   // and ship inconsistent patches.
@@ -223,6 +228,7 @@ export function useCollaboration({
       nextBaseVersionRef.current = payload.currentVersion;
       // The server's snapshot IS our new baseline — next commit diffs against it.
       lastSyncedSceneRef.current = payload.snapshot ?? null;
+      serverBaseSceneRef.current = payload.snapshot ?? null;
       rememberUploadedAssets(payload.assets);
       setState((currentState) => ({
         ...currentState,
@@ -403,44 +409,80 @@ export function useCollaboration({
   }, [applySharedProjectState, updatePendingCount]);
 
   async function handleAppliedOperation(applied: AppliedProjectOperation) {
-    if (applied.operation.clientId === clientId) {
+    const isOwnOp = applied.operation.clientId === clientId;
+
+    if (isOwnOp) {
       pendingQueueRef.current.confirm(applied.operation.clientOperationId);
       updatePendingCount();
-    } else if (editorAppRef.current) {
-      // A remote op's patch is computed against the version right before it
-      // (applied.version - 1). If our local version isn't that, we've missed
-      // an op — applying this patch to our stale base would corrupt the scene.
-      // Resync from the server (authoritative) instead.
-      const localVersion = latestStateRef.current.currentVersion ?? 0;
-      const expectedBase = applied.version - 1;
 
-      if (localVersion !== expectedBase) {
-        await resyncProject();
-        return;
+      // Advance server base to include our confirmed op. This is an
+      // approximation — if the server rebased our op the result may differ
+      // slightly, but it self-heals on the next remote op + replay cycle.
+      if (serverBaseSceneRef.current) {
+        const op = applied.operation;
+        if (op.scene) {
+          serverBaseSceneRef.current = op.scene;
+        } else if (op.scenePatch?.length) {
+          try {
+            serverBaseSceneRef.current = applyScenePatch(serverBaseSceneRef.current, op.scenePatch);
+          } catch {
+            // Will self-heal on next remote op
+          }
+        }
+      }
+    } else if (editorAppRef.current) {
+      const remoteOp = applied.operation;
+
+      // 1. Compute new confirmed server base.
+      let newServerBase: import("@webster/shared").WebsterProjectManifest | null = null;
+      if (remoteOp.scene) {
+        newServerBase = remoteOp.scene;
+      } else if (remoteOp.scenePatch?.length) {
+        if (!serverBaseSceneRef.current) {
+          await resyncProject();
+          return;
+        }
+        try {
+          newServerBase = applyScenePatch(serverBaseSceneRef.current, remoteOp.scenePatch);
+        } catch {
+          await resyncProject();
+          return;
+        }
       }
 
-      try {
-        const assets = await fetchSharedProjectAssets(applied.operation.assetReferences);
+      if (newServerBase) {
+        serverBaseSceneRef.current = newServerBase;
 
-        isApplyingRemoteRef.current = true;
-        const appliedManifest = await applyOperationToScene(
-          editorAppRef.current,
-          applied.operation,
-          assets,
-          lastSyncedSceneRef.current
-        );
-        if (appliedManifest) {
-          lastSyncedSceneRef.current = appliedManifest;
+        // 2. Replay all unconfirmed local ops on top of the new server base so
+        // the user's in-progress strokes / edits are not wiped by the remote op.
+        let replayTarget: import("@webster/shared").WebsterProjectManifest = newServerBase;
+        for (const pendingOp of pendingQueueRef.current.list()) {
+          if (pendingOp.scene) {
+            replayTarget = pendingOp.scene;
+          } else if (pendingOp.scenePatch?.length) {
+            try {
+              replayTarget = applyScenePatch(replayTarget, pendingOp.scenePatch);
+            } catch {
+              // Pending patch no longer applies cleanly — skip it in the
+              // replay; it will be dropped or retried when confirmed.
+            }
+          }
         }
-        onLayersChange(editorAppRef.current.getLayerSummaries());
-      } catch (error) {
-        // Patch couldn't apply to our local base (drift) — pull the
-        // authoritative scene from the server to self-heal.
-        isApplyingRemoteRef.current = false;
-        await resyncProject();
-        return;
-      } finally {
-        isApplyingRemoteRef.current = false;
+
+        // 3. Single import of the final replayed state.
+        const assets = await fetchSharedProjectAssets(remoteOp.assetReferences);
+        isApplyingRemoteRef.current = true;
+        try {
+          await editorAppRef.current.importSerializedScene(
+            replayTarget as unknown as import("../scene/Scene").SerializedScene,
+            assets,
+            { historyLabel: "Remote update" }
+          );
+          lastSyncedSceneRef.current = replayTarget;
+          onLayersChange(editorAppRef.current.getLayerSummaries());
+        } finally {
+          isApplyingRemoteRef.current = false;
+        }
       }
     }
 

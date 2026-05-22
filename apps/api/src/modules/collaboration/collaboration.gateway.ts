@@ -311,20 +311,8 @@ export class CollaborationGateway
       type: 'manual' as const,
     }));
 
-    const statePayload: SharedProjectStatePayload = {
-      projectId,
-      projectName: project.projectName,
-      currentVersion: project.currentVersion,
-      role: frontendRole,
-      snapshot: (project.metadata ?? {}) as any,
-      assets,
-      snapshots,
-      users: this.presenceService.getAll(projectId),
-    };
-
-    socket.emit('project:state', statePayload);
-
-    // Update presence
+    // Register presence BEFORE building the state payload so the joining
+    // client's own entry is included in the users list they receive.
     const presence: SharedProjectPresence = {
       user: {
         id: user.id,
@@ -335,10 +323,23 @@ export class CollaborationGateway
     this.presenceService.set(projectId, clientId, presence);
     socket.data.trackedPresence.set(clientId, projectId);
 
-    socket.to(`project:${projectId}`).emit(
-      'presence:update',
-      this.presenceService.getAll(projectId),
-    );
+    const allUsers = this.presenceService.getAll(projectId);
+
+    const statePayload: SharedProjectStatePayload = {
+      projectId,
+      projectName: project.projectName,
+      currentVersion: project.currentVersion,
+      role: frontendRole,
+      snapshot: (project.metadata ?? {}) as any,
+      assets,
+      snapshots,
+      users: allUsers,
+    };
+
+    socket.emit('project:state', statePayload);
+
+    // Notify everyone else that a new user joined.
+    socket.to(`project:${projectId}`).emit('presence:update', allUsers);
   }
 
   // ---------------------------------------------------------------------------
