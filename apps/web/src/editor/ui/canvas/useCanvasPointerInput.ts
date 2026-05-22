@@ -118,7 +118,8 @@ export function useCanvasPointerInput({
       },
       onPointerLeave: () => setCanvasCursor("default"),
       onPointerMove: (event: ReactPointerEvent<HTMLCanvasElement>) => {
-        onPresenceCursor?.({ x: event.clientX, y: event.clientY }, selectedTool);
+        const rect = event.currentTarget.getBoundingClientRect();
+        onPresenceCursor?.({ x: event.clientX - rect.left, y: event.clientY - rect.top }, selectedTool);
         panTo(event.clientX, event.clientY);
 
         if (selectedTool === "Text" && textSelectionPointerIdRef.current === event.pointerId) {

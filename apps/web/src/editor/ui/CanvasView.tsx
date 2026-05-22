@@ -206,7 +206,6 @@ export function CanvasView({
   showCanvasBorder,
 }: CanvasViewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const canvasContainerRef = useRef<HTMLDivElement | null>(null);
   const collaborationActionHandlerRef = useRef<
     (action: SharedEditorAction) => void
   >(() => undefined);
@@ -901,7 +900,7 @@ export function CanvasView({
       />
       <div className='relative grid min-h-full p-0'>
         <div className='relative min-h-0 min-w-0'>
-          <div className='absolute inset-0 grid overflow-hidden bg-transparent' ref={canvasContainerRef}>
+          <div className='absolute inset-0 grid overflow-hidden bg-transparent'>
             <canvas
               ref={canvasRef}
               aria-label='WebGL editor canvas'
@@ -925,9 +924,8 @@ export function CanvasView({
               ? collaborationState.users
                   .filter((u) => u.cursor != null)
                   .map((u) => {
-                    const rect = canvasContainerRef.current?.getBoundingClientRect();
-                    const x = u.cursor!.x - (rect?.left ?? 0);
-                    const y = u.cursor!.y - (rect?.top ?? 0);
+                    const x = u.cursor!.x;
+                    const y = u.cursor!.y;
                     const color = userIdToColor(u.user.id);
                     return (
                       <div
