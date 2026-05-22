@@ -50,28 +50,39 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     }
 
     const auth0Subject = payload.sub;
+
+    // FAST PATH: a subject we've already seen is the overwhelmingly common case.
+    // Resolve it with a single lookup — no /userinfo call, no merge transaction.
+    // (Calling /userinfo + a multi-table merge on EVERY request was both slow and
+    // a source of lock contention/hangs under concurrent REST + WS auth.)
+    const known = await this.prisma.user.findUnique({ where: { auth0Subject } });
+    if (known) {
+      // Cheap backfill: if the JWT carries a real email and our stored one is a
+      // placeholder, update it once. No /userinfo, no merge.
+      const claimEmail = (payload.email ?? '').trim().toLowerCase();
+      if (claimEmail && known.email.startsWith('noemail:')) {
+        try {
+          const updated = await this.prisma.user.update({
+            where: { id: known.id },
+            data: { email: claimEmail, displayName: payload.name ?? known.displayName },
+          });
+          return this.toAuthUser(updated);
+        } catch {
+          // email may now collide with a pending row — ignore and use what we have
+        }
+      }
+      return this.toAuthUser(known);
+    }
+
+    // SLOW PATH (new subject only): resolve a real email so we can attach to a
+    // pending invite, falling back to /userinfo when the token lacks the claim.
     let realEmail = (payload.email ?? '').trim().toLowerCase();
     let displayName = payload.name ?? null;
-
-    // Google OAuth (and some other social connections) issue Auth0 access tokens
-    // without the email claim. If we don't have one and we don't already know
-    // this user's email, fetch it from /userinfo so pending-invite reconciliation
-    // can find them.
     if (!realEmail) {
-      const existing = await this.prisma.user.findUnique({
-        where: { auth0Subject },
-        select: { email: true, displayName: true },
-      });
-
-      if (existing && !existing.email.startsWith('noemail:')) {
-        realEmail = existing.email;
-        displayName = displayName ?? existing.displayName;
-      } else {
-        const userInfo = await this.fetchUserInfo(req);
-        if (userInfo) {
-          realEmail = (userInfo.email ?? '').trim().toLowerCase();
-          displayName = displayName ?? userInfo.name ?? null;
-        }
+      const userInfo = await this.fetchUserInfo(req);
+      if (userInfo) {
+        realEmail = (userInfo.email ?? '').trim().toLowerCase();
+        displayName = displayName ?? userInfo.name ?? null;
       }
     }
 
@@ -147,6 +158,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       });
     });
 
+    return this.toAuthUser(user);
+  }
+
+  private toAuthUser(user: {
+    id: string;
+    auth0Subject: string;
+    email: string;
+    displayName: string | null;
+  }): AuthUser {
     return {
       id: user.id,
       auth0Subject: user.auth0Subject,
@@ -166,6 +186,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     try {
       const response = await fetch(`https://${this.domain}/userinfo`, {
         headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(4000),
       });
       if (!response.ok) {
         this.logger.warn(`Auth0 /userinfo returned ${response.status}`);

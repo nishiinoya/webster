@@ -155,6 +155,52 @@ export async function createProjectSnapshot({ message, projectId }: CreateSnapsh
   );
 }
 
+export type UserProfile = {
+  id: string;
+  email: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export async function getCurrentUser() {
+  return fetchJson<UserProfile>("/users/me");
+}
+
+export async function updateCurrentUser(updates: { displayName?: string }) {
+  return fetchJson<UserProfile>("/users/me", {
+    body: JSON.stringify(updates),
+    headers: { "Content-Type": "application/json" },
+    method: "PATCH"
+  });
+}
+
+export async function uploadAvatar(file: Blob, filename = "avatar") {
+  const formData = new FormData();
+  formData.append("file", file, filename);
+
+  return fetchJson<UserProfile>("/users/me/avatar", {
+    body: formData,
+    method: "POST"
+  });
+}
+
+export async function removeAvatar() {
+  return fetchJson<UserProfile>("/users/me/avatar", { method: "DELETE" });
+}
+
+/** Turns a relative avatarUrl (e.g. /users/<id>/avatar?v=...) into an absolute URL. */
+export function toAbsoluteAvatarUrl(avatarUrl: string | null | undefined) {
+  if (!avatarUrl) {
+    return null;
+  }
+  if (/^https?:\/\//iu.test(avatarUrl)) {
+    return avatarUrl;
+  }
+  return `${getSharedProjectApiBaseUrl()}${avatarUrl.startsWith("/") ? "" : "/"}${avatarUrl}`;
+}
+
 export type ProjectSummary = {
   id: string;
   projectName: string;

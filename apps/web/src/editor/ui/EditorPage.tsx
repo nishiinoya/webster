@@ -791,6 +791,19 @@ export function EditorPage() {
       return;
     }
 
+    // Reflect the click in the URL immediately, before we even start loading.
+    // The mode→shared mirror effect only fires after the load completes, so if
+    // the REST/WS round trip is slow (or hangs), we'd otherwise leave the user
+    // staring at a bare /. Doing it here makes refresh restore the right
+    // project even if the original load never finished.
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get('projectId') !== trimmed) {
+        url.searchParams.set('projectId', trimmed);
+        window.history.replaceState(null, '', url.toString());
+      }
+    }
+
     documentCounterRef.current += 1;
     const tab: EditorDocumentTab = {
       height: 600,

@@ -50,6 +50,7 @@ model User {
   auth0Subject String   @unique @map("auth0_subject") @db.VarChar
   email        String   @unique @db.VarChar
   displayName  String?  @map("display_name") @db.VarChar
+  avatarUrl    String?  @map("avatar_url") @db.Text
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 

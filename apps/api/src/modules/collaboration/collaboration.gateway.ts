@@ -94,26 +94,31 @@ export class CollaborationGateway
       }
 
       const auth0Subject = payload.sub!;
+
+      // Fast path for known subjects — one lookup, no /userinfo, no merge tx.
+      const knownUser = await this.prisma.user.findUnique({
+        where: { auth0Subject },
+      });
+      if (knownUser) {
+        socket.data.user = {
+          id: knownUser.id,
+          auth0Subject: knownUser.auth0Subject,
+          email: knownUser.email,
+          displayName: knownUser.displayName,
+        };
+        socket.data.trackedPresence = new Map();
+        this.logger.debug(`Socket ${socket.id} authenticated as ${knownUser.email}`);
+        return;
+      }
+
+      // New subject: resolve a real email (via /userinfo if needed) and reconcile.
       let rawEmail = (payload.email ?? '').trim().toLowerCase();
       let displayName: string | null = payload.name ?? null;
-
-      // If the JWT lacks the email claim (Google OAuth via Auth0 often does),
-      // either re-use what we already stored for this subject or fetch it from
-      // /userinfo so pending-invite reconciliation can find this user.
       if (!rawEmail) {
-        const existing = await this.prisma.user.findUnique({
-          where: { auth0Subject },
-          select: { email: true, displayName: true },
-        });
-        if (existing && !existing.email.startsWith('noemail:')) {
-          rawEmail = existing.email;
-          displayName = displayName ?? existing.displayName;
-        } else {
-          const userInfo = await this.fetchUserInfo(token, domain);
-          if (userInfo) {
-            rawEmail = (userInfo.email ?? '').trim().toLowerCase();
-            displayName = displayName ?? userInfo.name ?? null;
-          }
+        const userInfo = await this.fetchUserInfo(token, domain);
+        if (userInfo) {
+          rawEmail = (userInfo.email ?? '').trim().toLowerCase();
+          displayName = displayName ?? userInfo.name ?? null;
         }
       }
 
@@ -202,6 +207,7 @@ export class CollaborationGateway
     try {
       const response = await fetch(`https://${domain}/userinfo`, {
         headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(4000),
       });
       if (!response.ok) return null;
       return (await response.json()) as { email?: string; name?: string };

@@ -17,6 +17,8 @@ import Image from 'next/image';
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/Avatar';
 import Link from 'next/link';
+import { useAuth0 } from '@auth0/auth0-react';
+import { getCurrentUser, toAbsoluteAvatarUrl } from '../../collaboration/sharedProjectApi';
 
 type ToolbarProps = {
   canEditDocument: boolean;
@@ -320,7 +322,40 @@ export function Toolbar({
     }
   }
 
-  const isUser = true; // for Aauth0
+  const { user, isAuthenticated, loginWithRedirect } = useAuth0();
+  const [profile, setProfile] = useState<{
+    displayName: string | null;
+    avatarUrl: string | null;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+    let cancelled = false;
+    getCurrentUser()
+      .then((p) => {
+        if (!cancelled) {
+          setProfile({ displayName: p.displayName, avatarUrl: p.avatarUrl });
+        }
+      })
+      .catch(() => {
+        // fall back to Auth0 values
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated]);
+
+  const displayName =
+    profile?.displayName ||
+    user?.name ||
+    user?.nickname ||
+    user?.email ||
+    'Account';
+  const avatarSrc =
+    toAbsoluteAvatarUrl(profile?.avatarUrl) || user?.picture || null;
+  const avatarFallback = getAvatarInitials(displayName);
 
   return (
     <header
@@ -1413,21 +1448,24 @@ export function Toolbar({
           </>
         ) : null}
 
-        {isUser ? (
+        {isAuthenticated ? (
           <Link href='/profile' className='flex items-center gap-2 pl-2.5'>
-            <span>Alrum</span>
+            <span className='text-[13px] text-[#c9cdd2]'>{displayName}</span>
             <Avatar>
-              <AvatarImage
-                src='https://github.com/shadcn.png'
-                alt='@shadcn'
-                className='grayscale'
-              />
-              <AvatarFallback>CN</AvatarFallback>
+              {avatarSrc ? (
+                <AvatarImage
+                  src={avatarSrc}
+                  alt={displayName}
+                  className='grayscale'
+                />
+              ) : null}
+              <AvatarFallback>{avatarFallback}</AvatarFallback>
             </Avatar>
           </Link>
         ) : (
-          <a
-            href=''
+          <button
+            type='button'
+            onClick={() => void loginWithRedirect()}
             className='flex items-center gap-2 hover:bg-[#252930] rounded-lg border border-transparent hover:border-[#4c535c] px-2.5 py-2 '
           >
             <Image
@@ -1439,7 +1477,7 @@ export function Toolbar({
             <p className='text-[13px] text-[#c9cdd2] hover:text-[#dce1e6]'>
               Registration/Login
             </p>
-          </a>
+          </button>
         )}
       </div>
     </header>
@@ -1595,6 +1633,17 @@ const statusPillClass =
 
 const statusButtonClass =
   'rounded-lg border border-[#33373d] bg-[#22252a] px-2.5 py-[7px] text-[#c9cdd2] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]';
+
+function getAvatarInitials(name: string) {
+  const parts = name.trim().split(/\s+/u).filter(Boolean);
+  if (parts.length === 0) {
+    return '?';
+  }
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
 
 function getSaveStatusLabel(status: SaveStatus) {
   if (status === 'saving') {

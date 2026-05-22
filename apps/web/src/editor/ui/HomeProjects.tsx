@@ -14,12 +14,22 @@ type HomeProjectsProps = {
 
 type Tab = "recent" | "all";
 
+const ALL_PAGE_SIZE = 8;
+
 export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
   const [tab, setTab] = useState<Tab>("recent");
   const [recent, setRecent] = useState<RecentSharedProject[]>([]);
   const [allProjects, setAllProjects] = useState<ProjectSummary[]>([]);
   const [isLoadingAll, setIsLoadingAll] = useState(true);
   const [allError, setAllError] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+
+  const pageCount = Math.max(1, Math.ceil(allProjects.length / ALL_PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const pageProjects = allProjects.slice(
+    currentPage * ALL_PAGE_SIZE,
+    currentPage * ALL_PAGE_SIZE + ALL_PAGE_SIZE
+  );
 
   useEffect(() => {
     setRecent(listRecentlyOpenedProjects(10));
@@ -87,20 +97,45 @@ export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
           <EmptyNote>No recently opened projects yet.</EmptyNote>
         )
       ) : (
-        <div className="grid max-h-[320px] gap-2 overflow-auto pr-1">
+        <div className="grid gap-2">
           {isLoadingAll ? (
             <EmptyNote>Loading...</EmptyNote>
           ) : allError ? (
             <EmptyNote tone="error">{allError}</EmptyNote>
           ) : allProjects.length > 0 ? (
-            allProjects.map((project) => (
-              <ProjectRow
-                key={project.id}
-                onOpen={() => onOpenProject(project.id, project.projectName)}
-                subtitle={`${capitalize(project.role)} · ${formatWhen(Date.parse(project.updatedAt))}`}
-                title={project.projectName}
-              />
-            ))
+            <>
+              {pageProjects.map((project) => (
+                <ProjectRow
+                  key={project.id}
+                  onOpen={() => onOpenProject(project.id, project.projectName)}
+                  subtitle={`${capitalize(project.role)} · ${formatWhen(Date.parse(project.updatedAt))}`}
+                  title={project.projectName}
+                />
+              ))}
+              {pageCount > 1 ? (
+                <div className="mt-1 flex items-center justify-between gap-3">
+                  <button
+                    className={pagerClass}
+                    disabled={currentPage === 0}
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                    type="button"
+                  >
+                    Prev
+                  </button>
+                  <span className="text-[12px] font-bold text-[#8b929b]">
+                    Page {currentPage + 1} of {pageCount}
+                  </span>
+                  <button
+                    className={pagerClass}
+                    disabled={currentPage >= pageCount - 1}
+                    onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+                    type="button"
+                  >
+                    Next
+                  </button>
+                </div>
+              ) : null}
+            </>
           ) : (
             <EmptyNote>You have no projects yet.</EmptyNote>
           )}
@@ -150,6 +185,9 @@ function EmptyNote({
     </p>
   );
 }
+
+const pagerClass =
+  "rounded-md border border-[#30353d] bg-[#17191d] px-3 py-1.5 text-[12px] font-bold text-[#dce1e6] hover:border-[#4aa391] disabled:opacity-40 disabled:hover:border-[#30353d]";
 
 function tabClass(active: boolean) {
   return `rounded-lg border px-3 py-2 text-[13px] font-bold ${

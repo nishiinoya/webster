@@ -1,3 +1,16 @@
+# Development stack — everything runs in containers.
+#
+#   docker compose up -d            # postgres + minio + api + web
+#   open http://localhost:3000
+#
+# Auth0 build args come from the root .env file (gitignored). NEXT_PUBLIC_* are
+# inlined at Next build time, so the `web` image must be rebuilt when you
+# change any NEXT_PUBLIC_* value: `docker compose up -d --build web`.
+#
+# Stripe CLI is gated behind the `stripe` profile so it doesn't crash-loop
+# without a key. Opt in when you need to forward webhooks locally:
+#   docker compose --profile stripe up -d stripe-cli
+
 services:
   postgres:
     image: postgres:16
@@ -83,7 +96,28 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  web:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+      args:
+        # NEXT_PUBLIC_* are inlined at build time. Falls back to the AUTH0_*
+        # values when NEXT_PUBLIC_AUTH0_* aren't set, since they're the same
+        # tenant in local dev.
+        NEXT_PUBLIC_WEBSTER_API_URL: ${NEXT_PUBLIC_WEBSTER_API_URL:-http://localhost:4000/api}
+        NEXT_PUBLIC_WEBSTER_WS_URL: ${NEXT_PUBLIC_WEBSTER_WS_URL:-http://localhost:4000}
+        NEXT_PUBLIC_AUTH0_DOMAIN: ${NEXT_PUBLIC_AUTH0_DOMAIN:-${AUTH0_DOMAIN:-}}
+        NEXT_PUBLIC_AUTH0_CLIENT_ID: ${NEXT_PUBLIC_AUTH0_CLIENT_ID:-}
+        NEXT_PUBLIC_AUTH0_AUDIENCE: ${NEXT_PUBLIC_AUTH0_AUDIENCE:-${AUTH0_AUDIENCE:-}}
+        NEXT_PUBLIC_AUTH0_REDIRECT_URI: ${NEXT_PUBLIC_AUTH0_REDIRECT_URI:-http://localhost:3000/callback}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    restart: unless-stopped
+
   stripe-cli:
+    profiles: ["stripe"]
     image: stripe/stripe-cli:latest
     command: listen --forward-to http://api:4000/api/subscriptions/webhook
     environment:
@@ -93,19 +127,6 @@ services:
       api:
         condition: service_healthy
     restart: on-failure
-
-  web:
-    build:
-      context: .
-      dockerfile: docker/web.Dockerfile
-    ports:
-      - "3000:3000"
-    depends_on:
-      - api
-    environment:
-      NEXT_PUBLIC_WEBSTER_API_URL: http://localhost:4000/api
-      NEXT_PUBLIC_WEBSTER_WS_URL: http://localhost:4000
-    restart: unless-stopped
 
 volumes:
   postgres_data:

@@ -12,9 +12,32 @@ COPY packages/shared/package.json packages/shared/package.json
 
 RUN npm ci
 
+# The committed lockfile was generated on Windows, so it only records the
+# win32 builds of Tailwind v4's native deps (lightningcss, @tailwindcss/oxide).
+# Install the matching linux musl binaries for this Alpine x64 image so the
+# CSS pipeline can load them at build time.
+RUN npm install --no-save \
+      lightningcss-linux-x64-musl@$(node -p "require('lightningcss/package.json').version") \
+      @tailwindcss/oxide-linux-x64-musl@$(node -p "require('@tailwindcss/oxide/package.json').version")
+
 # Stage 2: Build
 FROM deps AS build
 WORKDIR /app
+
+# Next.js inlines NEXT_PUBLIC_* at BUILD time, so they must be passed as build
+# args (not runtime env) and exported before `next build`.
+ARG NEXT_PUBLIC_WEBSTER_API_URL
+ARG NEXT_PUBLIC_WEBSTER_WS_URL
+ARG NEXT_PUBLIC_AUTH0_DOMAIN
+ARG NEXT_PUBLIC_AUTH0_CLIENT_ID
+ARG NEXT_PUBLIC_AUTH0_AUDIENCE
+ARG NEXT_PUBLIC_AUTH0_REDIRECT_URI
+ENV NEXT_PUBLIC_WEBSTER_API_URL=$NEXT_PUBLIC_WEBSTER_API_URL \
+    NEXT_PUBLIC_WEBSTER_WS_URL=$NEXT_PUBLIC_WEBSTER_WS_URL \
+    NEXT_PUBLIC_AUTH0_DOMAIN=$NEXT_PUBLIC_AUTH0_DOMAIN \
+    NEXT_PUBLIC_AUTH0_CLIENT_ID=$NEXT_PUBLIC_AUTH0_CLIENT_ID \
+    NEXT_PUBLIC_AUTH0_AUDIENCE=$NEXT_PUBLIC_AUTH0_AUDIENCE \
+    NEXT_PUBLIC_AUTH0_REDIRECT_URI=$NEXT_PUBLIC_AUTH0_REDIRECT_URI
 
 COPY . .
 

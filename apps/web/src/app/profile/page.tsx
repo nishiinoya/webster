@@ -1,60 +1,144 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useAuth0 } from '@auth0/auth0-react';
+import {
+  getCurrentUser,
+  removeAvatar,
+  toAbsoluteAvatarUrl,
+  updateCurrentUser,
+  uploadAvatar,
+} from '@/editor/collaboration/sharedProjectApi';
 
-type Settings = {
-  displayName: string;
-  email: string;
-  avatarDataUrl?: string | null;
-};
-
-const STORAGE_KEY = 'webster.profile.settings.v1';
-
-const defaultSettings: Settings = {
-  displayName: '',
-  email: '',
-  avatarDataUrl: null,
-};
+const AVATAR_MAX_DIMENSION = 256;
 
 export default function ProfilePage() {
-  const [settings, setSettings] = useState<Settings>(defaultSettings);
+  const { user } = useAuth0();
+  const [displayName, setDisplayName] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  // A newly picked file (resized) not yet uploaded, plus a local preview URL.
+  const [pendingAvatar, setPendingAvatar] = useState<Blob | null>(null);
+  const [pendingAvatarPreview, setPendingAvatarPreview] = useState<string | null>(null);
+  const [removeAvatarOnSave, setRemoveAvatarOnSave] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [section, setSection] = useState<'profile' | 'subscription'>('profile');
   const [promoCode, setPromoCode] = useState('');
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
+  // The display name as last loaded/saved — used to decide whether the
+  // display-name PATCH actually needs to fire on Save.
+  const savedDisplayNameRef = useRef('');
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+    let cancelled = false;
 
-      if (raw) {
-        setSettings(JSON.parse(raw));
-        setSavedAt(new Date().toLocaleString());
-      }
-    } catch {
-      // ignore
-    }
+    getCurrentUser()
+      .then((profile) => {
+        if (!cancelled) {
+          // Pre-fill the field with the Auth0 name when the backend has no
+          // display name yet, so it's never blank. savedDisplayNameRef tracks
+          // what's actually persisted, so saving the pre-filled name still fires
+          // the PATCH that persists it.
+          const stored = profile.displayName ?? '';
+          setDisplayName(stored || user?.name || user?.nickname || '');
+          savedDisplayNameRef.current = stored;
+          setAvatarUrl(profile.avatarUrl);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Unable to load profile.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  function update<K extends keyof Settings>(key: K, value: Settings[K]) {
-    setSettings((s) => ({ ...s, [key]: value }));
-  }
+  // Revoke the object URL when the pending preview changes / unmounts.
+  useEffect(() => {
+    return () => {
+      if (pendingAvatarPreview) {
+        URL.revokeObjectURL(pendingAvatarPreview);
+      }
+    };
+  }, [pendingAvatarPreview]);
 
-  function save() {
+  async function pickAvatar(file: File) {
+    setError(null);
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-      setSavedAt(new Date().toLocaleString());
-      window.alert('Налаштування збережено локально.');
-    } catch (err) {
-      window.alert('Не вдалося зберегти налаштування.');
+      const blob = await resizeImageToBlob(file, AVATAR_MAX_DIMENSION);
+      if (pendingAvatarPreview) {
+        URL.revokeObjectURL(pendingAvatarPreview);
+      }
+      setPendingAvatar(blob);
+      setPendingAvatarPreview(URL.createObjectURL(blob));
+      setRemoveAvatarOnSave(false);
+    } catch {
+      setError('Unable to read that image.');
     }
   }
 
-  function resetToDefaults() {
-    setSettings(defaultSettings);
-    localStorage.removeItem(STORAGE_KEY);
-    setSavedAt(null);
+  function clearAvatar() {
+    if (pendingAvatarPreview) {
+      URL.revokeObjectURL(pendingAvatarPreview);
+    }
+    setPendingAvatar(null);
+    setPendingAvatarPreview(null);
+    setRemoveAvatarOnSave(true);
   }
+
+  async function save() {
+    setIsSaving(true);
+    setError(null);
+    try {
+      const trimmedName = displayName.trim();
+      let latest = null;
+
+      // Request 1 — display name PATCH, only when it actually changed.
+      if (trimmedName !== savedDisplayNameRef.current) {
+        latest = await updateCurrentUser({ displayName: trimmedName });
+      }
+
+      // Request 2 — avatar, as its own multipart upload (or removal).
+      if (pendingAvatar) {
+        latest = await uploadAvatar(pendingAvatar);
+      } else if (removeAvatarOnSave) {
+        latest = await removeAvatar();
+      }
+
+      if (latest) {
+        savedDisplayNameRef.current = latest.displayName ?? '';
+        setDisplayName(latest.displayName ?? '');
+        setAvatarUrl(latest.avatarUrl);
+      }
+
+      if (pendingAvatarPreview) {
+        URL.revokeObjectURL(pendingAvatarPreview);
+      }
+      setPendingAvatar(null);
+      setPendingAvatarPreview(null);
+      setRemoveAvatarOnSave(false);
+      setSavedAt(new Date().toLocaleString());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to save profile.');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  const savedAvatar = removeAvatarOnSave ? null : toAbsoluteAvatarUrl(avatarUrl);
+  const avatarPreview =
+    pendingAvatarPreview ?? savedAvatar ?? user?.picture ?? null;
+  const hasAvatar = Boolean(pendingAvatarPreview ?? savedAvatar);
 
   return (
     <main className='min-h-screen bg-[#0f1213] py-12 px-6 text-[#e7e9ec]'>
@@ -98,123 +182,77 @@ export default function ProfilePage() {
                 </h2>
 
                 <div className='mb-4 flex items-center gap-4'>
-                  <div className='relative'>
-                    <div className='h-20 w-20 overflow-hidden rounded-full border border-[#30353d] bg-[#0b0d0d]'>
-                      {settings.avatarDataUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={settings.avatarDataUrl}
-                          alt='avatar'
-                          className='h-full w-full object-cover'
-                        />
-                      ) : (
-                        <div className='grid h-full w-full place-items-center text-sm text-[#9aa1ab]'>
-                          No avatar
-                        </div>
-                      )}
-                    </div>
-                    <input
-                      ref={avatarInputRef}
-                      type='file'
-                      accept='image/*'
-                      className='hidden'
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-
-                        if (file) {
-                          const reader = new FileReader();
-                          reader.onload = () => {
-                            const result = reader.result as
-                              | string
-                              | ArrayBuffer
-                              | null;
-
-                            if (typeof result === 'string') {
-                              update('avatarDataUrl', result);
-                            }
-                          };
-                          reader.readAsDataURL(file);
-                        }
-                      }}
-                    />
+                  <div className='h-20 w-20 overflow-hidden rounded-full border border-[#30353d] bg-[#0b0d0d]'>
+                    {avatarPreview ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={avatarPreview}
+                        alt='avatar'
+                        className='h-full w-full object-cover'
+                      />
+                    ) : (
+                      <div className='grid h-full w-full place-items-center text-sm text-[#9aa1ab]'>
+                        No avatar
+                      </div>
+                    )}
                   </div>
-
                   <div className='flex flex-col gap-2'>
                     <button
                       type='button'
+                      disabled={isSaving}
                       onClick={() => avatarInputRef.current?.click()}
-                      className='rounded-4xl border border-[#4aa391] bg-[#203731] px-3 py-1 text-sm font-semibold text-[#eef1f4]'
+                      className='rounded-4xl border border-[#4aa391] bg-[#203731] px-3 py-1 text-sm font-semibold text-[#eef1f4] disabled:opacity-60'
                     >
                       Upload avatar
                     </button>
-                    <button
-                      type='button'
-                      onClick={() => update('avatarDataUrl', null)}
-                      className='rounded-4xl border border-[#3a414a] bg-transparent px-3 py-1 text-sm font-semibold text-[#9aa1ab]'
-                    >
-                      Remove
-                    </button>
+                    {hasAvatar ? (
+                      <button
+                        type='button'
+                        disabled={isSaving}
+                        onClick={clearAvatar}
+                        className='rounded-4xl border border-[#3a414a] bg-transparent px-3 py-1 text-sm font-semibold text-[#9aa1ab] disabled:opacity-60'
+                      >
+                        Remove
+                      </button>
+                    ) : null}
                   </div>
+                  <input
+                    ref={avatarInputRef}
+                    type='file'
+                    accept='image/*'
+                    className='hidden'
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        void pickAvatar(file);
+                      }
+                      e.target.value = '';
+                    }}
+                  />
                 </div>
 
                 <label className='mb-2 block text-xs font-semibold text-[#9aa1ab]'>
                   Display name
                 </label>
                 <input
-                  value={settings.displayName}
-                  onChange={(e) => update('displayName', e.target.value)}
-                  className='mb-4 w-full rounded-md border border-[#30353d] bg-[#0b0d0d] px-3 py-2 text-sm text-[#eef1f4]'
+                  value={displayName}
+                  disabled={isSaving}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  className='mb-4 w-full rounded-md border border-[#30353d] bg-[#0b0d0d] px-3 py-2 text-sm text-[#eef1f4] disabled:opacity-60'
                   placeholder='How others see you'
                 />
 
-                <label className='mb-2 block text-xs font-semibold text-[#9aa1ab]'>
-                  Email
-                </label>
-                <input
-                  value={(settings as Settings).email}
-                  onChange={(e) => update('email', e.target.value)}
-                  className='mb-4 w-full rounded-md border border-[#30353d] bg-[#0b0d0d] px-3 py-2 text-sm text-[#eef1f4]'
-                  placeholder='you@example.com'
-                />
-
-                <div className='mb-4 flex flex-col gap-3'>
-                  <button
-                    onClick={() =>
-                      window.alert('Password reset email sent (demo).')
-                    }
-                    className='w-full rounded-4xl border border-[#3a414a] bg-transparent px-4 py-2 font-bold text-[#9aa1ab] hover:border-[#4aa391]'
-                  >
-                    Change password (send email)
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (
-                        window.confirm(
-                          'Are you sure you want to delete your account? This is a demo action.',
-                        )
-                      ) {
-                        resetToDefaults();
-                        window.alert('Account deleted (demo).');
-                      }
-                    }}
-                    className='w-full rounded-4xl border border-[#5a2a2a] bg-transparent px-4 py-2 font-bold text-[#ffb9b9] hover:border-[#ffb9b9]'
-                  >
-                    Delete account
-                  </button>
-                </div>
+                {error ? (
+                  <p className='mb-3 text-sm font-bold text-[#ffb9b9]'>{error}</p>
+                ) : null}
 
                 <div className='flex gap-3'>
                   <button
                     onClick={save}
-                    className='min-w-40 rounded-4xl border border-[#4aa391] bg-[#203731] px-4 py-2 font-extrabold text-[#eef1f4]'
+                    disabled={isSaving}
+                    className='min-w-40 rounded-4xl border border-[#4aa391] bg-[#203731] px-4 py-2 font-extrabold text-[#eef1f4] disabled:opacity-60'
                   >
-                    Save
-                  </button>
-                  <button
-                    onClick={resetToDefaults}
-                    className='min-w-40 rounded-4xl border border-[#3a414a] bg-transparent px-4 py-2 font-bold text-[#9aa1ab]'
-                  >
-                    Reset
+                    {isSaving ? 'Saving...' : 'Save'}
                   </button>
                 </div>
 
@@ -271,4 +309,51 @@ export default function ProfilePage() {
       </div>
     </main>
   );
+}
+
+/**
+ * Downscales an image file to a JPEG Blob (max `maxDimension` on the longest
+ * side) so the uploaded avatar stays small in object storage.
+ */
+function resizeImageToBlob(file: File, maxDimension: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+
+      const scale = Math.min(1, maxDimension / Math.max(image.width, image.height));
+      const width = Math.max(1, Math.round(image.width * scale));
+      const height = Math.max(1, Math.round(image.height * scale));
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('Canvas not supported'));
+        return;
+      }
+      ctx.drawImage(image, 0, 0, width, height);
+      canvas.toBlob(
+        (blob) => {
+          if (blob) {
+            resolve(blob);
+          } else {
+            reject(new Error('Unable to encode image'));
+          }
+        },
+        'image/jpeg',
+        0.85,
+      );
+    };
+
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('Unable to load image'));
+    };
+
+    image.src = objectUrl;
+  });
 }

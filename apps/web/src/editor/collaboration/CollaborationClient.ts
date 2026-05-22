@@ -48,6 +48,11 @@ export class CollaborationClient {
 
     const socket = io(wsUrl, {
       auth: { token: this.options.accessToken ?? "" },
+      // Skip long-polling entirely. Polling holds a persistent HTTP connection
+      // open against the API origin; with Chrome's 6-per-origin HTTP/1.1 limit
+      // on localhost, that can starve REST fetches and make /me, /projects
+      // etc. sit "pending" forever. WebSocket uses its own connection slot.
+      transports: ["websocket"],
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
