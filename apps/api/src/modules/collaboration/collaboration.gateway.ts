@@ -408,15 +408,28 @@ export class CollaborationGateway
       return;
     }
 
+    // Auto-rebase: if another commit was applied ahead of this one in the queue
+    // (baseVersion is stale), re-apply the op on top of the current state
+    // instead of rejecting it. Operations are already serialized per-project by
+    // projectLocks, so the only cause of a mismatch is a concurrent user — and
+    // for a drawing editor where ops are independent patches, last-write-wins
+    // applied in queue order is the correct behaviour.
     if (op.baseVersion !== project.currentVersion) {
-      socket.emit('project:error', {
-        code: 'version_conflict',
-        message: `Version conflict: expected ${project.currentVersion}, got ${op.baseVersion}.`,
-        projectId,
-      });
-      return;
+      if (!op.scenePatch?.length && !op.scene) {
+        // No payload to apply — nothing we can do, ask client to resync.
+        socket.emit('project:error', {
+          code: 'version_conflict',
+          message: `Version conflict: server is at v${project.currentVersion}, op based on v${op.baseVersion}. Please resync.`,
+          projectId,
+        });
+        return;
+      }
+      this.logger.debug(
+        `Auto-rebasing op ${op.clientOperationId} from v${op.baseVersion} onto v${project.currentVersion} for project ${projectId}`,
+      );
     }
 
+    const wasRebased = op.baseVersion !== project.currentVersion;
     const currentManifest = (project.metadata ?? {}) as any;
     const newManifest = this.operationApplier.apply(currentManifest, op);
     const newVersion = project.currentVersion + 1;
@@ -429,10 +442,17 @@ export class CollaborationGateway
       },
     });
 
+    // When rebased, remote clients can't safely apply a stale patch (it was
+    // computed against an older base). Send the full scene instead so every
+    // client does a safe scene-replace regardless of their local version.
+    const broadcastOp = wasRebased
+      ? { ...op, phase: 'commit' as const, scene: newManifest, scenePatch: undefined }
+      : { ...op, phase: 'commit' as const };
+
     const applied: AppliedProjectOperation = {
       projectId,
       version: newVersion,
-      operation: { ...op, phase: 'commit' },
+      operation: broadcastOp,
     };
 
     this.server.to(`project:${projectId}`).emit('operation:applied', applied);

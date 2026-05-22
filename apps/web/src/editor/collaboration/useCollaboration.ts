@@ -125,6 +125,9 @@ export function useCollaboration({
   const pendingQueueRef = useRef(new PendingOperationsQueue());
   const resyncingRef = useRef(false);
   const uploadedAssetPathsRef = useRef(new Set<string>());
+  // Serialise applied-operation handlers so a slow async handler (e.g. asset
+  // fetch) doesn't let the next event run before the version counter advances.
+  const applyChainRef = useRef<Promise<unknown>>(Promise.resolve());
 
   useEffect(() => {
     latestStateRef.current = state;
@@ -259,8 +262,10 @@ export function useCollaboration({
       const client = new CollaborationClient({
         accessToken,
         clientId,
-        onAppliedOperation: async (applied) => {
-          await handleAppliedOperation(applied);
+        onAppliedOperation: (applied) => {
+          applyChainRef.current = applyChainRef.current
+            .then(() => handleAppliedOperation(applied))
+            .catch(() => {});
         },
         onError: async (error) => {
           await handleProjectError(error);
