@@ -24,6 +24,7 @@ type UseEditorSceneRequestsOptions = {
   onLayerAssetCommandPendingChange?: (state: LayerAssetCommandPendingState | null) => void;
   onLayerAssetCommandRequestHandled: (requestId: number) => void;
   onLayerCommandRequestHandled: (requestId: number) => void;
+  onLayerFilterPreview?: (layerIds: string[]) => void;
   onSceneChange: () => void;
   onSelectLayerRequestHandled: (requestId: number) => void;
   onUploadRequestHandled: (requestId: number) => void;
@@ -76,6 +77,7 @@ export function useEditorSceneRequests({
   onLayerAssetCommandPendingChange,
   onLayerAssetCommandRequestHandled,
   onLayerCommandRequestHandled,
+  onLayerFilterPreview,
   onSceneChange,
   onSelectLayerRequestHandled,
   onUploadRequestHandled,
@@ -356,7 +358,29 @@ export function useEditorSceneRequests({
 
     editorAppRef.current.applyLayerCommand(layerCommandRequest.command);
     onLayersChange(editorAppRef.current.getLayerSummaries());
-  }, [editorAppRef, layerCommandRequest, onLayerCommandRequestHandled, onLayersChange]);
+
+    if (isFilterOnlyLayerUpdateCommand(layerCommandRequest.command)) {
+      onLayerFilterPreview?.([layerCommandRequest.command.layerId]);
+    }
+  }, [
+    editorAppRef,
+    layerCommandRequest,
+    onLayerCommandRequestHandled,
+    onLayerFilterPreview,
+    onLayersChange
+  ]);
+}
+
+function isFilterOnlyLayerUpdateCommand(
+  command: LayerCommand
+): command is Extract<LayerCommand, { type: "update" }> {
+  if (command.type !== "update") {
+    return false;
+  }
+
+  const updateKeys = Object.keys(command.updates);
+
+  return updateKeys.length === 1 && updateKeys[0] === "filters";
 }
 
 function wait(milliseconds: number) {

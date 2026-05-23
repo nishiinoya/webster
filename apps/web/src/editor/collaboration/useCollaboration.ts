@@ -12,7 +12,12 @@ import type {
   SharedProjectSnapshotSummary
 } from "@webster/shared";
 import { getProjectRoleCapabilities } from "@webster/shared";
-import type { EditorApp, LayerTransformPreviewPayload } from "../app/EditorApp";
+import type {
+  EditorApp,
+  LayerCropPreviewPayload,
+  LayerFilterPreviewPayload,
+  LayerTransformPreviewPayload
+} from "../app/EditorApp";
 import type { SharedEditorAction } from "../app/history/SharedEditorAction";
 import type { DrawPreviewPayload } from "../tools/drawing/DrawingTool";
 import type { MaskBrushPreviewPayload } from "../tools/mask-brush/MaskBrushTool";
@@ -520,6 +525,22 @@ export function useCollaboration({
 
           if (isDrawPreviewPayload(operation.payload)) {
             if (editorApp.applyRemoteDrawPreview(operation.payload)) {
+              markRemotePreviewActive(operation, 12000);
+              onLayersChange(editorApp.getLayerSummaries());
+            }
+            return;
+          }
+
+          if (isLayerFilterPreviewPayload(operation.payload)) {
+            if (editorApp.applyRemoteLayerFilterPreview(operation.payload)) {
+              markRemotePreviewActive(operation, 3000);
+              onLayersChange(editorApp.getLayerSummaries());
+            }
+            return;
+          }
+
+          if (isLayerCropPreviewPayload(operation.payload)) {
+            if (editorApp.applyRemoteLayerCropPreview(operation.payload)) {
               markRemotePreviewActive(operation, 12000);
               onLayersChange(editorApp.getLayerSummaries());
             }
@@ -1123,6 +1144,42 @@ export function useCollaboration({
     [clientId, editorAppRef, prepareOperationForSocket]
   );
 
+  const sendLayerFilterPreview = useCallback(
+    (layerIds: string[]) => {
+      const editorApp = editorAppRef.current;
+      const currentState = latestStateRef.current;
+
+      if (
+        !editorApp ||
+        layerIds.length === 0 ||
+        isApplyingRemoteRef.current ||
+        currentState.mode !== "shared" ||
+        !currentState.projectId ||
+        !currentState.capabilities.canEdit ||
+        !clientRef.current?.isConnected
+      ) {
+        return;
+      }
+
+      const realtimePayload = editorApp.getLayerFilterPreviewPayload(layerIds);
+
+      if (!realtimePayload) {
+        return;
+      }
+
+      clientRef.current.sendPreview(
+        createRealtimePreviewOperation({
+          clientId,
+          payload: realtimePayload as unknown as Record<string, unknown>,
+          projectId: currentState.projectId,
+          projectVersion: currentState.currentVersion ?? 0,
+          tool: realtimePayload.tool
+        })
+      );
+    },
+    [clientId, editorAppRef]
+  );
+
   const sendPresenceCursor = useCallback((cursor: { x: number; y: number } | null, tool: string) => {
     const currentState = latestStateRef.current;
 
@@ -1302,6 +1359,7 @@ export function useCollaboration({
     flushDeferredRemoteOps,
     handleLocalEditorAction,
     saveCurrentSharedProject,
+    sendLayerFilterPreview,
     sendPresenceCursor,
     sendPreviewFromCurrentScene,
     state
@@ -1370,6 +1428,36 @@ function isLayerTransformPreviewPayload(
     typeof payload.tool === "string" &&
     Array.isArray(payload.layers) &&
     payload.layers.every(isLayerTransformPreviewLayer)
+  );
+}
+
+function isLayerFilterPreviewPayload(value: unknown): value is LayerFilterPreviewPayload {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const payload = value as Partial<LayerFilterPreviewPayload>;
+
+  return (
+    payload.source === "filter-preview" &&
+    payload.tool === "Filters" &&
+    Array.isArray(payload.layers) &&
+    payload.layers.every(isLayerFilterPreviewLayer)
+  );
+}
+
+function isLayerCropPreviewPayload(value: unknown): value is LayerCropPreviewPayload {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const payload = value as Partial<LayerCropPreviewPayload>;
+
+  return (
+    payload.source === "layer-crop-preview" &&
+    payload.tool === "Crop" &&
+    Array.isArray(payload.layers) &&
+    payload.layers.every(isLayerCropPreviewLayer)
   );
 }
 
@@ -1451,6 +1539,58 @@ function isLayerTransformPreviewLayer(
     isFinitePreviewNumber(layer.scaleY) &&
     (layer.crop === null || isPreviewCrop(layer.crop)) &&
     (layer.imageGeometry === undefined || isPreviewImageGeometry(layer.imageGeometry))
+  );
+}
+
+function isLayerFilterPreviewLayer(
+  value: unknown
+): value is LayerFilterPreviewPayload["layers"][number] {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const layer = value as Partial<LayerFilterPreviewPayload["layers"][number]>;
+
+  return typeof layer.id === "string" && isPreviewLayerFilters(layer.filters);
+}
+
+function isLayerCropPreviewLayer(
+  value: unknown
+): value is LayerCropPreviewPayload["layers"][number] {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const layer = value as Partial<LayerCropPreviewPayload["layers"][number]>;
+
+  return (
+    typeof layer.id === "string" &&
+    (layer.crop === null || isPreviewCrop(layer.crop)) &&
+    (layer.imageGeometry === undefined || isPreviewImageGeometry(layer.imageGeometry))
+  );
+}
+
+function isPreviewLayerFilters(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const filters = value as Record<string, unknown>;
+
+  return (
+    isFinitePreviewNumber(filters.brightness) &&
+    isFinitePreviewNumber(filters.blur) &&
+    isFinitePreviewNumber(filters.contrast) &&
+    isFinitePreviewNumber(filters.dropShadowBlur) &&
+    isFinitePreviewNumber(filters.dropShadowOffsetX) &&
+    isFinitePreviewNumber(filters.dropShadowOffsetY) &&
+    isFinitePreviewNumber(filters.dropShadowOpacity) &&
+    isFinitePreviewNumber(filters.grayscale) &&
+    isFinitePreviewNumber(filters.hue) &&
+    isFinitePreviewNumber(filters.invert) &&
+    isFinitePreviewNumber(filters.saturation) &&
+    isFinitePreviewNumber(filters.sepia) &&
+    isFinitePreviewNumber(filters.shadow)
   );
 }
 

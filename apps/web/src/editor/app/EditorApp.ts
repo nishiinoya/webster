@@ -41,12 +41,13 @@ import { ShapeLayer } from "../layers/ShapeLayer";
 import { StrokeLayer } from "../layers/StrokeLayer";
 import { TextLayer } from "../layers/TextLayer";
 import type { ShapeKind } from "../layers/ShapeLayer";
-import { normalizeLayerTexture } from "../layers/Layer";
+import { normalizeLayerFilters, normalizeLayerTexture } from "../layers/Layer";
 import type {
   ImageLayerGeometry,
   ImportedLayerTexture,
   Layer,
   LayerContentCrop,
+  LayerFilterSettings,
   Object3DKind,
   SerializedStrokeLayer
 } from "../layers/Layer";
@@ -246,6 +247,29 @@ export type LayerTransformPreviewPayload = {
   layers: LayerTransformPreviewLayer[];
   source: "layer-transform-preview";
   tool: string;
+};
+
+export type LayerFilterPreviewLayer = {
+  filters: LayerFilterSettings;
+  id: string;
+};
+
+export type LayerFilterPreviewPayload = {
+  layers: LayerFilterPreviewLayer[];
+  source: "filter-preview";
+  tool: "Filters";
+};
+
+export type LayerCropPreviewLayer = {
+  crop: LayerContentCrop | null;
+  id: string;
+  imageGeometry?: ImageLayerGeometry;
+};
+
+export type LayerCropPreviewPayload = {
+  layers: LayerCropPreviewLayer[];
+  source: "layer-crop-preview";
+  tool: "Crop";
 };
 
 /**
@@ -1395,6 +1419,10 @@ export class EditorApp {
       return this.inputController.getMaskBrushPreviewPayload();
     }
 
+    if (tool === "Crop") {
+      return this.getLayerCropPreviewPayload();
+    }
+
     if (isLayerTransformPreviewTool(tool)) {
       return this.getLayerTransformPreviewPayload(tool);
     }
@@ -1569,6 +1597,53 @@ export class EditorApp {
       : null;
   }
 
+  getLayerFilterPreviewPayload(layerIds: string[]): LayerFilterPreviewPayload | null {
+    const seenLayerIds = new Set<string>();
+    const layers = layerIds.flatMap((layerId) => {
+      if (seenLayerIds.has(layerId)) {
+        return [];
+      }
+
+      seenLayerIds.add(layerId);
+      const layer = this.scene.getLayer(layerId);
+
+      return layer ? [{ filters: { ...layer.filters }, id: layer.id }] : [];
+    });
+
+    return layers.length > 0
+      ? {
+          layers,
+          source: "filter-preview",
+          tool: "Filters"
+        }
+      : null;
+  }
+
+  private getLayerCropPreviewPayload(): LayerCropPreviewPayload | null {
+    const before = this.pendingHistoryGesture?.before.scene;
+
+    if (!before) {
+      return null;
+    }
+
+    const beforeLayersById = new Map(before.layers.map((layer) => [layer.id, layer]));
+    const layers = this.scene.layers
+      .filter((layer) => {
+        const beforeLayer = beforeLayersById.get(layer.id);
+
+        return beforeLayer ? !areLayerCropPreviewStatesEqual(layer, beforeLayer) : true;
+      })
+      .map(createLayerCropPreviewLayer);
+
+    return layers.length > 0
+      ? {
+          layers,
+          source: "layer-crop-preview",
+          tool: "Crop"
+        }
+      : null;
+  }
+
   applyRemoteMaskBrushPreview(payload: MaskBrushPreviewPayload) {
     const layer = this.scene.getLayer(payload.layerId);
 
@@ -1636,6 +1711,51 @@ export class EditorApp {
     preview.appliedPointCount = Math.max(preview.appliedPointCount, payloadEndPointCount);
 
     return Boolean(dirtyRect);
+  }
+
+  applyRemoteLayerFilterPreview(payload: LayerFilterPreviewPayload) {
+    let didChange = false;
+
+    for (const previewLayer of payload.layers) {
+      const layer = this.scene.getLayer(previewLayer.id);
+
+      if (!layer) {
+        continue;
+      }
+
+      this.scene.updateLayer(layer.id, {
+        filters: normalizeLayerFilters({
+          ...layer.filters,
+          ...previewLayer.filters
+        })
+      });
+      didChange = true;
+    }
+
+    return didChange;
+  }
+
+  applyRemoteLayerCropPreview(payload: LayerCropPreviewPayload) {
+    let didChange = false;
+
+    for (const previewLayer of payload.layers) {
+      const layer = this.scene.getLayer(previewLayer.id);
+
+      if (!layer || layer.locked) {
+        continue;
+      }
+
+      this.remoteLayerTransformAnimations.delete(layer.id);
+      applyLayerCropPreviewLayer(
+        layer,
+        cloneLayerCropPreviewLayer(previewLayer),
+        layer instanceof ImageLayer ? null : this.getRemoteCropPreviewMask(layer)
+      );
+      this.scene.updateLayer(layer.id, {});
+      didChange = true;
+    }
+
+    return didChange;
   }
 
   applyRemoteLayerTransformPreview(payload: LayerTransformPreviewPayload) {
@@ -2365,7 +2485,7 @@ export class EditorApp {
 }
 
 function isLayerTransformPreviewTool(tool: string) {
-  return tool === "Move" || tool === "Transform" || tool === "Crop";
+  return tool === "Move" || tool === "Transform";
 }
 
 function getRemoteMaskBrushKey(payload: MaskBrushPreviewPayload) {
@@ -2419,12 +2539,30 @@ function createLayerTransformPreviewLayer(layer: Layer): LayerTransformPreviewLa
   };
 }
 
+function createLayerCropPreviewLayer(layer: Layer): LayerCropPreviewLayer {
+  return {
+    crop: layer.crop ? { ...layer.crop } : null,
+    id: layer.id,
+    ...(layer instanceof ImageLayer
+      ? { imageGeometry: normalizeImageLayerGeometry(layer.geometry) }
+      : {})
+  };
+}
+
 function cloneLayerTransformPreviewLayer(
   layer: LayerTransformPreviewLayer
 ): LayerTransformPreviewLayer {
   return {
     ...layer,
     crop: layer.crop ? { ...layer.crop } : null,
+    imageGeometry: layer.imageGeometry ? normalizeImageLayerGeometry(layer.imageGeometry) : undefined
+  };
+}
+
+function cloneLayerCropPreviewLayer(layer: LayerCropPreviewLayer): LayerCropPreviewLayer {
+  return {
+    crop: layer.crop ? { ...layer.crop } : null,
+    id: layer.id,
     imageGeometry: layer.imageGeometry ? normalizeImageLayerGeometry(layer.imageGeometry) : undefined
   };
 }
@@ -2448,6 +2586,35 @@ function applyLayerTransformPreviewLayer(
   }
 
   if (cropPreview && !(layer instanceof ImageLayer)) {
+    const cropBounds = previewLayer.crop ?? getFullLayerCrop(layer);
+
+    layer.mask = clipLayerMaskToBounds({
+      baseMask: cropPreview.baseMask,
+      bottom: cropBounds.bottom,
+      currentRevision: layer.mask?.revision ?? cropPreview.baseMask.revision,
+      frame: cropPreview.frame,
+      left: cropBounds.left,
+      right: cropBounds.right,
+      top: cropBounds.top
+    });
+  }
+}
+
+function applyLayerCropPreviewLayer(
+  layer: Layer,
+  previewLayer: LayerCropPreviewLayer,
+  cropPreview: { baseMask: LayerMask; frame: CropMaskFrame } | null = null
+) {
+  if (layer instanceof ImageLayer) {
+    if (previewLayer.imageGeometry) {
+      layer.geometry = normalizeImageLayerGeometry(previewLayer.imageGeometry);
+    }
+    return;
+  }
+
+  layer.crop = previewLayer.crop ? { ...previewLayer.crop } : null;
+
+  if (cropPreview) {
     const cropBounds = previewLayer.crop ?? getFullLayerCrop(layer);
 
     layer.mask = clipLayerMaskToBounds({
@@ -2666,6 +2833,15 @@ function areLayerTransformPreviewStatesEqual(left: Layer, right: Layer) {
     left.rotation === right.rotation &&
     left.scaleX === right.scaleX &&
     left.scaleY === right.scaleY &&
+    areLayerContentCropsEqualForPreview(left.crop, right.crop) &&
+    (!(left instanceof ImageLayer) ||
+      !(right instanceof ImageLayer) ||
+      areImageLayerGeometriesEqualForPreview(left.geometry, right.geometry))
+  );
+}
+
+function areLayerCropPreviewStatesEqual(left: Layer, right: Layer) {
+  return (
     areLayerContentCropsEqualForPreview(left.crop, right.crop) &&
     (!(left instanceof ImageLayer) ||
       !(right instanceof ImageLayer) ||

@@ -3,14 +3,17 @@ import { Camera2D } from "../../geometry/Camera2D";
 import { invert3x3, transformPoint3x3 } from "../../geometry/Matrix3";
 import { Scene } from "../../scene/Scene";
 import { getModelMatrix } from "../../geometry/TransformGeometry";
-import type { Point } from "../../geometry/TransformGeometry";
 import { Layer } from "../../layers/Layer";
-import { TextLayer } from "../../layers/TextLayer";
 import { ensureLayerMaskResolution } from "../../masks/LayerMaskResolution";
 import type { LayerMask } from "../../masks/LayerMask";
 import type { MaskDirtyRect } from "../../masks/LayerMask";
-import { getTextMaskFrame } from "../../rendering/text/BitmapText";
-import { clamp, getBrushRadiiInMaskSpace, paintMaskEllipse } from "./MaskBrushRaster";
+import {
+  getLayerMaskFrame,
+  isLayerLocalUnitMaskable,
+  layerLocalUnitToMaskPixel,
+  maskPixelToLayerLocalUnit
+} from "../../masks/LayerMaskCoordinates";
+import { clamp, paintMaskEllipse } from "./MaskBrushRaster";
 import type { MaskBrushRadii } from "./MaskBrushRaster";
 import type { MaskBrushPixelPredicate } from "./MaskBrushRaster";
 import type { MaskBrushOptions } from "./MaskBrushTypes";
@@ -256,20 +259,13 @@ export class MaskBrushTool {
 
     const localPoint = transformPoint3x3(inverseModel, worldPoint.x, worldPoint.y);
 
-    if (layer instanceof TextLayer) {
-      return this.clientToTextLayerMaskPoint(layer, localPoint);
-    }
+    const paintMargin = this.getPaintMarginInMaskSpace(layer, layer.mask);
 
-    const paintMargin = this.getPaintMarginInLayerSpace(layer, layer.mask);
-
-    if (!isInsideUnitRectWithMargin(localPoint, paintMargin)) {
+    if (!isLayerLocalUnitMaskable(layer, localPoint, paintMargin)) {
       return null;
     }
 
-    return {
-      x: localPoint.x * (layer.mask.width - 1) + 0.5,
-      y: (1 - localPoint.y) * (layer.mask.height - 1) + 0.5
-    };
+    return layerLocalUnitToMaskPixel(layer, layer.mask, localPoint);
   }
 
   private clientToWorld(clientX: number, clientY: number) {
@@ -278,7 +274,7 @@ export class MaskBrushTool {
     return this.camera.screenToWorld(clientX - bounds.left, clientY - bounds.top);
   }
 
-  private getPaintMarginInLayerSpace(layer: Layer, mask: LayerMask) {
+  private getPaintMarginInMaskSpace(layer: Layer, mask: LayerMask) {
     const radius = this.getBrushRadiiInMaskSpace(layer, mask);
 
     return {
@@ -288,54 +284,14 @@ export class MaskBrushTool {
   }
 
   private getBrushRadiiInMaskSpace(layer: Layer, mask: LayerMask) {
-    if (layer instanceof TextLayer) {
-      const frame = getCurrentTextMaskFrame(layer);
-      const maskPixelsPerWorldX = mask.width / Math.max(1e-6, frame.width);
-      const maskPixelsPerWorldY = mask.height / Math.max(1e-6, frame.height);
-      const brushRadiusInWorld = this.brushOptions.size / Math.max(1e-6, this.getCameraZoom()) / 2;
-
-      return {
-        x: Math.max(0.5, brushRadiusInWorld * maskPixelsPerWorldX),
-        y: Math.max(0.5, brushRadiusInWorld * maskPixelsPerWorldY)
-      };
-    }
-
-    return getBrushRadiiInMaskSpace(
-      layer,
-      mask,
-      this.brushOptions.size,
-      this.getCameraZoom()
-    );
-  }
-
-  private clientToTextLayerMaskPoint(layer: TextLayer, unitPoint: Point) {
-    if (!layer.mask) {
-      return null;
-    }
-
-    const frame = getCurrentTextMaskFrame(layer);
-    const localX = unitPoint.x * layer.width;
-    const localY = unitPoint.y * layer.height;
-    const normalizedX = (localX - frame.x) / frame.width;
-    const normalizedY = (localY - frame.y) / frame.height;
-    const radius = this.getBrushRadiiInMaskSpace(layer, layer.mask);
-    const margin = {
-      x: radius.x / Math.max(1, layer.mask.width - 1),
-      y: radius.y / Math.max(1, layer.mask.height - 1)
-    };
-
-    if (
-      normalizedX < -margin.x ||
-      normalizedX > 1 + margin.x ||
-      normalizedY < -margin.y ||
-      normalizedY > 1 + margin.y
-    ) {
-      return null;
-    }
+    const frame = getLayerMaskFrame(layer);
+    const maskPixelsPerWorldX = mask.width / Math.max(1e-6, frame.width * Math.abs(layer.scaleX));
+    const maskPixelsPerWorldY = mask.height / Math.max(1e-6, frame.height * Math.abs(layer.scaleY));
+    const brushRadiusInWorld = this.brushOptions.size / Math.max(1e-6, this.getCameraZoom()) / 2;
 
     return {
-      x: normalizedX * (layer.mask.width - 1) + 0.5,
-      y: (1 - normalizedY) * (layer.mask.height - 1) + 0.5
+      x: Math.max(0.5, brushRadiusInWorld * maskPixelsPerWorldX),
+      y: Math.max(0.5, brushRadiusInWorld * maskPixelsPerWorldY)
     };
   }
 
@@ -361,16 +317,9 @@ export class MaskBrushTool {
       return undefined;
     }
 
-    if (layer instanceof TextLayer) {
-      return createCachedMaskPredicate(
-        mask,
-        createTextSelectionPixelPredicate(layer, mask, selection)
-      );
-    }
-
     return createCachedMaskPredicate(
       mask,
-      createRotatedSelectionPixelPredicate(layer, mask, selection)
+      createLayerSelectionPixelPredicate(layer, mask, selection)
     );
   }
 }
@@ -382,49 +331,23 @@ type MaskPaintPoint = {
 
 type MaskSelection = NonNullable<Scene["selection"]["current"]>;
 
-function createTextSelectionPixelPredicate(
-  layer: TextLayer,
-  mask: LayerMask,
-  selection: MaskSelection
-): MaskBrushPixelPredicate {
-  const frame = getCurrentTextMaskFrame(layer);
-  const modelMatrix = getModelMatrix(layer);
-
-  return (x, y) => {
-    const normalizedX = (x + 0.5) / Math.max(1, mask.width);
-    const normalizedYFromBottom = 1 - (y + 0.5) / Math.max(1, mask.height);
-    const localX = frame.x + normalizedX * frame.width;
-    const localY = frame.y + normalizedYFromBottom * frame.height;
-    const worldPoint = transformPoint3x3(
-      modelMatrix,
-      localX / Math.max(1e-6, layer.width),
-      localY / Math.max(1e-6, layer.height)
-    );
-
-    return containsSelectionPoint(selection, worldPoint.x, worldPoint.y);
-  };
-}
-
-function createRotatedSelectionPixelPredicate(
+function createLayerSelectionPixelPredicate(
   layer: Layer,
   mask: LayerMask,
   selection: MaskSelection
 ): MaskBrushPixelPredicate {
   const modelMatrix = getModelMatrix(layer);
-  const xScale = 1 / Math.max(1, mask.width);
-  const yScale = 1 / Math.max(1, mask.height);
-  const matrixXFromMaskX = modelMatrix[0] * xScale;
-  const matrixXFromMaskY = -modelMatrix[3] * yScale;
-  const matrixYFromMaskX = modelMatrix[1] * xScale;
-  const matrixYFromMaskY = -modelMatrix[4] * yScale;
-  const baseWorldX = modelMatrix[3] + modelMatrix[6] + (modelMatrix[0] * xScale) / 2 - (modelMatrix[3] * yScale) / 2;
-  const baseWorldY = modelMatrix[4] + modelMatrix[7] + (modelMatrix[1] * xScale) / 2 - (modelMatrix[4] * yScale) / 2;
 
   return (x, y) => {
-    const worldX = baseWorldX + x * matrixXFromMaskX + y * matrixXFromMaskY;
-    const worldY = baseWorldY + x * matrixYFromMaskX + y * matrixYFromMaskY;
+    const unitPoint = maskPixelToLayerLocalUnit(layer, mask, x, y);
 
-    return containsSelectionPoint(selection, worldX, worldY);
+    if (!isLayerLocalUnitMaskable(layer, unitPoint)) {
+      return false;
+    }
+
+    const worldPoint = transformPoint3x3(modelMatrix, unitPoint.x, unitPoint.y);
+
+    return containsSelectionPoint(selection, worldPoint.x, worldPoint.y);
   };
 }
 
@@ -469,19 +392,6 @@ function createCachedMaskPredicate(
 
     return result;
   };
-}
-
-function isInsideUnitRectWithMargin(point: Point, margin: Point) {
-  return (
-    point.x >= -margin.x &&
-    point.x <= 1 + margin.x &&
-    point.y >= -margin.y &&
-    point.y <= 1 + margin.y
-  );
-}
-
-function getCurrentTextMaskFrame(layer: TextLayer) {
-  return layer.lastTextMaskFrame ?? getTextMaskFrame(layer);
 }
 
 function unionDirtyRects(

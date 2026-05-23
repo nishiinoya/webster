@@ -1,6 +1,10 @@
 import { Camera2D } from "../../geometry/Camera2D";
 import { ImageLayer, isDefaultImageLayerGeometry } from "../../layers/ImageLayer";
 import { defaultLayerFilters, Layer } from "../../layers/Layer";
+import {
+  getImageLayerRenderedUnitCorners,
+  layerLocalUnitToMaskUnit
+} from "../../masks/LayerMaskCoordinates";
 import { TexturedShaderProgram } from "../shaders/TexturedShaderProgram";
 import { SolidColorShaderProgram } from "../shaders/SolidColorShaderProgram";
 import { Quad } from "../geometry/Quad";
@@ -66,23 +70,25 @@ export function renderImageLayer(
 }
 
 function getImageLayerVertexData(layer: ImageLayer) {
-  const { corners, crop } = layer.geometry;
+  const { crop } = layer.geometry;
+  const corners = getImageLayerRenderedUnitCorners(layer);
+  const vertices = new Float32Array([
+    corners.bottomLeft.x,
+    corners.bottomLeft.y,
+    corners.bottomRight.x,
+    corners.bottomRight.y,
+    corners.topLeft.x,
+    corners.topLeft.y,
+    corners.topLeft.x,
+    corners.topLeft.y,
+    corners.bottomRight.x,
+    corners.bottomRight.y,
+    corners.topRight.x,
+    corners.topRight.y
+  ]);
 
   return {
-    vertices: new Float32Array([
-      corners.bottomLeft.x,
-      corners.bottomLeft.y,
-      corners.bottomRight.x,
-      corners.bottomRight.y,
-      corners.topLeft.x,
-      corners.topLeft.y,
-      corners.topLeft.x,
-      corners.topLeft.y,
-      corners.bottomRight.x,
-      corners.bottomRight.y,
-      corners.topRight.x,
-      corners.topRight.y
-    ]),
+    vertices,
     texCoords: new Float32Array([
       crop.left,
       crop.bottom,
@@ -97,19 +103,22 @@ function getImageLayerVertexData(layer: ImageLayer) {
       crop.right,
       crop.top
     ]),
-    maskCoords: new Float32Array([
-      0,
-      0,
-      1,
-      0,
-      0,
-      1,
-      0,
-      1,
-      1,
-      0,
-      1,
-      1
-    ])
+    maskCoords: getImageLayerMaskCoords(layer, vertices)
   };
+}
+
+function getImageLayerMaskCoords(layer: ImageLayer, vertices: Float32Array) {
+  const maskCoords = new Float32Array(vertices.length);
+
+  for (let index = 0; index < vertices.length; index += 2) {
+    const maskUnit = layerLocalUnitToMaskUnit(layer, {
+      x: vertices[index],
+      y: vertices[index + 1]
+    });
+
+    maskCoords[index] = maskUnit.x;
+    maskCoords[index + 1] = maskUnit.y;
+  }
+
+  return maskCoords;
 }

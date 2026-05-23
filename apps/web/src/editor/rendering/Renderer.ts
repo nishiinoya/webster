@@ -1149,9 +1149,7 @@ export class Renderer {
             x: layer.x + this.layerRenderOffset.x,
             y: layer.y + this.layerRenderOffset.y
           };
-    const modelMatrix = getModelMatrix(positionedLayer);
-
-    return layer.crop ? multiplyMatrix3(modelMatrix, getLayerCropMatrix(layer)) : modelMatrix;
+    return getModelMatrix(positionedLayer);
   }
 
   private withLayerRenderOffset(offset: { x: number; y: number }, draw: () => void) {
@@ -1500,42 +1498,4 @@ export class Renderer {
 
     await Promise.all(tasks);
   }
-}
-
-function getLayerCropMatrix(layer: Layer) {
-  const crop = layer.crop;
-
-  if (!crop) {
-    return new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]);
-  }
-
-  const cropWidth = Math.max(1e-6, crop.right - crop.left);
-  const cropHeight = Math.max(1e-6, crop.top - crop.bottom);
-
-  return new Float32Array([
-    layer.width / cropWidth,
-    0,
-    0,
-    0,
-    layer.height / cropHeight,
-    0,
-    -crop.left / cropWidth,
-    -crop.bottom / cropHeight,
-    1
-  ]);
-}
-
-function multiplyMatrix3(left: Float32Array, right: Float32Array) {
-  const result = new Float32Array(9);
-
-  for (let column = 0; column < 3; column += 1) {
-    for (let row = 0; row < 3; row += 1) {
-      result[column * 3 + row] =
-        left[row] * right[column * 3] +
-        left[3 + row] * right[column * 3 + 1] +
-        left[6 + row] * right[column * 3 + 2];
-    }
-  }
-
-  return result;
 }

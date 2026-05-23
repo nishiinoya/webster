@@ -61,7 +61,9 @@ type ResizeState = {
 
 type CropState = ResizeState & {
   baseCrop: ImageLayerGeometry["crop"] | null;
+  baseImageGeometry: ImageLayerGeometry | null;
   baseLayerCrop: LayerContentCrop;
+  baseLayerTransform: LayerTransformSnapshot;
   baseMask: LayerMask | null;
   baseMaskFrame: CropMaskFrame | null;
 };
@@ -90,6 +92,14 @@ type HandleClickState = {
 };
 type CropMaskFrame = {
   height: number;
+  width: number;
+  x: number;
+  y: number;
+};
+type LayerTransformSnapshot = {
+  height: number;
+  scaleX: number;
+  scaleY: number;
   width: number;
   x: number;
   y: number;
@@ -504,7 +514,9 @@ export class MoveTool {
     return {
       ...this.createResizeState(layer, handleId),
       baseCrop: layer instanceof ImageLayer ? { ...layer.geometry.crop } : null,
+      baseImageGeometry: layer instanceof ImageLayer ? cloneImageLayerGeometry(layer.geometry) : null,
       baseLayerCrop: getLayerContentCrop(layer),
+      baseLayerTransform: captureLayerTransform(layer),
       baseMask,
       baseMaskFrame: baseMask ? getLayerMaskFrame(layer) : null
     };
@@ -648,34 +660,60 @@ export class MoveTool {
       top = clamp(pointerLocal.y, bottom + minSize, state.baseHeight);
     }
 
-    this.applyLayerBounds(state, left, right, bottom, top, {
-      preserveLayerSize: true
-    });
+    restoreLayerTransform(state.layer, state.baseLayerTransform);
 
-    if (state.layer instanceof ImageLayer && state.baseCrop) {
-      state.layer.crop = null;
-      this.applyImageLayerMaskCrop(state, left, right, bottom, top);
-
-      const cropSpanX = state.baseCrop.right - state.baseCrop.left;
-      const cropSpanY = state.baseCrop.top - state.baseCrop.bottom;
-
-      state.layer.geometry = {
-        ...cloneImageLayerGeometry(state.layer.geometry),
-        crop: {
-          bottom: state.baseCrop.bottom + (bottom / state.baseHeight) * cropSpanY,
-          left: state.baseCrop.left + (left / state.baseWidth) * cropSpanX,
-          right: state.baseCrop.left + (right / state.baseWidth) * cropSpanX,
-          top: state.baseCrop.bottom + (top / state.baseHeight) * cropSpanY
-        }
-      };
-    } else {
-      const cropBounds = getLayerLocalCropBounds(state, left, right, bottom, top);
-
-      state.layer.crop = normalizeLayerContentCrop(cropBounds, state.layer.width, state.layer.height);
-      this.applyLayerMaskClip(state, cropBounds);
+    if (state.layer instanceof ImageLayer) {
+      this.applyImageLayerCrop(state, left, right, bottom, top);
+      this.scene.updateLayer(state.layer.id, {});
+      return;
     }
 
+    const cropBounds = getLayerLocalCropBounds(state, left, right, bottom, top);
+
+    state.layer.crop = normalizeLayerContentCrop(cropBounds, state.layer.width, state.layer.height);
+    this.applyLayerMaskClip(state, cropBounds);
+
     this.scene.updateLayer(state.layer.id, {});
+  }
+
+  private applyImageLayerCrop(
+    state: CropState,
+    left: number,
+    right: number,
+    bottom: number,
+    top: number
+  ) {
+    if (
+      !(state.layer instanceof ImageLayer) ||
+      !state.baseCrop ||
+      !state.baseImageGeometry ||
+      state.baseWidth <= 0 ||
+      state.baseHeight <= 0
+    ) {
+      return;
+    }
+
+    const leftRatio = clamp(left / state.baseWidth, 0, 1);
+    const rightRatio = clamp(right / state.baseWidth, leftRatio, 1);
+    const bottomRatio = clamp(bottom / state.baseHeight, 0, 1);
+    const topRatio = clamp(top / state.baseHeight, bottomRatio, 1);
+    const cropSpanX = state.baseCrop.right - state.baseCrop.left;
+    const cropSpanY = state.baseCrop.top - state.baseCrop.bottom;
+
+    state.layer.crop = null;
+    state.layer.geometry = {
+      corners: { ...state.baseImageGeometry.corners },
+      crop: {
+        bottom: state.baseCrop.bottom + bottomRatio * cropSpanY,
+        left: state.baseCrop.left + leftRatio * cropSpanX,
+        right: state.baseCrop.left + rightRatio * cropSpanX,
+        top: state.baseCrop.bottom + topRatio * cropSpanY
+      }
+    };
+
+    if (state.baseMask) {
+      this.applyImageLayerMaskCrop(state, left, right, bottom, top);
+    }
   }
 
   private applyImageLayerMaskCrop(
@@ -689,12 +727,16 @@ export class MoveTool {
       return;
     }
 
-    state.layer.mask = cropLayerMaskToBounds({
-      baseHeight: state.baseHeight,
+    state.layer.mask = clipLayerMaskToBounds({
       baseMask: state.baseMask,
-      baseWidth: state.baseWidth,
       bottom,
       currentRevision: state.layer.mask?.revision ?? state.baseMask.revision,
+      frame: {
+        height: state.baseHeight,
+        width: state.baseWidth,
+        x: 0,
+        y: 0
+      },
       left,
       right,
       top
@@ -1156,71 +1198,6 @@ function getLayerLocalCropBounds(
   };
 }
 
-function cropLayerMaskToBounds(options: {
-  baseHeight: number;
-  baseMask: LayerMask;
-  baseWidth: number;
-  bottom: number;
-  currentRevision: number;
-  left: number;
-  right: number;
-  top: number;
-}) {
-  const {
-    baseHeight,
-    baseMask,
-    baseWidth,
-    bottom,
-    currentRevision,
-    left,
-    right,
-    top
-  } = options;
-  const sourceLeft = clampInteger(
-    Math.floor((left / baseWidth) * baseMask.width),
-    0,
-    baseMask.width - 1
-  );
-  const sourceRight = clampInteger(
-    Math.ceil((right / baseWidth) * baseMask.width),
-    sourceLeft + 1,
-    baseMask.width
-  );
-  const sourceTop = clampInteger(
-    Math.floor(((baseHeight - top) / baseHeight) * baseMask.height),
-    0,
-    baseMask.height - 1
-  );
-  const sourceBottom = clampInteger(
-    Math.ceil(((baseHeight - bottom) / baseHeight) * baseMask.height),
-    sourceTop + 1,
-    baseMask.height
-  );
-  const width = sourceRight - sourceLeft;
-  const height = sourceBottom - sourceTop;
-  const data = new Uint8Array(width * height);
-
-  for (let row = 0; row < height; row += 1) {
-    const sourceStart = (sourceTop + row) * baseMask.width + sourceLeft;
-    const targetStart = row * width;
-
-    data.set(baseMask.data.subarray(sourceStart, sourceStart + width), targetStart);
-  }
-
-  const croppedMask = new LayerMask({
-    data,
-    enabled: baseMask.enabled,
-    height,
-    id: baseMask.id,
-    width
-  });
-
-  croppedMask.revision = Math.max(baseMask.revision, currentRevision);
-  croppedMask.markDirty();
-
-  return croppedMask;
-}
-
 function clipLayerMaskToBounds(options: {
   baseMask: LayerMask;
   bottom: number;
@@ -1262,8 +1239,24 @@ function clipLayerMaskToBounds(options: {
   return clippedMask;
 }
 
-function clampInteger(value: number, min: number, max: number) {
-  return Math.min(Math.max(Number.isFinite(value) ? value : min, min), max);
+function captureLayerTransform(layer: Layer): LayerTransformSnapshot {
+  return {
+    height: layer.height,
+    scaleX: layer.scaleX,
+    scaleY: layer.scaleY,
+    width: layer.width,
+    x: layer.x,
+    y: layer.y
+  };
+}
+
+function restoreLayerTransform(layer: Layer, transform: LayerTransformSnapshot) {
+  layer.x = transform.x;
+  layer.y = transform.y;
+  layer.width = transform.width;
+  layer.height = transform.height;
+  layer.scaleX = transform.scaleX;
+  layer.scaleY = transform.scaleY;
 }
 
 function clamp(value: number, min: number, max: number) {

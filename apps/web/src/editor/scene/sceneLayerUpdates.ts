@@ -1,7 +1,6 @@
 import { normalizeLayerFilters, normalizeLayerTexture } from "../layers/Layer";
 import type {
   ImageLayerGeometry,
-  LayerContentCrop,
   LayerFilterSettings,
   LayerTextureSettings,
   Object3DKind
@@ -12,6 +11,9 @@ import {
   ImageLayer,
   normalizeImageLayerGeometry
 } from "../layers/ImageLayer";
+import {
+  isImageLayerGeometryCropBakedIntoCorners as isBakedImageCropGeometry
+} from "../masks/LayerMaskCoordinates";
 import { Layer } from "../layers/Layer";
 import { Object3DLayer, normalizeObject3DKind, normalizeRotation as normalize3DRotation } from "../layers/Object3DLayer";
 import { ShapeLayer } from "../layers/ShapeLayer";
@@ -291,94 +293,38 @@ function normalizeColor(color: [number, number, number, number]): [number, numbe
 }
 
 function resetLayerCrop(layer: Layer) {
-  if (layer.crop) {
-    restoreLayerBoundsFromCrop(layer, layer.crop);
-    layer.crop = null;
-
-    if (!(layer instanceof ImageLayer)) {
-      layer.mask = null;
-    }
-  }
-
   if (layer instanceof ImageLayer) {
-    const defaultGeometry = createDefaultImageLayerGeometry();
-    const crop = layer.geometry.crop;
+    layer.crop = null;
+    resetImageLayerCrop(layer);
+    return;
+  }
 
-    if (!areImageCropsEqual(crop, defaultGeometry.crop)) {
-      restoreLayerBoundsFromCrop(layer, {
-        bottom: crop.bottom * layer.height,
-        left: crop.left * layer.width,
-        right: crop.right * layer.width,
-        top: crop.top * layer.height
-      });
-      layer.geometry = {
-        ...layer.geometry,
-        crop: defaultGeometry.crop
-      };
-    }
+  if (layer.crop) {
+    layer.crop = null;
+    layer.mask = null;
   }
 }
 
-function restoreLayerBoundsFromCrop(layer: Layer, crop: LayerContentCrop) {
-  const cropWidth = Math.max(1e-6, crop.right - crop.left);
-  const cropHeight = Math.max(1e-6, crop.top - crop.bottom);
-  const resetScaleX = layer.scaleX * (layer.width / cropWidth);
-  const resetScaleY = layer.scaleY * (layer.height / cropHeight);
-  const fullWidth = layer.width * resetScaleX;
-  const fullHeight = layer.height * resetScaleY;
-  const currentWidth = layer.width * layer.scaleX;
-  const currentHeight = layer.height * layer.scaleY;
-  const currentCenter = {
-    x: layer.x + currentWidth / 2,
-    y: layer.y + currentHeight / 2
-  };
-  const cropBottomLeftWorld = rotatePoint(
-    { x: layer.x, y: layer.y },
-    currentCenter,
-    layer.rotation
-  );
-  const cropOffsetFromFullCenter = rotateVector(
-    {
-      x: crop.left * resetScaleX - fullWidth / 2,
-      y: crop.bottom * resetScaleY - fullHeight / 2
-    },
-    layer.rotation
-  );
-  const fullCenter = {
-    x: cropBottomLeftWorld.x - cropOffsetFromFullCenter.x,
-    y: cropBottomLeftWorld.y - cropOffsetFromFullCenter.y
-  };
+function resetImageLayerCrop(layer: ImageLayer) {
+  const defaultGeometry = createDefaultImageLayerGeometry();
+  const resetCorners = shouldResetBakedImageCropCorners(layer, defaultGeometry);
 
-  layer.scaleX = resetScaleX;
-  layer.scaleY = resetScaleY;
-  layer.x = fullCenter.x - fullWidth / 2;
-  layer.y = fullCenter.y - fullHeight / 2;
+  layer.geometry = normalizeImageLayerGeometry({
+    ...layer.geometry,
+    ...(resetCorners ? { corners: defaultGeometry.corners } : {}),
+    crop: defaultGeometry.crop
+  });
 }
 
-function rotatePoint(point: { x: number; y: number }, center: { x: number; y: number }, degrees: number) {
-  const rotated = rotateVector(
-    {
-      x: point.x - center.x,
-      y: point.y - center.y
-    },
-    degrees
-  );
+function shouldResetBakedImageCropCorners(
+  layer: ImageLayer,
+  defaultGeometry: ImageLayerGeometry
+) {
+  if (areImageCropsEqual(layer.geometry.crop, defaultGeometry.crop)) {
+    return false;
+  }
 
-  return {
-    x: center.x + rotated.x,
-    y: center.y + rotated.y
-  };
-}
-
-function rotateVector(vector: { x: number; y: number }, degrees: number) {
-  const radians = (degrees * Math.PI) / 180;
-  const cos = Math.cos(radians);
-  const sin = Math.sin(radians);
-
-  return {
-    x: vector.x * cos - vector.y * sin,
-    y: vector.x * sin + vector.y * cos
-  };
+  return isBakedImageCropGeometry(layer);
 }
 
 function areImageCropsEqual(
