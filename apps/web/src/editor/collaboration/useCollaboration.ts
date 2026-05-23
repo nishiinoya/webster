@@ -23,6 +23,7 @@ import {
 } from "./CollaborationClient";
 import { PendingOperationsQueue } from "./PendingOperationsQueue";
 import {
+  applyMaskSnapshotFallback,
   applyOperationToScene,
   applyScenePatch,
   computeSceneDiff,
@@ -779,6 +780,10 @@ export function useCollaboration({
           } catch {
             if (op.scene) {
               serverBaseSceneRef.current = op.scene;
+            } else {
+              serverBaseSceneRef.current =
+                applyMaskSnapshotFallback(serverBaseSceneRef.current, op) ??
+                serverBaseSceneRef.current;
             }
           }
         } else if (op.scene) {
@@ -815,8 +820,12 @@ export function useCollaboration({
             if (remoteOp.scene) {
               newServerBase = remoteOp.scene;
             } else {
-              await resyncProject();
-              return;
+              newServerBase = applyMaskSnapshotFallback(serverBaseSceneRef.current, remoteOp);
+
+              if (!newServerBase) {
+                await resyncProject();
+                return;
+              }
             }
           }
         } else {

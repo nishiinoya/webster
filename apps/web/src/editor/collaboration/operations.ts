@@ -52,6 +52,11 @@ type CreateRealtimePreviewOperationOptions = {
   tool: string;
 };
 
+type MaskSnapshotPayload = {
+  layerId: string;
+  mask: Record<string, unknown> | null;
+};
+
 export type PreparedProjectOperation = {
   assetUploads: SharedProjectAssetUpload[];
   /** The fully-serialised current scene — caller stores this as the next previousScene. */
@@ -69,6 +74,19 @@ export async function createOperationFromEditorAction({
   projectId,
   projectVersion
 }: CreateOperationOptions): Promise<PreparedProjectOperation> {
+  const fastOperation = createFastOperationFromEditorAction({
+    action,
+    clientId,
+    phase,
+    previousScene,
+    projectId,
+    projectVersion
+  });
+
+  if (fastOperation) {
+    return fastOperation;
+  }
+
   const { assetReferences, assetUploads, manifest } =
     await createCollaborationSceneSnapshot(editorApp, projectId, alreadyUploadedAssetPaths);
 
@@ -76,6 +94,7 @@ export async function createOperationFromEditorAction({
     includeSceneFallback: shouldIncludeSceneFallbackForAction(action),
     preferPatch: shouldPreferPatchForAction(action)
   });
+  const payload = addMaskSnapshotsToPayload(getOperationPayload(action), action, scenePatch, manifest);
 
   return {
     assetUploads,
@@ -88,7 +107,7 @@ export async function createOperationFromEditorAction({
       createdAt: new Date().toISOString(),
       kind: getOperationKind(action),
       label: action.label,
-      payload: getOperationPayload(action),
+      payload,
       phase,
       projectId,
       ...(scene ? { scene } : {}),
@@ -156,6 +175,90 @@ export function createRealtimePreviewOperation({
   };
 }
 
+function createFastOperationFromEditorAction({
+  action,
+  clientId,
+  phase,
+  previousScene,
+  projectId,
+  projectVersion
+}: Omit<CreateOperationOptions, "alreadyUploadedAssetPaths" | "editorApp">): PreparedProjectOperation | null {
+  if (!previousScene || !isFilterOnlyLayerUpdateAction(action)) {
+    return null;
+  }
+
+  const command = action.payload as {
+    layerId?: unknown;
+    updates?: { filters?: Record<string, unknown> };
+  };
+  const layerId = command.layerId;
+
+  if (typeof layerId !== "string") {
+    return null;
+  }
+
+  const layerIndex = previousScene.layers.findIndex((layer) => layer.id === layerId);
+
+  if (layerIndex < 0) {
+    return null;
+  }
+
+  const manifest = deepClone(previousScene) as WebsterProjectManifest;
+  const layer = manifest.layers[layerIndex];
+  const currentFilters =
+    layer.filters && typeof layer.filters === "object" && !Array.isArray(layer.filters)
+      ? (layer.filters as Record<string, unknown>)
+      : {};
+  const nextFilters = {
+    ...currentFilters,
+    ...command.updates?.filters
+  };
+  const scenePatch: ProjectScenePatchOp[] = [
+    {
+      op: layer.filters === undefined ? "add" : "replace",
+      path: `/layers/${layerIndex}/filters`,
+      value: nextFilters
+    }
+  ];
+
+  layer.filters = nextFilters;
+
+  return {
+    assetUploads: [],
+    manifest,
+    operation: {
+      assetReferences: [],
+      baseVersion: projectVersion,
+      clientId,
+      clientOperationId: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      kind: "filter:update",
+      label: action.label,
+      payload: getOperationPayload(action),
+      phase,
+      projectId,
+      scenePatch
+    }
+  };
+}
+
+function isFilterOnlyLayerUpdateAction(action: SharedEditorAction) {
+  if (action.kind !== "command" || readPayloadType(action.payload) !== "update") {
+    return false;
+  }
+
+  const updates = (action.payload as { updates?: unknown }).updates;
+
+  return (
+    Boolean(updates) &&
+    typeof updates === "object" &&
+    updates !== null &&
+    !Array.isArray(updates) &&
+    Object.keys(updates).length === 1 &&
+    "filters" in updates
+  );
+}
+
 function shouldPreferPatchForAction(action: SharedEditorAction) {
   if (
     action.kind === "gesture" &&
@@ -168,19 +271,15 @@ function shouldPreferPatchForAction(action: SharedEditorAction) {
     return true;
   }
 
+  if (action.kind === "command" && readPayloadType(action.payload) === "mask") {
+    return true;
+  }
+
   return false;
 }
 
 function shouldIncludeSceneFallbackForAction(action: SharedEditorAction) {
-  if (action.kind === "gesture") {
-    return action.tool === "Crop" || action.tool === "Mask Brush";
-  }
-
-  if (action.kind === "scene" && (action.operation === "undo" || action.operation === "redo")) {
-    return true;
-  }
-
-  return action.kind === "command" && readPayloadType(action.payload) === "mask";
+  return action.kind === "gesture" && action.tool === "Crop";
 }
 
 /**
@@ -285,6 +384,33 @@ export function applyScenePatch(
   return applyPatch(cloned, patch as unknown as never[], false, true).newDocument as WebsterProjectManifest;
 }
 
+export function applyMaskSnapshotFallback(
+  base: WebsterProjectManifest,
+  operation: ProjectOperation
+): WebsterProjectManifest | null {
+  const snapshots = readMaskSnapshots(operation.payload?.maskSnapshots);
+
+  if (!snapshots.length) {
+    return null;
+  }
+
+  const cloned = deepClone(base) as WebsterProjectManifest;
+  let didApply = false;
+
+  for (const snapshot of snapshots) {
+    const layer = cloned.layers.find((candidate) => candidate.id === snapshot.layerId);
+
+    if (!layer) {
+      continue;
+    }
+
+    layer.mask = snapshot.mask;
+    didApply = true;
+  }
+
+  return didApply ? cloned : null;
+}
+
 /**
  * Applies a backend-broadcast operation to the local editor by hydrating the
  * `.webster` manifest shape the app already understands. Future granular
@@ -326,6 +452,10 @@ export async function applyOperationToScene(
         if (operation.scene) {
           resolved = operation.scene;
         } else {
+          resolved = applyMaskSnapshotFallback(currentManifest, operation);
+        }
+
+        if (!resolved) {
           throw new ScenePatchApplyError(
             `Failed to apply scene patch: ${(err as Error).message}`
           );
@@ -345,6 +475,113 @@ export async function applyOperationToScene(
   });
 
   return resolved;
+}
+
+function addMaskSnapshotsToPayload(
+  payload: Record<string, unknown>,
+  action: SharedEditorAction,
+  patch: ProjectScenePatchOp[] | undefined,
+  manifest: WebsterProjectManifest
+) {
+  if (!patch?.length || !shouldAttachMaskSnapshots(action, patch)) {
+    return payload;
+  }
+
+  const maskSnapshots = createMaskSnapshotsFromPatch(patch, manifest);
+
+  return maskSnapshots.length > 0 ? { ...payload, maskSnapshots } : payload;
+}
+
+function shouldAttachMaskSnapshots(action: SharedEditorAction, patch: ProjectScenePatchOp[]) {
+  if (action.kind === "gesture" && action.tool === "Mask Brush") {
+    return true;
+  }
+
+  if (action.kind === "command" && readPayloadType(action.payload) === "mask") {
+    return true;
+  }
+
+  return (
+    action.kind === "scene" &&
+    (action.operation === "undo" || action.operation === "redo") &&
+    isMaskOnlyPatch(patch)
+  );
+}
+
+function isMaskOnlyPatch(patch: ProjectScenePatchOp[]) {
+  return patch.length > 0 && patch.every((operation) => /^\/layers\/\d+\/mask(?:\/|$)/u.test(operation.path));
+}
+
+function createMaskSnapshotsFromPatch(
+  patch: ProjectScenePatchOp[],
+  manifest: WebsterProjectManifest
+): MaskSnapshotPayload[] {
+  const layerIndexes = new Set<number>();
+
+  for (const operation of patch) {
+    const match = /^\/layers\/(\d+)\/mask(?:\/|$)/u.exec(operation.path);
+
+    if (!match) {
+      continue;
+    }
+
+    layerIndexes.add(Number(match[1]));
+  }
+
+  return [...layerIndexes]
+    .map((layerIndex) => manifest.layers[layerIndex] ?? null)
+    .filter((layer): layer is WebsterSerializedLayer => Boolean(layer))
+    .map((layer) => ({
+      layerId: layer.id,
+      mask: readSerializedMask(layer.mask)
+    }));
+}
+
+function readMaskSnapshots(value: unknown): MaskSnapshotPayload[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((snapshot) => {
+      if (!snapshot || typeof snapshot !== "object") {
+        return null;
+      }
+
+      const layerId = (snapshot as { layerId?: unknown }).layerId;
+      const mask = readSerializedMask((snapshot as { mask?: unknown }).mask);
+
+      return typeof layerId === "string" ? { layerId, mask } : null;
+    })
+    .filter((snapshot): snapshot is MaskSnapshotPayload => Boolean(snapshot));
+}
+
+function readSerializedMask(value: unknown): Record<string, unknown> | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const mask = value as Record<string, unknown>;
+
+  return (
+    typeof mask.data === "string" &&
+    typeof mask.enabled === "boolean" &&
+    typeof mask.height === "number" &&
+    typeof mask.id === "string" &&
+    typeof mask.width === "number"
+  )
+    ? {
+        data: mask.data,
+        enabled: mask.enabled,
+        height: mask.height,
+        id: mask.id,
+        width: mask.width
+      }
+    : null;
 }
 
 /**

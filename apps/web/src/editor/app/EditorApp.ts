@@ -1653,6 +1653,18 @@ export class EditorApp {
           ? this.getRemoteCropPreviewMask(layer)
           : null;
 
+      if (payload.tool === "Crop") {
+        this.remoteLayerTransformAnimations.delete(layer.id);
+        applyLayerTransformPreviewLayer(
+          layer,
+          cloneLayerTransformPreviewLayer(previewLayer),
+          cropPreview
+        );
+        this.scene.updateLayer(layer.id, {});
+        didChange = true;
+        continue;
+      }
+
       this.remoteLayerTransformAnimations.set(layer.id, {
         cropPreview,
         durationMs: 90,
