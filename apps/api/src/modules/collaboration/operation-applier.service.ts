@@ -19,7 +19,10 @@ export class OperationApplierService {
   apply(
     manifest: WebsterProjectManifest,
     op: ProjectOperation,
+    options: { allowSceneFallback?: boolean } = {},
   ): WebsterProjectManifest {
+    const allowSceneFallback = options.allowSceneFallback ?? true;
+
     if (op.scenePatch && op.scenePatch.length > 0) {
       try {
         const cloned = deepClone(manifest) as WebsterProjectManifest;
@@ -32,9 +35,12 @@ export class OperationApplierService {
         return result.newDocument as WebsterProjectManifest;
       } catch (err) {
         this.logger.warn(
-          `scenePatch failed for op ${op.clientOperationId}: ${(err as Error).message}; falling back to op.scene if available`,
+          `scenePatch failed for op ${op.clientOperationId}: ${(err as Error).message}`,
         );
-        // intentional fall-through to scene/no-op
+        if (!allowSceneFallback || !op.scene) {
+          throw err;
+        }
+        // intentional fall-through to the full scene fallback
       }
     }
 

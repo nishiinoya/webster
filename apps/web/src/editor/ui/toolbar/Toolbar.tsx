@@ -472,7 +472,7 @@ export function Toolbar({
               }}
               type='button'
             >
-              Share project...
+              {isSharedMode ? 'Share project...' : 'Add to cloud...'}
             </button>
             <button
               className={toolbarMenuItemClass}
@@ -509,21 +509,28 @@ export function Toolbar({
             </button>
             <button
               className={toolbarMenuItemClass}
-              disabled={
-                isSharedMode ? !canDownloadSharedProject : !canEditDocument
-              }
+              disabled={!canvasSize}
               onClick={(event) => {
                 closeMenu(event);
-                if (isSharedMode) {
-                  onDownloadSharedProject();
-                } else {
-                  onOpenExportDialog();
-                }
+                onOpenExportDialog();
               }}
               type='button'
             >
-              {isSharedMode ? 'Download shared .webster...' : 'Export as...'}
+              Export image...
             </button>
+            {isSharedMode ? (
+              <button
+                className={toolbarMenuItemClass}
+                disabled={!canDownloadSharedProject}
+                onClick={(event) => {
+                  closeMenu(event);
+                  onDownloadSharedProject();
+                }}
+                type='button'
+              >
+                Download cloud .webster...
+              </button>
+            ) : null}
             <button
               className={toolbarMenuItemClass}
               disabled={!isSharedMode}

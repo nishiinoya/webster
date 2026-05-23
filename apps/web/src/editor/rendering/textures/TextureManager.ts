@@ -6,6 +6,7 @@ import { LayerMask } from "../../masks/LayerMask";
 
 export class TextureManager {
   private readonly imageTextureRevisions = new Map<string, number>();
+  private readonly maskTextureInstances = new Map<string, LayerMask>();
   private readonly maskTextureSizes = new Map<string, { height: number; width: number }>();
   private readonly maskTextureRevisions = new Map<string, number>();
   private readonly textures = new Map<string, WebGLTexture>();
@@ -99,10 +100,11 @@ export class TextureManager {
 
   getMaskTexture(mask: LayerMask) {
     const existingTexture = this.textures.get(mask.id);
+    const existingMask = this.maskTextureInstances.get(mask.id);
     const existingRevision = this.maskTextureRevisions.get(mask.id);
     const existingSize = this.maskTextureSizes.get(mask.id);
 
-    if (existingTexture && existingRevision === mask.revision) {
+    if (existingTexture && existingMask === mask && existingRevision === mask.revision) {
       return existingTexture;
     }
 
@@ -117,6 +119,7 @@ export class TextureManager {
 
     const canUploadDirtyRect =
       existingTexture &&
+      existingMask === mask &&
       existingSize?.width === mask.width &&
       existingSize.height === mask.height;
     const dirtyRect = canUploadDirtyRect ? mask.takeDirtyRect() : null;
@@ -152,6 +155,7 @@ export class TextureManager {
     }
 
     this.textures.set(mask.id, texture);
+    this.maskTextureInstances.set(mask.id, mask);
     this.maskTextureRevisions.set(mask.id, mask.revision);
     this.maskTextureSizes.set(mask.id, { height: mask.height, width: mask.width });
 
@@ -165,6 +169,7 @@ export class TextureManager {
 
     this.textures.clear();
     this.imageTextureRevisions.clear();
+    this.maskTextureInstances.clear();
     this.maskTextureSizes.clear();
     this.maskTextureRevisions.clear();
   }

@@ -237,6 +237,8 @@ export function EditorPage() {
   const [isExportImageDialogOpen, setIsExportImageDialogOpen] = useState(false);
   const [isNewDocumentDialogOpen, setIsNewDocumentDialogOpen] = useState(false);
   const [isShareProjectDialogOpen, setIsShareProjectDialogOpen] = useState(false);
+  const [openShareDialogAfterCloudUpload, setOpenShareDialogAfterCloudUpload] =
+    useState(false);
   const [isObject3DImportDialogOpen, setIsObject3DImportDialogOpen] =
     useState(false);
   const [object3DImportInitialFiles, setObject3DImportInitialFiles] = useState<
@@ -437,6 +439,27 @@ export function EditorPage() {
     );
   }, [sharedProjectState.mode, sharedProjectState.projectId, sharedProjectState.projectName]);
 
+  useEffect(() => {
+    if (!openShareDialogAfterCloudUpload) {
+      return;
+    }
+
+    if (sharedProjectState.mode === 'shared' && sharedProjectState.projectId) {
+      setIsShareProjectDialogOpen(true);
+      setOpenShareDialogAfterCloudUpload(false);
+      return;
+    }
+
+    if (sharedProjectState.error) {
+      setOpenShareDialogAfterCloudUpload(false);
+    }
+  }, [
+    openShareDialogAfterCloudUpload,
+    sharedProjectState.error,
+    sharedProjectState.mode,
+    sharedProjectState.projectId,
+  ]);
+
   const didApplyUrlProjectIdRef = useRef(false);
 
   useEffect(() => {
@@ -507,13 +530,30 @@ export function EditorPage() {
 
   function switchToLocalMode() {
     if (sharedProjectState.mode === 'local') {
+      clearSharedProjectUrlParam();
       return;
     }
 
+    clearSharedProjectUrlParam();
     setCollaborationRequest({
       id: Date.now(),
       type: 'switch-local',
     });
+  }
+
+  function clearSharedProjectUrlParam() {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const url = new URL(window.location.href);
+
+    if (!url.searchParams.has('projectId')) {
+      return;
+    }
+
+    url.searchParams.delete('projectId');
+    window.history.replaceState(null, '', url.toString());
   }
 
   function rememberImportedFontFamily(fontFamily: string) {
@@ -614,19 +654,12 @@ export function EditorPage() {
     ]);
     setImageDocumentRequest(null);
     setIsNewDocumentDialogOpen(false);
-
-    // Every new project lives on the server: auto-upload it so it gets a
-    // projectId. shareLocalProject waits for the editor to be ready.
-    setCollaborationRequest({
-      id: Date.now(),
-      title: tab.title,
-      type: 'share-local',
-    });
   }
 
   async function createDocumentFromUserTemplate(
     template: UserProjectTemplateSummary,
   ) {
+    switchToLocalMode();
     const storedTemplate = await getUserProjectTemplate(template.id);
 
     if (!storedTemplate) {
@@ -778,6 +811,7 @@ export function EditorPage() {
       return;
     }
 
+    setOpenShareDialogAfterCloudUpload(true);
     setCollaborationRequest({
       id: Date.now(),
       title: activeDocument.title,
@@ -894,6 +928,12 @@ export function EditorPage() {
   }
 
   function closeDocumentTab(tabId: string) {
+    const closingTab = tabs.find((tab) => tab.id === tabId);
+
+    if (closingTab?.isActive && sharedProjectState.mode === 'shared') {
+      switchToLocalMode();
+    }
+
     setTabs((currentTabs) => {
       const closedIndex = currentTabs.findIndex((tab) => tab.id === tabId);
 
@@ -907,7 +947,6 @@ export function EditorPage() {
       if (remainingTabs.length === 0) {
         setLayers([]);
         setZoomPercentage(100);
-        switchToLocalMode();
         return [];
       }
 
@@ -1539,7 +1578,7 @@ export function EditorPage() {
               <div className='flex-1 flex items-center justify-center'>
                 <div className='text-center'>
                   <h2 className='bg-gradient-to-r from-[#4aa391] via-[#6fd6c1] to-[#d9f5ee] bg-clip-text text-6xl font-extrabold tracking-[0.22em] text-transparent'>
-                    WEBSTEER
+                    WEBSTER
                   </h2>
                   <div className='flex flex-col items-center'>
                     <p className='mt-4 max-w-[420px] text-sm font-semibold uppercase tracking-[0.18em] text-[#a7b0b9]'>
@@ -1554,51 +1593,71 @@ export function EditorPage() {
                 </div>
               </div>
               <div className='flex-1 '>
-                <div className='grid w-[min(780px,100%)] justify-items-center gap-[18px] text-center border-2 border-dotted border-[#276f63] rounded-xl pt-20'>
+                <div className='grid w-[min(780px,100%)] justify-items-stretch gap-[18px] border-2 border-dotted border-[#276f63] rounded-xl p-8 text-left'>
                   <p className='m-0 text-xs font-extrabold uppercase tracking-normal text-[#8b929b]'>
                     No open documents
                   </p>
                   <h2 className='m-0 text-[34px] font-bold leading-[1.12] text-[#f2f4f7]'>
                     Start a Webster project
                   </h2>
-                  <div className='flex flex-col justify-center gap-4'>
-                    <button
-                      className='min-w-60 border border-[#4aa391] bg-[#203731] px-[18px] py-3.5 font-extrabold text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731] rounded-4xl cursor-pointer mt-20'
-                      onClick={() => setIsNewDocumentDialogOpen(true)}
-                      type='button'
-                    >
-                      Create new project
-                    </button>
-                    <button
-                      className='min-w-70 border border-[#4aa391] bg-[#203731] px-[18px] py-3.5 font-extrabold text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731] rounded-4xl cursor-pointer'
-                      onClick={() => emptyImageInputRef.current?.click()}
-                      type='button'
-                    >
-                      Open image
-                    </button>
-                    <button
-                      className='min-w-40 rounded-4xl border border-[#4aa391] bg-[#203731] px-[18px] py-3.5 font-extrabold text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]'
-                      onClick={openProjectPickerFromEmptyState}
-                      type='button'
-                    >
-                      Open from file
-                    </button>
-                  </div>
+                  <section
+                    className='grid gap-3 border-t border-[#30353d] pt-4'
+                    aria-label='Local projects'
+                  >
+                    <h3 className='m-0 text-sm font-extrabold uppercase tracking-[0.12em] text-[#a7b0b9]'>
+                      Local projects
+                    </h3>
+                    <div className='flex flex-wrap gap-3'>
+                      <button
+                        className='min-w-40 rounded-lg border border-[#4aa391] bg-[#203731] px-[18px] py-3 font-extrabold text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]'
+                        onClick={() => setIsNewDocumentDialogOpen(true)}
+                        type='button'
+                      >
+                        New local project
+                      </button>
+                      <button
+                        className='min-w-36 rounded-lg border border-[#4aa391] bg-[#203731] px-[18px] py-3 font-extrabold text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]'
+                        onClick={openProjectPickerFromEmptyState}
+                        type='button'
+                      >
+                        Open .webster
+                      </button>
+                      <button
+                        className='min-w-32 rounded-lg border border-[#30353d] bg-[#202329] px-[18px] py-3 font-extrabold text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]'
+                        onClick={() => emptyImageInputRef.current?.click()}
+                        type='button'
+                      >
+                        Open image
+                      </button>
+                    </div>
+                  </section>
                   {recentProjectError ? (
                     <p className='m-0 text-[13px] font-bold text-[#ffb9b9]'>
                       {recentProjectError}
                     </p>
                   ) : null}
-                  <div
-                    className='mt-12 mb-12 grid w-[min(620px,100%)] justify-items-center gap-2'
-                    aria-label='Your projects'
+                  <section
+                    className='mb-2 grid justify-items-start gap-3 border-t border-[#30353d] pt-4'
+                    aria-label='Cloud projects'
                   >
+                    <div className='flex w-full flex-wrap items-center justify-between gap-3'>
+                      <h3 className='m-0 text-sm font-extrabold uppercase tracking-[0.12em] text-[#a7b0b9]'>
+                        Cloud projects
+                      </h3>
+                      <button
+                        className='rounded-lg border border-[#30353d] bg-[#202329] px-3 py-2 text-[12px] font-extrabold text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]'
+                        onClick={openSharedProject}
+                        type='button'
+                      >
+                        Open by ID
+                      </button>
+                    </div>
                     <HomeProjects
                       onOpenProject={(projectId, projectName) =>
                         openSharedProjectById(projectId, projectName)
                       }
                     />
-                  </div>
+                  </section>
                   <input
                     ref={emptyImageInputRef}
                     accept='image/*'

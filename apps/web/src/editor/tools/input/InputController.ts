@@ -1,9 +1,11 @@
 import { Camera2D } from "../../geometry/Camera2D";
 import { DrawingTool } from "../drawing/DrawingTool";
 import type { DrawingToolOptions } from "../drawing/DrawingTool";
+import type { DrawPreviewPayload } from "../drawing/DrawingTool";
 /** Pointer input router for editor tools. */
 import { Scene } from "../../scene/Scene";
 import { MaskBrushTool } from "../mask-brush/MaskBrushTool";
+import type { MaskBrushPreviewPayload } from "../mask-brush/MaskBrushTool";
 import type { MaskBrushOptions } from "../mask-brush/MaskBrushTypes";
 import { MoveTool } from "../move/MoveTool";
 import type { ToolCursor, ToolPointerEvent } from "../move/MoveTool";
@@ -171,6 +173,14 @@ export class InputController {
 
   undoLastMaskStroke() {
     return this.maskBrushTool.undoLastStroke();
+  }
+
+  getMaskBrushPreviewPayload(): MaskBrushPreviewPayload | null {
+    return this.maskBrushTool.getPreviewPayload();
+  }
+
+  getDrawPreviewPayload(): DrawPreviewPayload | null {
+    return this.drawingTool.getPreviewPayload();
   }
 
   getCursor(clientX: number, clientY: number): ToolCursor {

@@ -83,6 +83,55 @@ export function paintMaskEllipse(
   return dirtyRect;
 }
 
+export function paintMaskStrokePath(
+  mask: LayerMask,
+  points: MaskPoint[],
+  radii: MaskBrushRadii,
+  options: MaskBrushPaintOptions,
+  shouldPaintPixel?: MaskBrushPixelPredicate
+) {
+  let dirtyRect: MaskDirtyRect | null = null;
+  const firstPoint = points[0];
+
+  if (!firstPoint) {
+    return null;
+  }
+
+  dirtyRect = unionDirtyRects(
+    dirtyRect,
+    paintMaskEllipse(mask, firstPoint, radii, options, shouldPaintPixel)
+  );
+
+  const step = Math.max(1, Math.min(radii.x, radii.y) / 4);
+
+  for (let pointIndex = 1; pointIndex < points.length; pointIndex += 1) {
+    const previous = points[pointIndex - 1];
+    const point = points[pointIndex];
+    const distance = Math.hypot(point.x - previous.x, point.y - previous.y);
+    const steps = Math.max(1, Math.ceil(distance / step));
+
+    for (let index = 1; index <= steps; index += 1) {
+      const amount = index / steps;
+
+      dirtyRect = unionDirtyRects(
+        dirtyRect,
+        paintMaskEllipse(
+          mask,
+          {
+            x: previous.x + (point.x - previous.x) * amount,
+            y: previous.y + (point.y - previous.y) * amount
+          },
+          radii,
+          options,
+          shouldPaintPixel
+        )
+      );
+    }
+  }
+
+  return dirtyRect;
+}
+
 export function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
@@ -96,6 +145,28 @@ function expandDirtyRect(rect: MaskDirtyRect | null, x: number, y: number): Mask
   const top = Math.min(rect.y, y);
   const right = Math.max(rect.x + rect.width, x + 1);
   const bottom = Math.max(rect.y + rect.height, y + 1);
+
+  return {
+    height: bottom - top,
+    width: right - left,
+    x: left,
+    y: top
+  };
+}
+
+function unionDirtyRects(a: MaskDirtyRect | null, b: MaskDirtyRect | null) {
+  if (!a) {
+    return b;
+  }
+
+  if (!b) {
+    return a;
+  }
+
+  const left = Math.min(a.x, b.x);
+  const top = Math.min(a.y, b.y);
+  const right = Math.max(a.x + a.width, b.x + b.width);
+  const bottom = Math.max(a.y + a.height, b.y + b.height);
 
   return {
     height: bottom - top,

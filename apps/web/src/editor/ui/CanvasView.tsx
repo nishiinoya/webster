@@ -39,6 +39,7 @@ import type {
 } from '../collaboration/useCollaboration';
 import { useCollaboration } from '../collaboration/useCollaboration';
 import type { SharedEditorAction } from '../app/history/SharedEditorAction';
+import type { CollaborationPreviewPointer } from '../collaboration/operations';
 import { saveUserProjectTemplate } from '../projects/projectTemplates';
 import type { WebsterFileHandle } from '../projects/projectFiles';
 import type { EditorDocumentTab } from './editorDocuments';
@@ -209,9 +210,9 @@ export function CanvasView({
   const collaborationActionHandlerRef = useRef<
     (action: SharedEditorAction) => void
   >(() => undefined);
-  const collaborationPreviewHandlerRef = useRef<(tool: string) => void>(
-    () => undefined,
-  );
+  const collaborationPreviewHandlerRef = useRef<
+    (tool: string, pointer: CollaborationPreviewPointer) => void
+  >(() => undefined);
   const handledClipboardCommandRequestIdRef = useRef<number | null>(null);
   const handledTemplateInsertRequestIdRef = useRef<number | null>(null);
   const [fps, setFps] = useState(0);
@@ -242,6 +243,7 @@ export function CanvasView({
     currentUserIdRef,
     flushDeferredRemoteOps,
     handleLocalEditorAction,
+    saveCurrentSharedProject,
     sendPresenceCursor,
     sendPreviewFromCurrentScene,
     state: collaborationState,
@@ -259,9 +261,11 @@ export function CanvasView({
     collaborationActionHandlerRef.current = (action) => {
       void handleLocalEditorAction(action);
     };
-    // Previews are disabled — receiver ignores them and they flood the socket.
-    collaborationPreviewHandlerRef.current = () => {};
-  }, [handleLocalEditorAction]);
+    // Stream small, throttled visual previews while the pointer gesture is active.
+    collaborationPreviewHandlerRef.current = (tool, pointer) => {
+      void sendPreviewFromCurrentScene(tool, pointer);
+    };
+  }, [handleLocalEditorAction, sendPreviewFromCurrentScene]);
 
   useEffect(() => {
     if (!canEditSharedProject && selectedTool !== 'Pan') {
@@ -275,8 +279,8 @@ export function CanvasView({
     onLayersChange,
     onInteractionEnd: flushDeferredRemoteOps,
     onPresenceCursor: sendPresenceCursor,
-    onPreviewEditorAction: (tool) =>
-      collaborationPreviewHandlerRef.current(tool),
+    onPreviewEditorAction: (tool, pointer) =>
+      collaborationPreviewHandlerRef.current(tool, pointer),
     onTextToolPointerDown: handleTextToolPointerDown,
     selectedTool,
   });
@@ -320,12 +324,15 @@ export function CanvasView({
     canEditDocument: canEditSharedProject,
     closedDocumentRequest,
     onLayersChange,
+    isSharedProject: collaborationState.mode === 'shared',
+    onSaveSharedProject: saveCurrentSharedProject,
     onProjectFileRequestHandled,
     onProjectFilePendingChange,
     onProjectSaveRequestHandled,
     onSaveStatusChange,
     onSceneChange: rememberActiveScene,
     onSelectTool,
+    preserveRemoteHistoryChanges: collaborationState.mode === 'shared',
     projectFileRequest,
     projectSaveRequest,
     setWebglError,
@@ -591,10 +598,16 @@ export function CanvasView({
       return;
     }
 
+    const preserveRemoteChanges = collaborationState.mode === 'shared';
+    const historyState = editorAppRef.current.getHistoryState();
+    const couldNavigate =
+      historyCommandRequest.command === 'undo'
+        ? historyState.canUndo
+        : historyState.canRedo;
     const didApply =
       historyCommandRequest.command === 'undo'
-        ? editorAppRef.current.undo()
-        : editorAppRef.current.redo();
+        ? editorAppRef.current.undo({ preserveRemoteChanges })
+        : editorAppRef.current.redo({ preserveRemoteChanges });
 
     if (didApply) {
       onLayersChange(editorAppRef.current.getLayerSummaries());
@@ -602,10 +615,18 @@ export function CanvasView({
         Math.round(editorAppRef.current.getCameraSnapshot().zoom * 100),
       );
       rememberActiveScene();
+      setWebglError(null);
+    } else if (couldNavigate && preserveRemoteChanges) {
+      setWebglError(
+        historyCommandRequest.command === 'undo'
+          ? 'Undo was skipped because that edit overlaps with newer shared changes.'
+          : 'Redo was skipped because that edit overlaps with newer shared changes.',
+      );
     }
 
     onHistoryCommandRequestHandled(historyCommandRequest.id);
   }, [
+    collaborationState.mode,
     editorAppRef,
     canEditSharedProject,
     historyCommandRequest,
@@ -613,6 +634,7 @@ export function CanvasView({
     onLayersChange,
     onZoomChange,
     rememberActiveScene,
+    setWebglError,
   ]);
 
   useEffect(() => {
@@ -934,7 +956,11 @@ export function CanvasView({
                       <div
                         key={u.user.id}
                         className='pointer-events-none absolute z-[3]'
-                        style={{ left: x, top: y }}
+                        style={{
+                          left: x,
+                          top: y,
+                          transition: 'left 80ms linear, top 80ms linear',
+                        }}
                       >
                         <svg width='16' height='20' viewBox='0 0 16 20' fill='none'>
                           <path

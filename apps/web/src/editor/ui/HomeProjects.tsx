@@ -69,7 +69,7 @@ export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
           onClick={() => setTab("recent")}
           type="button"
         >
-          Recently opened
+          Recent cloud
         </button>
         <button
           aria-pressed={tab === "all"}
@@ -77,7 +77,7 @@ export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
           onClick={() => setTab("all")}
           type="button"
         >
-          All projects
+          All cloud
         </button>
       </div>
 
@@ -94,7 +94,7 @@ export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
             ))}
           </div>
         ) : (
-          <EmptyNote>No recently opened projects yet.</EmptyNote>
+          <EmptyNote>No cloud projects opened here yet.</EmptyNote>
         )
       ) : (
         <div className="grid gap-2">
@@ -137,7 +137,7 @@ export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
               ) : null}
             </>
           ) : (
-            <EmptyNote>You have no projects yet.</EmptyNote>
+            <EmptyNote>No cloud projects yet.</EmptyNote>
           )}
         </div>
       )}

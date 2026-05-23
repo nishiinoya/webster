@@ -17,13 +17,16 @@ type UseProjectFileActionsOptions = {
   canEditDocument: boolean;
   closedDocumentRequest: { id: number; tabId: string } | null;
   editorAppRef: MutableRefObject<EditorApp | null>;
+  isSharedProject?: boolean;
   onLayersChange: (layers: ReturnType<EditorApp["getLayerSummaries"]>) => void;
+  onSaveSharedProject?: () => Promise<void>;
   onProjectFileRequestHandled: (requestId: number) => void;
   onProjectSaveRequestHandled: (requestId: number) => void;
   onProjectFilePendingChange?: (state: ProjectFilePendingState | null) => void;
   onSaveStatusChange: (status: SaveStatus) => void;
   onSceneChange: () => void;
   onSelectTool: (tool: string) => void;
+  preserveRemoteHistoryChanges?: boolean;
   projectFileRequest: {
     file: File;
     handle?: WebsterFileHandle | null;
@@ -46,13 +49,16 @@ export function useProjectFileActions({
   canEditDocument,
   closedDocumentRequest,
   editorAppRef,
+  isSharedProject = false,
   onLayersChange,
+  onSaveSharedProject,
   onProjectFileRequestHandled,
   onProjectSaveRequestHandled,
   onProjectFilePendingChange,
   onSaveStatusChange,
   onSceneChange,
   onSelectTool,
+  preserveRemoteHistoryChanges = false,
   projectFileRequest,
   projectSaveRequest,
   setWebglError
@@ -91,6 +97,13 @@ export function useProjectFileActions({
       updateSaveStatus("saving");
 
       try {
+        if (mode === "save" && isSharedProject && onSaveSharedProject) {
+          await onSaveSharedProject();
+          updateSaveStatus("saved");
+          setWebglError(null);
+          return;
+        }
+
         const activeHandleRef = {
           current: projectFileHandlesRef.current.get(activeDocumentId) ?? null
         };
@@ -119,6 +132,8 @@ export function useProjectFileActions({
       activeDocumentId,
       activeDocumentTitle,
       editorAppRef,
+      isSharedProject,
+      onSaveSharedProject,
       setWebglError,
       updateSaveStatus
     ]
@@ -245,7 +260,11 @@ export function useProjectFileActions({
         return runClipboardCommand("paste");
       }
     },
-    onSaveProject: () => saveCurrentProject("save"),
+    onSaveProject: () => {
+      if (canEditDocument) {
+        return saveCurrentProject("save");
+      }
+    },
     onSelectTool: (tool) => {
       if (canEditDocument || tool === "Pan") {
         return onSelectTool(tool);
@@ -256,10 +275,14 @@ export function useProjectFileActions({
         return;
       }
 
-      if (editorAppRef.current.undo()) {
+      const couldUndo = editorAppRef.current.getHistoryState().canUndo;
+
+      if (editorAppRef.current.undo({ preserveRemoteChanges: preserveRemoteHistoryChanges })) {
         onLayersChange(editorAppRef.current.getLayerSummaries());
         onSceneChange();
         setWebglError(null);
+      } else if (couldUndo && preserveRemoteHistoryChanges) {
+        setWebglError("Undo was skipped because that edit overlaps with newer shared changes.");
       }
     },
     onRedo: () => {
@@ -267,10 +290,14 @@ export function useProjectFileActions({
         return;
       }
 
-      if (editorAppRef.current.redo()) {
+      const couldRedo = editorAppRef.current.getHistoryState().canRedo;
+
+      if (editorAppRef.current.redo({ preserveRemoteChanges: preserveRemoteHistoryChanges })) {
         onLayersChange(editorAppRef.current.getLayerSummaries());
         onSceneChange();
         setWebglError(null);
+      } else if (couldRedo && preserveRemoteHistoryChanges) {
+        setWebglError("Redo was skipped because that edit overlaps with newer shared changes.");
       }
     }
   });

@@ -21,6 +21,12 @@ type EditorHistoryEntry<TSnapshot> = {
   before: TSnapshot;
 };
 
+export type EditorHistoryNavigationEntry<TSnapshot> = {
+  action: SharedEditorAction;
+  after: TSnapshot;
+  before: TSnapshot;
+};
+
 type EditorHistoryOptions<TSnapshot> = {
   cloneSnapshot: (snapshot: TSnapshot) => TSnapshot;
   initialLabel?: string;
@@ -105,6 +111,23 @@ export class EditorHistory<TSnapshot> {
     return this.cloneSnapshot(entry.before);
   }
 
+  peekUndoEntry(): EditorHistoryNavigationEntry<TSnapshot> | null {
+    if (!this.canUndo()) {
+      return null;
+    }
+
+    return this.cloneEntry(this.entries[this.index]);
+  }
+
+  commitUndo() {
+    if (!this.canUndo()) {
+      return false;
+    }
+
+    this.index -= 1;
+    return true;
+  }
+
   redo() {
     if (!this.canRedo()) {
       return null;
@@ -113,6 +136,23 @@ export class EditorHistory<TSnapshot> {
     this.index += 1;
 
     return this.cloneSnapshot(this.entries[this.index].after);
+  }
+
+  peekRedoEntry(): EditorHistoryNavigationEntry<TSnapshot> | null {
+    if (!this.canRedo()) {
+      return null;
+    }
+
+    return this.cloneEntry(this.entries[this.index + 1]);
+  }
+
+  commitRedo() {
+    if (!this.canRedo()) {
+      return false;
+    }
+
+    this.index += 1;
+    return true;
   }
 
   getState(): HistoryStateSnapshot {
@@ -138,6 +178,14 @@ export class EditorHistory<TSnapshot> {
       entries,
       redoLabel: this.canRedo() ? this.entries[this.index + 1].action.label : null,
       undoLabel: this.canUndo() ? this.entries[this.index].action.label : null
+    };
+  }
+
+  private cloneEntry(entry: EditorHistoryEntry<TSnapshot>): EditorHistoryNavigationEntry<TSnapshot> {
+    return {
+      action: entry.action,
+      after: this.cloneSnapshot(entry.after),
+      before: this.cloneSnapshot(entry.before)
     };
   }
 }

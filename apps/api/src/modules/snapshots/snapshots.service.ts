@@ -118,16 +118,6 @@ export class SnapshotsService {
     const newManifest = (updated.metadata ?? {}) as any;
     const newVersion = updated.currentVersion;
 
-    // Notify connected clients if RoomService is available
-    if (this.roomService) {
-      await this.roomService.notifyProjectReplaced(
-        projectId,
-        newManifest,
-        newVersion,
-        user,
-      );
-    }
-
     const assetsPrefix = `projects/${projectId}/assets/`;
     const dbAssets = await this.prisma.projectAsset.findMany({
       where: { projectId },
@@ -163,6 +153,17 @@ export class SnapshotsService {
     }));
 
     const users = this.roomService ? this.roomService.getPresence(projectId) : [];
+
+    await this.roomService?.notifyProjectReplaced(
+      projectId,
+      newManifest,
+      newVersion,
+      user,
+      {
+        assetReferences: assets,
+        source: 'restore',
+      },
+    );
 
     return {
       projectId,

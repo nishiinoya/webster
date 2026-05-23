@@ -1,7 +1,15 @@
 import { editorRenderOptions, imageExportRenderOptions, Renderer } from "../rendering/Renderer";
 import { InputController } from "../tools/input/InputController";
 import type { MaskBrushOptions } from "../tools/mask-brush/MaskBrushTypes";
-import type { DrawingToolOptions } from "../tools/drawing/DrawingTool";
+import type { MaskBrushPreviewPayload } from "../tools/mask-brush/MaskBrushTool";
+import { LayerMask } from "../masks/LayerMask";
+import { ensureLayerMaskResolution, getPreferredLayerMaskSize } from "../masks/LayerMaskResolution";
+import { paintMaskStrokePath } from "../tools/mask-brush/MaskBrushRaster";
+import type {
+  DrawingToolOptions,
+  DrawPreviewPayload,
+  DrawPreviewStrokeStyle
+} from "../tools/drawing/DrawingTool";
 import type { ToolPointerEvent } from "../tools/move/MoveTool";
 import { Camera2D } from "../geometry/Camera2D";
 import { getLayerCorners, getModelMatrix } from "../geometry/TransformGeometry";
@@ -14,6 +22,7 @@ import type { SceneSnapshot } from "../scene/sceneSnapshots";
 import {
   areSceneSnapshotsEqual,
   captureSceneSnapshot,
+  cloneLayerForSnapshot,
   cloneSceneSnapshot,
   restoreSceneSnapshot
 } from "../scene/sceneSnapshots";
@@ -26,16 +35,25 @@ import type {
 import type { LayerClipboardSnapshot } from "../scene/Scene";
 import { exportScenePackage, importScenePackage } from "../projects/ProjectPackage";
 import type { ProjectPackageOptions, ProjectPackageProgress } from "../projects/ProjectPackage";
-import { ImageLayer } from "../layers/ImageLayer";
+import { ImageLayer, normalizeImageLayerGeometry } from "../layers/ImageLayer";
 import { Object3DLayer } from "../layers/Object3DLayer";
 import { ShapeLayer } from "../layers/ShapeLayer";
+import { StrokeLayer } from "../layers/StrokeLayer";
 import { TextLayer } from "../layers/TextLayer";
 import type { ShapeKind } from "../layers/ShapeLayer";
 import { normalizeLayerTexture } from "../layers/Layer";
-import type { ImportedLayerTexture, Layer, Object3DKind } from "../layers/Layer";
+import type {
+  ImageLayerGeometry,
+  ImportedLayerTexture,
+  Layer,
+  LayerContentCrop,
+  Object3DKind,
+  SerializedStrokeLayer
+} from "../layers/Layer";
 import type { SelectionMode } from "../selection/SelectionManager";
 import { getSelectionAlpha } from "../selection/SelectionManager";
 import type { Selection, SelectionBounds } from "../selection/SelectionManager";
+import { getTextMaskFrame } from "../rendering/text/BitmapText";
 import {
   createBlankDocumentScene,
   forgetEditorDocument,
@@ -204,6 +222,32 @@ type PendingHistoryGesture = {
   compareMode: HistoryComparisonMode;
 };
 
+type CropMaskFrame = {
+  height: number;
+  width: number;
+  x: number;
+  y: number;
+};
+
+export type LayerTransformPreviewLayer = {
+  crop: LayerContentCrop | null;
+  height: number;
+  id: string;
+  imageGeometry?: ImageLayerGeometry;
+  rotation: number;
+  scaleX: number;
+  scaleY: number;
+  width: number;
+  x: number;
+  y: number;
+};
+
+export type LayerTransformPreviewPayload = {
+  layers: LayerTransformPreviewLayer[];
+  source: "layer-transform-preview";
+  tool: string;
+};
+
 /**
  * Coordinates the active scene, renderer, tool input, and document-level editor workflows.
  */
@@ -229,6 +273,42 @@ export class EditorApp {
   private readonly tabScenes = new Map<string, Scene>();
   private readonly histories = new Map<string, EditorHistory<EditorAppStateSnapshot>>();
   private pendingHistoryGesture: PendingHistoryGesture | null = null;
+  private readonly remoteMaskPreviewStrokes = new Map<
+    string,
+    {
+      appliedPointCount: number;
+      baseData: Uint8Array;
+      brushKey: string;
+      layerId: string;
+      maskId: string;
+      radiiKey: string;
+    }
+  >();
+  private readonly remoteDrawPreviewStrokes = new Map<
+    string,
+    {
+      appliedPointCount: number;
+      layerId: string;
+      pathIndex: number;
+      points: Array<{ x: number; y: number }>;
+      style: DrawPreviewStrokeStyle;
+    }
+  >();
+  private readonly remoteCropPreviewMasks = new Map<
+    string,
+    { baseMask: LayerMask; frame: CropMaskFrame }
+  >();
+  private readonly remoteLayerTransformAnimations = new Map<
+    string,
+    {
+      cropPreview: { baseMask: LayerMask; frame: CropMaskFrame } | null;
+      durationMs: number;
+      start: LayerTransformPreviewLayer;
+      startedAt: number;
+      target: LayerTransformPreviewLayer;
+    }
+  >();
+  private remoteLayerTransformAnimationFrameId: number | null = null;
 
   /**
    * Creates the app coordinator and initializes the shared renderer.
@@ -333,6 +413,7 @@ export class EditorApp {
       this.animationFrameId = null;
     }
 
+    this.cancelRemoteLayerTransformAnimations();
     this.renderer.dispose();
     for (const tabScene of this.tabScenes.values()) {
       if (tabScene !== this.scene) {
@@ -427,6 +508,10 @@ export class EditorApp {
       nextScene,
       notifyCameraChange: this.notifyCameraChange.bind(this)
     });
+    this.cancelRemoteLayerTransformAnimations();
+    this.remoteMaskPreviewStrokes.clear();
+    this.remoteDrawPreviewStrokes.clear();
+    this.remoteCropPreviewMasks.clear();
 
     const shouldRemember = options.rememberActiveDocument ?? true;
 
@@ -1136,7 +1221,11 @@ export class EditorApp {
     return this.getCurrentHistory()?.getState() ?? createEmptyHistoryState();
   }
 
-  undo() {
+  undo(options: { preserveRemoteChanges?: boolean } = {}) {
+    if (options.preserveRemoteChanges) {
+      return this.navigateHistoryPreservingRemoteChanges("undo");
+    }
+
     const snapshot = this.getCurrentHistory()?.undo();
 
     if (!snapshot) {
@@ -1151,7 +1240,11 @@ export class EditorApp {
     return true;
   }
 
-  redo() {
+  redo(options: { preserveRemoteChanges?: boolean } = {}) {
+    if (options.preserveRemoteChanges) {
+      return this.navigateHistoryPreservingRemoteChanges("redo");
+    }
+
     const snapshot = this.getCurrentHistory()?.redo();
 
     if (!snapshot) {
@@ -1162,6 +1255,38 @@ export class EditorApp {
     this.restoreAppSnapshot(snapshot);
     this.notifyHistoryChange();
     this.notifyHistoryNavigation("redo");
+
+    return true;
+  }
+
+  private navigateHistoryPreservingRemoteChanges(operation: "undo" | "redo") {
+    const history = this.getCurrentHistory();
+    const entry =
+      operation === "undo" ? history?.peekUndoEntry() : history?.peekRedoEntry();
+
+    if (!history || !entry) {
+      return false;
+    }
+
+    const from = operation === "undo" ? entry.after : entry.before;
+    const to = operation === "undo" ? entry.before : entry.after;
+    const snapshot = this.createScopedHistoryNavigationSnapshot(from, to);
+
+    if (!snapshot) {
+      return false;
+    }
+
+    const didCommit =
+      operation === "undo" ? history.commitUndo() : history.commitRedo();
+
+    if (!didCommit) {
+      return false;
+    }
+
+    this.pendingHistoryGesture = null;
+    this.restoreAppSnapshot(snapshot);
+    this.notifyHistoryChange();
+    this.notifyHistoryNavigation(operation);
 
     return true;
   }
@@ -1259,6 +1384,367 @@ export class EditorApp {
 
   undoLastMaskStroke() {
     return this.inputController.undoLastMaskStroke();
+  }
+
+  getRealtimePreviewPayload(tool: string) {
+    if (tool === "Draw") {
+      return this.inputController.getDrawPreviewPayload();
+    }
+
+    if (tool === "Mask Brush") {
+      return this.inputController.getMaskBrushPreviewPayload();
+    }
+
+    if (isLayerTransformPreviewTool(tool)) {
+      return this.getLayerTransformPreviewPayload(tool);
+    }
+
+    return null;
+  }
+
+  applyRemoteDrawPreview(payload: DrawPreviewPayload) {
+    if (payload.layer && payload.layer.id !== payload.layerId) {
+      return false;
+    }
+
+    if (payload.mode === "draw") {
+      return this.applyRemoteDrawStrokePreview(payload);
+    }
+
+    const existingIndex = this.scene.layers.findIndex((layer) => layer.id === payload.layerId);
+
+    if (!payload.layer) {
+      if (existingIndex < 0) {
+        return false;
+      }
+
+      this.scene.layers.splice(existingIndex, 1);
+      this.scene.selectedLayerIds = this.scene.selectedLayerIds.filter(
+        (layerId) => layerId !== payload.layerId
+      );
+      if (this.scene.selectedLayerId === payload.layerId) {
+        this.scene.selectedLayerId = this.scene.selectedLayerIds.at(-1) ?? null;
+      }
+      return true;
+    }
+
+    const existingLayer = existingIndex >= 0 ? this.scene.layers[existingIndex] : null;
+
+    if (existingLayer?.locked) {
+      return false;
+    }
+
+    const previewLayer = createStrokeLayerFromPreview(payload.layer);
+
+    if (existingIndex >= 0) {
+      this.scene.layers.splice(existingIndex, 1, previewLayer);
+      return true;
+    }
+
+    const insertIndex = Math.min(
+      Math.max(0, Math.floor(payload.layerIndex)),
+      this.scene.layers.length
+    );
+
+    this.scene.layers.splice(insertIndex, 0, previewLayer);
+    return true;
+  }
+
+  private applyRemoteDrawStrokePreview(payload: DrawPreviewPayload) {
+    if (
+      payload.points.length === 0 ||
+      payload.pathIndex < 0 ||
+      !payload.style
+    ) {
+      return false;
+    }
+
+    const existingIndex = this.scene.layers.findIndex((layer) => layer.id === payload.layerId);
+    let layer = existingIndex >= 0 ? this.scene.layers[existingIndex] : null;
+
+    if (layer?.locked) {
+      return false;
+    }
+
+    const previewKey = getRemoteDrawPreviewKey(payload.layerId, payload.pathIndex);
+    const existingPreview = this.remoteDrawPreviewStrokes.get(previewKey);
+
+    if (payload.layer && (!existingPreview || !(layer instanceof StrokeLayer))) {
+      const previewLayer = createStrokeLayerFromPreview(payload.layer);
+
+      if (existingIndex >= 0) {
+        this.scene.layers.splice(existingIndex, 1, previewLayer);
+      } else {
+        const insertIndex = Math.min(
+          Math.max(0, Math.floor(payload.layerIndex)),
+          this.scene.layers.length
+        );
+
+        this.scene.layers.splice(insertIndex, 0, previewLayer);
+      }
+
+      layer = previewLayer;
+    }
+
+    if (!(layer instanceof StrokeLayer)) {
+      return false;
+    }
+
+    const pointOffset = Math.max(0, Math.floor(payload.pointOffset ?? 0));
+    let preview =
+      existingPreview &&
+      existingPreview.layerId === payload.layerId &&
+      existingPreview.pathIndex === payload.pathIndex &&
+      pointOffset <= existingPreview.points.length
+        ? existingPreview
+        : null;
+
+    if (!preview) {
+      if (!payload.layer && payload.pathIndex >= layer.paths.length) {
+        return false;
+      }
+
+      preview = {
+        appliedPointCount: pointOffset,
+        layerId: payload.layerId,
+        pathIndex: payload.pathIndex,
+        points: [],
+        style: cloneDrawPreviewStrokeStyle(payload.style)
+      };
+      this.remoteDrawPreviewStrokes.set(previewKey, preview);
+    }
+
+    if (pointOffset > preview.points.length) {
+      return false;
+    }
+
+    const payloadEndPointCount = pointOffset + payload.points.length;
+
+    if (payloadEndPointCount <= preview.appliedPointCount) {
+      return false;
+    }
+
+    preview.points.splice(
+      pointOffset,
+      preview.points.length - pointOffset,
+      ...payload.points.map((point) => ({ ...point }))
+    );
+    preview.appliedPointCount = Math.max(preview.appliedPointCount, payloadEndPointCount);
+
+    if (payload.pathIndex >= layer.paths.length) {
+      if (payload.pathIndex !== layer.paths.length) {
+        return false;
+      }
+
+      layer.appendWorldPath(preview.points, preview.style);
+      return true;
+    }
+
+    layer.setWorldPathAt(payload.pathIndex, preview.points);
+    return true;
+  }
+
+  private getLayerTransformPreviewPayload(tool: string): LayerTransformPreviewPayload | null {
+    const before = this.pendingHistoryGesture?.before.scene;
+
+    if (!before) {
+      return null;
+    }
+
+    const beforeLayersById = new Map(before.layers.map((layer) => [layer.id, layer]));
+    const layers = this.scene.layers
+      .filter((layer) => {
+        const beforeLayer = beforeLayersById.get(layer.id);
+
+        return beforeLayer ? !areLayerTransformPreviewStatesEqual(layer, beforeLayer) : true;
+      })
+      .map(createLayerTransformPreviewLayer);
+
+    return layers.length > 0
+      ? {
+          layers,
+          source: "layer-transform-preview",
+          tool
+        }
+      : null;
+  }
+
+  applyRemoteMaskBrushPreview(payload: MaskBrushPreviewPayload) {
+    const layer = this.scene.getLayer(payload.layerId);
+
+    if (
+      !layer ||
+      layer.locked ||
+      payload.points.length === 0 ||
+      payload.maskWidth <= 0 ||
+      payload.maskHeight <= 0
+    ) {
+      return false;
+    }
+
+    const mask = ensureLayerMaskResolution(layer);
+
+    if (mask.width !== payload.maskWidth || mask.height !== payload.maskHeight) {
+      return false;
+    }
+
+    const brushKey = getRemoteMaskBrushKey(payload);
+    const radiiKey = getRemoteMaskRadiiKey(payload);
+    const pointOffset = Math.max(0, Math.floor(payload.pointOffset ?? 0));
+    const existingPreview = this.remoteMaskPreviewStrokes.get(payload.strokeId);
+    let preview =
+      existingPreview &&
+      existingPreview.layerId === layer.id &&
+      existingPreview.maskId === mask.id &&
+      existingPreview.brushKey === brushKey &&
+      existingPreview.radiiKey === radiiKey &&
+      pointOffset <= existingPreview.appliedPointCount
+        ? existingPreview
+        : null;
+
+    if (!preview) {
+      preview = {
+        appliedPointCount: pointOffset,
+        baseData: new Uint8Array(mask.data),
+        brushKey,
+        layerId: layer.id,
+        maskId: mask.id,
+        radiiKey
+      };
+      this.remoteMaskPreviewStrokes.set(payload.strokeId, preview);
+    }
+
+    const payloadEndPointCount = pointOffset + payload.points.length;
+
+    if (payloadEndPointCount <= preview.appliedPointCount) {
+      return false;
+    }
+
+    const firstPointIndex = Math.max(0, preview.appliedPointCount - pointOffset - 1);
+    const pointsToPaint = payload.points.slice(firstPointIndex);
+
+    if (pointsToPaint.length === 0) {
+      return false;
+    }
+
+    const dirtyRect = paintMaskStrokePath(mask, pointsToPaint, payload.radii, payload.brush);
+
+    if (dirtyRect) {
+      mask.markDirty(dirtyRect);
+    }
+
+    preview.appliedPointCount = Math.max(preview.appliedPointCount, payloadEndPointCount);
+
+    return Boolean(dirtyRect);
+  }
+
+  applyRemoteLayerTransformPreview(payload: LayerTransformPreviewPayload) {
+    let didChange = false;
+
+    for (const previewLayer of payload.layers) {
+      const layer = this.scene.getLayer(previewLayer.id);
+
+      if (!layer || layer.locked) {
+        continue;
+      }
+
+      const cropPreview =
+        payload.tool === "Crop" && !(layer instanceof ImageLayer)
+          ? this.getRemoteCropPreviewMask(layer)
+          : null;
+
+      this.remoteLayerTransformAnimations.set(layer.id, {
+        cropPreview,
+        durationMs: 90,
+        start: createLayerTransformPreviewLayer(layer),
+        startedAt: window.performance.now(),
+        target: cloneLayerTransformPreviewLayer(previewLayer)
+      });
+      didChange = true;
+    }
+
+    if (didChange) {
+      this.scheduleRemoteLayerTransformAnimation();
+    }
+
+    return didChange;
+  }
+
+  private scheduleRemoteLayerTransformAnimation() {
+    if (this.remoteLayerTransformAnimationFrameId !== null) {
+      return;
+    }
+
+    const animate = () => {
+      this.remoteLayerTransformAnimationFrameId = null;
+
+      if (this.remoteLayerTransformAnimations.size === 0 || this.isDisposed) {
+        return;
+      }
+
+      const now = window.performance.now();
+
+      for (const [layerId, animation] of this.remoteLayerTransformAnimations) {
+        const layer = this.scene.getLayer(layerId);
+
+        if (!layer || layer.locked) {
+          this.remoteLayerTransformAnimations.delete(layerId);
+          continue;
+        }
+
+        const progress = clampUnit((now - animation.startedAt) / animation.durationMs);
+        const easedProgress = 1 - Math.pow(1 - progress, 3);
+
+        applyLayerTransformPreviewLayer(
+          layer,
+          interpolateLayerTransformPreviewLayer(
+            animation.start,
+            animation.target,
+            easedProgress
+          ),
+          animation.cropPreview
+        );
+        this.scene.updateLayer(layer.id, {});
+
+        if (progress >= 1) {
+          this.remoteLayerTransformAnimations.delete(layerId);
+        }
+      }
+
+      if (this.remoteLayerTransformAnimations.size > 0) {
+        this.scheduleRemoteLayerTransformAnimation();
+      }
+    };
+
+    this.remoteLayerTransformAnimationFrameId = window.requestAnimationFrame(animate);
+  }
+
+  private cancelRemoteLayerTransformAnimations() {
+    this.remoteLayerTransformAnimations.clear();
+
+    if (this.remoteLayerTransformAnimationFrameId !== null) {
+      window.cancelAnimationFrame(this.remoteLayerTransformAnimationFrameId);
+      this.remoteLayerTransformAnimationFrameId = null;
+    }
+  }
+
+  private getRemoteCropPreviewMask(layer: Layer) {
+    const existing = this.remoteCropPreviewMasks.get(layer.id);
+
+    if (existing) {
+      return existing;
+    }
+
+    const preview = {
+      baseMask: layer.mask
+        ? cloneLayerMaskWithId(layer.mask)
+        : new LayerMask(getPreferredLayerMaskSize(layer)),
+      frame: getLayerMaskFrame(layer)
+    };
+
+    this.remoteCropPreviewMasks.set(layer.id, preview);
+
+    return preview;
   }
 
   getCursor(clientX: number, clientY: number) {
@@ -1740,6 +2226,35 @@ export class EditorApp {
     this.notifyCameraChange();
   }
 
+  private createScopedHistoryNavigationSnapshot(
+    from: EditorAppStateSnapshot,
+    to: EditorAppStateSnapshot
+  ): EditorAppStateSnapshot | null {
+    const current = this.captureAppSnapshot();
+    const next = this.cloneAppSnapshot(current);
+
+    if (!applyScopedDocumentSnapshotDelta(current.scene, next.scene, from.scene, to.scene)) {
+      return null;
+    }
+
+    if (!applyScopedLayerSnapshotDelta(current.scene, next.scene, from.scene, to.scene)) {
+      return null;
+    }
+
+    const targetScene = cloneSceneSnapshot(to.scene);
+    const nextLayerIds = new Set(next.scene.layers.map((layer) => layer.id));
+    const selectedLayerIds = targetScene.selectedLayerIds.filter((layerId) =>
+      nextLayerIds.has(layerId)
+    );
+
+    next.scene.selectedLayerId = selectedLayerIds.at(-1) ?? null;
+    next.scene.selectedLayerIds = selectedLayerIds;
+    next.scene.selection = targetScene.selection;
+    next.textEditingState = cloneTextEditingState(to.textEditingState);
+
+    return next;
+  }
+
   private recordHistoryAction(
     action: SharedEditorAction,
     before: EditorAppStateSnapshot,
@@ -1835,6 +2350,707 @@ export class EditorApp {
 
     return layer;
   }
+}
+
+function isLayerTransformPreviewTool(tool: string) {
+  return tool === "Move" || tool === "Transform" || tool === "Crop";
+}
+
+function getRemoteMaskBrushKey(payload: MaskBrushPreviewPayload) {
+  return `${payload.brush.mode}:${payload.brush.opacity}:${payload.brush.size}`;
+}
+
+function getRemoteMaskRadiiKey(payload: MaskBrushPreviewPayload) {
+  return `${payload.radii.x}:${payload.radii.y}`;
+}
+
+function getRemoteDrawPreviewKey(layerId: string, pathIndex: number) {
+  return `${layerId}:${pathIndex}`;
+}
+
+function cloneDrawPreviewStrokeStyle(style: DrawPreviewStrokeStyle): DrawPreviewStrokeStyle {
+  return {
+    color: [...style.color],
+    selectionClip: style.selectionClip
+      ? {
+          ...style.selectionClip,
+          bounds: { ...style.selectionClip.bounds },
+          mask: style.selectionClip.mask
+            ? {
+                data: new Uint8Array(style.selectionClip.mask.data),
+                height: style.selectionClip.mask.height,
+                width: style.selectionClip.mask.width
+              }
+            : undefined,
+          points: style.selectionClip.points?.map((point) => ({ ...point }))
+        }
+      : style.selectionClip,
+    strokeStyle: style.strokeStyle,
+    strokeWidth: style.strokeWidth
+  };
+}
+
+function createLayerTransformPreviewLayer(layer: Layer): LayerTransformPreviewLayer {
+  return {
+    crop: layer.crop ? { ...layer.crop } : null,
+    height: layer.height,
+    id: layer.id,
+    ...(layer instanceof ImageLayer
+      ? { imageGeometry: normalizeImageLayerGeometry(layer.geometry) }
+      : {}),
+    rotation: layer.rotation,
+    scaleX: layer.scaleX,
+    scaleY: layer.scaleY,
+    width: layer.width,
+    x: layer.x,
+    y: layer.y
+  };
+}
+
+function cloneLayerTransformPreviewLayer(
+  layer: LayerTransformPreviewLayer
+): LayerTransformPreviewLayer {
+  return {
+    ...layer,
+    crop: layer.crop ? { ...layer.crop } : null,
+    imageGeometry: layer.imageGeometry ? normalizeImageLayerGeometry(layer.imageGeometry) : undefined
+  };
+}
+
+function applyLayerTransformPreviewLayer(
+  layer: Layer,
+  previewLayer: LayerTransformPreviewLayer,
+  cropPreview: { baseMask: LayerMask; frame: CropMaskFrame } | null = null
+) {
+  layer.x = previewLayer.x;
+  layer.y = previewLayer.y;
+  layer.width = Math.max(1, previewLayer.width);
+  layer.height = Math.max(1, previewLayer.height);
+  layer.rotation = previewLayer.rotation;
+  layer.scaleX = previewLayer.scaleX;
+  layer.scaleY = previewLayer.scaleY;
+  layer.crop = previewLayer.crop ? { ...previewLayer.crop } : null;
+
+  if (layer instanceof ImageLayer && previewLayer.imageGeometry) {
+    layer.geometry = normalizeImageLayerGeometry(previewLayer.imageGeometry);
+  }
+
+  if (cropPreview && !(layer instanceof ImageLayer)) {
+    const cropBounds = previewLayer.crop ?? getFullLayerCrop(layer);
+
+    layer.mask = clipLayerMaskToBounds({
+      baseMask: cropPreview.baseMask,
+      bottom: cropBounds.bottom,
+      currentRevision: layer.mask?.revision ?? cropPreview.baseMask.revision,
+      frame: cropPreview.frame,
+      left: cropBounds.left,
+      right: cropBounds.right,
+      top: cropBounds.top
+    });
+  }
+}
+
+function cloneLayerMaskWithId(mask: LayerMask) {
+  const cloned = new LayerMask({
+    data: new Uint8Array(mask.data),
+    enabled: mask.enabled,
+    height: mask.height,
+    id: mask.id,
+    width: mask.width
+  });
+
+  cloned.revision = mask.revision;
+
+  return cloned;
+}
+
+function createStrokeLayerFromPreview(layer: SerializedStrokeLayer) {
+  const previewLayer = new StrokeLayer({
+    color: [...layer.color],
+    crop: layer.crop ? { ...layer.crop } : null,
+    filters: { ...layer.filters },
+    groupId: layer.groupId,
+    height: layer.height,
+    id: layer.id,
+    locked: layer.locked,
+    mask: layer.mask ? LayerMask.fromJSON(layer.mask) : null,
+    name: layer.name,
+    opacity: layer.opacity,
+    paths: layer.paths,
+    points: layer.points,
+    rotation: layer.rotation,
+    scaleX: layer.scaleX,
+    scaleY: layer.scaleY,
+    strokeStyle: layer.strokeStyle,
+    strokeWidth: layer.strokeWidth,
+    visible: layer.visible,
+    width: layer.width,
+    x: layer.x,
+    y: layer.y
+  });
+
+  return previewLayer;
+}
+
+function getLayerMaskFrame(layer: Layer): CropMaskFrame {
+  if (layer instanceof TextLayer) {
+    return layer.lastTextMaskFrame ?? getTextMaskFrame(layer);
+  }
+
+  return {
+    height: layer.height,
+    width: layer.width,
+    x: 0,
+    y: 0
+  };
+}
+
+function getFullLayerCrop(layer: Layer): LayerContentCrop {
+  return {
+    bottom: 0,
+    left: 0,
+    right: layer.width,
+    top: layer.height
+  };
+}
+
+function clipLayerMaskToBounds(options: {
+  baseMask: LayerMask;
+  bottom: number;
+  currentRevision: number;
+  frame: CropMaskFrame;
+  left: number;
+  right: number;
+  top: number;
+}) {
+  const { baseMask, bottom, currentRevision, frame, left, right, top } = options;
+  const data = new Uint8Array(baseMask.width * baseMask.height);
+  const widthScale = frame.width / Math.max(1, baseMask.width);
+  const heightScale = frame.height / Math.max(1, baseMask.height);
+
+  for (let y = 0; y < baseMask.height; y += 1) {
+    const localY = frame.y + frame.height - (y + 0.5) * heightScale;
+    const rowStart = y * baseMask.width;
+
+    for (let x = 0; x < baseMask.width; x += 1) {
+      const localX = frame.x + (x + 0.5) * widthScale;
+
+      if (localX >= left && localX <= right && localY >= bottom && localY <= top) {
+        data[rowStart + x] = baseMask.data[rowStart + x];
+      }
+    }
+  }
+
+  const clippedMask = new LayerMask({
+    data,
+    enabled: true,
+    height: baseMask.height,
+    id: baseMask.id,
+    width: baseMask.width
+  });
+
+  clippedMask.revision = Math.max(baseMask.revision, currentRevision);
+  clippedMask.markDirty();
+
+  return clippedMask;
+}
+
+function interpolateLayerTransformPreviewLayer(
+  start: LayerTransformPreviewLayer,
+  target: LayerTransformPreviewLayer,
+  amount: number
+): LayerTransformPreviewLayer {
+  return {
+    crop: interpolateCrop(start.crop, target.crop, amount),
+    height: lerp(start.height, target.height, amount),
+    id: target.id,
+    imageGeometry: interpolateImageGeometry(start.imageGeometry, target.imageGeometry, amount),
+    rotation: lerpAngle(start.rotation, target.rotation, amount),
+    scaleX: lerp(start.scaleX, target.scaleX, amount),
+    scaleY: lerp(start.scaleY, target.scaleY, amount),
+    width: lerp(start.width, target.width, amount),
+    x: lerp(start.x, target.x, amount),
+    y: lerp(start.y, target.y, amount)
+  };
+}
+
+function interpolateCrop(
+  start: LayerContentCrop | null,
+  target: LayerContentCrop | null,
+  amount: number
+) {
+  if (!start || !target) {
+    return amount >= 1 ? (target ? { ...target } : null) : start ? { ...start } : null;
+  }
+
+  return {
+    bottom: lerp(start.bottom, target.bottom, amount),
+    left: lerp(start.left, target.left, amount),
+    right: lerp(start.right, target.right, amount),
+    top: lerp(start.top, target.top, amount)
+  };
+}
+
+function interpolateImageGeometry(
+  start: ImageLayerGeometry | undefined,
+  target: ImageLayerGeometry | undefined,
+  amount: number
+) {
+  if (!start || !target) {
+    return amount >= 1 && target ? normalizeImageLayerGeometry(target) : start;
+  }
+
+  return {
+    corners: {
+      bottomLeft: interpolatePoint(start.corners.bottomLeft, target.corners.bottomLeft, amount),
+      bottomRight: interpolatePoint(
+        start.corners.bottomRight,
+        target.corners.bottomRight,
+        amount
+      ),
+      topLeft: interpolatePoint(start.corners.topLeft, target.corners.topLeft, amount),
+      topRight: interpolatePoint(start.corners.topRight, target.corners.topRight, amount)
+    },
+    crop: {
+      bottom: lerp(start.crop.bottom, target.crop.bottom, amount),
+      left: lerp(start.crop.left, target.crop.left, amount),
+      right: lerp(start.crop.right, target.crop.right, amount),
+      top: lerp(start.crop.top, target.crop.top, amount)
+    }
+  };
+}
+
+function interpolatePoint(
+  start: { x: number; y: number },
+  target: { x: number; y: number },
+  amount: number
+) {
+  return {
+    x: lerp(start.x, target.x, amount),
+    y: lerp(start.y, target.y, amount)
+  };
+}
+
+function lerp(start: number, target: number, amount: number) {
+  return start + (target - start) * amount;
+}
+
+function lerpAngle(start: number, target: number, amount: number) {
+  let delta = ((target - start + 540) % 360) - 180;
+
+  if (!Number.isFinite(delta)) {
+    delta = target - start;
+  }
+
+  return start + delta * amount;
+}
+
+function areLayerTransformPreviewStatesEqual(left: Layer, right: Layer) {
+  return (
+    left.x === right.x &&
+    left.y === right.y &&
+    left.width === right.width &&
+    left.height === right.height &&
+    left.rotation === right.rotation &&
+    left.scaleX === right.scaleX &&
+    left.scaleY === right.scaleY &&
+    areLayerContentCropsEqualForPreview(left.crop, right.crop) &&
+    (!(left instanceof ImageLayer) ||
+      !(right instanceof ImageLayer) ||
+      areImageLayerGeometriesEqualForPreview(left.geometry, right.geometry))
+  );
+}
+
+function areLayerContentCropsEqualForPreview(
+  left: LayerContentCrop | null,
+  right: LayerContentCrop | null
+) {
+  if (left === right) {
+    return true;
+  }
+
+  if (!left || !right) {
+    return false;
+  }
+
+  return (
+    left.bottom === right.bottom &&
+    left.left === right.left &&
+    left.right === right.right &&
+    left.top === right.top
+  );
+}
+
+function areImageLayerGeometriesEqualForPreview(
+  left: ImageLayerGeometry,
+  right: ImageLayerGeometry
+) {
+  return (
+    arePreviewPointsEqual(left.corners.bottomLeft, right.corners.bottomLeft) &&
+    arePreviewPointsEqual(left.corners.bottomRight, right.corners.bottomRight) &&
+    arePreviewPointsEqual(left.corners.topLeft, right.corners.topLeft) &&
+    arePreviewPointsEqual(left.corners.topRight, right.corners.topRight) &&
+    left.crop.bottom === right.crop.bottom &&
+    left.crop.left === right.crop.left &&
+    left.crop.right === right.crop.right &&
+    left.crop.top === right.crop.top
+  );
+}
+
+function arePreviewPointsEqual(
+  left: { x: number; y: number },
+  right: { x: number; y: number }
+) {
+  return left.x === right.x && left.y === right.y;
+}
+
+function applyScopedDocumentSnapshotDelta(
+  current: SceneSnapshot,
+  next: SceneSnapshot,
+  from: SceneSnapshot,
+  to: SceneSnapshot
+) {
+  if (areSnapshotDocumentsEqual(from.document, to.document)) {
+    return true;
+  }
+
+  if (!areSnapshotDocumentsEqual(current.document, from.document)) {
+    return false;
+  }
+
+  next.document = {
+    color: [...to.document.color],
+    height: to.document.height,
+    width: to.document.width,
+    x: to.document.x,
+    y: to.document.y
+  };
+
+  return true;
+}
+
+function applyScopedLayerSnapshotDelta(
+  current: SceneSnapshot,
+  next: SceneSnapshot,
+  from: SceneSnapshot,
+  to: SceneSnapshot
+) {
+  const currentById = mapLayersById(current.layers);
+  const fromById = mapLayersById(from.layers);
+  const toById = mapLayersById(to.layers);
+  const fromIds = from.layers.map((layer) => layer.id);
+  const toIds = to.layers.map((layer) => layer.id);
+
+  for (const [layerId, fromLayer] of fromById) {
+    if (toById.has(layerId)) {
+      continue;
+    }
+
+    const currentLayer = currentById.get(layerId);
+
+    if (!currentLayer) {
+      continue;
+    }
+
+    if (!areHistoryLayerStatesEqual(currentLayer, fromLayer)) {
+      return false;
+    }
+
+    removeLayerSnapshotById(next.layers, layerId);
+  }
+
+  for (const [layerId, toLayer] of toById) {
+    const fromLayer = fromById.get(layerId);
+
+    if (!fromLayer) {
+      const currentLayer = currentById.get(layerId);
+
+      if (currentLayer) {
+        if (!areHistoryLayerStatesEqual(currentLayer, toLayer)) {
+          return false;
+        }
+        continue;
+      }
+
+      insertLayerSnapshotForTargetOrder(next.layers, cloneLayerForSnapshot(toLayer), toIds);
+      continue;
+    }
+
+    if (areHistoryLayerStatesEqual(fromLayer, toLayer)) {
+      continue;
+    }
+
+    const currentLayer = currentById.get(layerId);
+
+    if (!currentLayer) {
+      return false;
+    }
+
+    if (!areHistoryLayerStatesEqual(currentLayer, fromLayer)) {
+      const scopedMaskReplacement = createScopedMaskOnlyLayerReplacement(
+        currentLayer,
+        fromLayer,
+        toLayer
+      );
+
+      if (!scopedMaskReplacement) {
+        return false;
+      }
+
+      replaceLayerSnapshotById(next.layers, layerId, scopedMaskReplacement);
+      continue;
+    }
+
+    replaceLayerSnapshotById(next.layers, layerId, cloneLayerForSnapshot(toLayer));
+  }
+
+  if (!areStringArraysEqual(fromIds, toIds)) {
+    const fromIdsStillPresent = new Set(fromIds.filter((layerId) => currentById.has(layerId)));
+    const currentOrderForFromIds = current.layers
+      .map((layer) => layer.id)
+      .filter((layerId) => fromIdsStillPresent.has(layerId));
+    const expectedOrderForFromIds = fromIds.filter((layerId) => fromIdsStillPresent.has(layerId));
+
+    if (!areStringArraysEqual(currentOrderForFromIds, expectedOrderForFromIds)) {
+      return false;
+    }
+
+    reorderLayerSnapshots(next.layers, toIds);
+  }
+
+  return true;
+}
+
+function mapLayersById(layers: Layer[]) {
+  return new Map(layers.map((layer) => [layer.id, layer]));
+}
+
+function removeLayerSnapshotById(layers: Layer[], layerId: string) {
+  const index = layers.findIndex((layer) => layer.id === layerId);
+
+  if (index >= 0) {
+    layers.splice(index, 1);
+  }
+}
+
+function replaceLayerSnapshotById(layers: Layer[], layerId: string, replacement: Layer) {
+  const index = layers.findIndex((layer) => layer.id === layerId);
+
+  if (index >= 0) {
+    layers.splice(index, 1, replacement);
+  }
+}
+
+function insertLayerSnapshotForTargetOrder(
+  layers: Layer[],
+  layer: Layer,
+  targetOrder: string[]
+) {
+  const targetIndex = targetOrder.indexOf(layer.id);
+
+  for (let index = targetIndex - 1; index >= 0; index -= 1) {
+    const previousLayerIndex = layers.findIndex((candidate) => candidate.id === targetOrder[index]);
+
+    if (previousLayerIndex >= 0) {
+      layers.splice(previousLayerIndex + 1, 0, layer);
+      return;
+    }
+  }
+
+  for (let index = targetIndex + 1; index < targetOrder.length; index += 1) {
+    const nextLayerIndex = layers.findIndex((candidate) => candidate.id === targetOrder[index]);
+
+    if (nextLayerIndex >= 0) {
+      layers.splice(nextLayerIndex, 0, layer);
+      return;
+    }
+  }
+
+  layers.push(layer);
+}
+
+function reorderLayerSnapshots(layers: Layer[], targetOrder: string[]) {
+  const layerById = mapLayersById(layers);
+  const orderedTargetLayers = targetOrder
+    .map((layerId) => layerById.get(layerId) ?? null)
+    .filter((layer): layer is Layer => Boolean(layer));
+  const targetIds = new Set(orderedTargetLayers.map((layer) => layer.id));
+  let orderedIndex = 0;
+  const reordered = layers.map((layer) => {
+    if (!targetIds.has(layer.id)) {
+      return layer;
+    }
+
+    const replacement = orderedTargetLayers[orderedIndex] ?? layer;
+    orderedIndex += 1;
+    return replacement;
+  });
+
+  if (orderedIndex < orderedTargetLayers.length) {
+    reordered.push(...orderedTargetLayers.slice(orderedIndex));
+  }
+
+  layers.splice(0, layers.length, ...reordered);
+}
+
+function areSnapshotDocumentsEqual(
+  left: SceneSnapshot["document"],
+  right: SceneSnapshot["document"]
+) {
+  return (
+    left.x === right.x &&
+    left.y === right.y &&
+    left.width === right.width &&
+    left.height === right.height &&
+    left.color[0] === right.color[0] &&
+    left.color[1] === right.color[1] &&
+    left.color[2] === right.color[2] &&
+    left.color[3] === right.color[3]
+  );
+}
+
+function areStringArraysEqual(left: string[], right: string[]) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function areHistoryLayerStatesEqual(left: Layer, right: Layer) {
+  const leftComparable = getHistoryLayerComparable(left);
+  const rightComparable = getHistoryLayerComparable(right);
+
+  if (!leftComparable || !rightComparable) {
+    return false;
+  }
+
+  return stableStringify(leftComparable) === stableStringify(rightComparable);
+}
+
+function createScopedMaskOnlyLayerReplacement(
+  currentLayer: Layer,
+  fromLayer: Layer,
+  toLayer: Layer
+) {
+  if (
+    currentLayer.type !== fromLayer.type ||
+    fromLayer.type !== toLayer.type ||
+    !areHistoryLayerNonMaskStatesEqual(fromLayer, toLayer)
+  ) {
+    return null;
+  }
+
+  const maskDelta = createScopedMaskDelta(currentLayer.mask, fromLayer.mask, toLayer.mask);
+
+  if (!maskDelta.canApply) {
+    return null;
+  }
+
+  const replacement = cloneLayerForSnapshot(currentLayer);
+
+  replacement.mask = maskDelta.mask;
+
+  return replacement;
+}
+
+function areHistoryLayerNonMaskStatesEqual(left: Layer, right: Layer) {
+  const leftComparable = getHistoryLayerComparableWithoutMask(left);
+  const rightComparable = getHistoryLayerComparableWithoutMask(right);
+
+  if (!leftComparable || !rightComparable) {
+    return false;
+  }
+
+  return stableStringify(leftComparable) === stableStringify(rightComparable);
+}
+
+function getHistoryLayerComparableWithoutMask(layer: Layer) {
+  const comparable = getHistoryLayerComparable(layer);
+
+  if (!comparable || Array.isArray(comparable) || typeof comparable !== "object") {
+    return comparable;
+  }
+
+  const { mask: _mask, ...withoutMask } = comparable as Record<string, unknown>;
+
+  return withoutMask;
+}
+
+type ScopedMaskDeltaResult =
+  | { canApply: true; mask: LayerMask | null }
+  | { canApply: false };
+
+function createScopedMaskDelta(
+  _currentMask: LayerMask | null,
+  _fromMask: LayerMask | null,
+  toMask: LayerMask | null
+): ScopedMaskDeltaResult {
+  if (!_fromMask && !toMask) {
+    return { canApply: false };
+  }
+
+  if (!toMask) {
+    return { canApply: true, mask: null };
+  }
+
+  return { canApply: true, mask: cloneMaskForScopedHistory(toMask) };
+}
+
+function cloneMaskForScopedHistory(mask: LayerMask) {
+  const clone = new LayerMask({
+    data: new Uint8Array(mask.data),
+    enabled: mask.enabled,
+    height: mask.height,
+    id: mask.id,
+    width: mask.width
+  });
+
+  clone.revision = mask.revision;
+  clone.markDirty();
+
+  return clone;
+}
+
+function getHistoryLayerComparable(layer: Layer) {
+  const serialized = layer.toJSON();
+
+  if (isPromiseLike(serialized)) {
+    return null;
+  }
+
+  return normalizeHistoryComparable(serialized);
+}
+
+function normalizeHistoryComparable(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(normalizeHistoryComparable);
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  const output: Record<string, unknown> = {};
+
+  for (const key of Object.keys(value).sort()) {
+    const childValue = (value as Record<string, unknown>)[key];
+
+    if (childValue === undefined) {
+      continue;
+    }
+
+    output[key] =
+      key === "dataUrl" && typeof childValue === "string"
+        ? "__asset-data-url__"
+        : normalizeHistoryComparable(childValue);
+  }
+
+  return output;
+}
+
+function stableStringify(value: unknown): string {
+  return JSON.stringify(value);
+}
+
+function isPromiseLike(value: unknown): value is Promise<unknown> {
+  return Boolean(value && typeof value === "object" && typeof (value as { then?: unknown }).then === "function");
 }
 
 function shouldShowSelectionOutline(tool: string) {

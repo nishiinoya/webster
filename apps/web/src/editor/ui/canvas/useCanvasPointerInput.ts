@@ -7,6 +7,7 @@ import {
 } from "react";
 import { EditorApp } from "../../app/EditorApp";
 import type { LayerSummary } from "../../app/EditorApp";
+import type { CollaborationPreviewPointer } from "../../collaboration/operations";
 
 type UseCanvasPointerInputOptions = {
   canEditDocument: boolean;
@@ -14,7 +15,7 @@ type UseCanvasPointerInputOptions = {
   onLayersChange: (layers: LayerSummary[]) => void;
   onInteractionEnd?: () => void;
   onPresenceCursor?: (cursor: { x: number; y: number }, tool: string) => void;
-  onPreviewEditorAction?: (tool: string) => void;
+  onPreviewEditorAction?: (tool: string, pointer: CollaborationPreviewPointer) => void;
   onTextToolPointerDown?: (event: ReactPointerEvent<HTMLCanvasElement>) => boolean;
   selectedTool: string;
 };
@@ -32,6 +33,8 @@ export function useCanvasPointerInput({
   const panStateRef = useRef<{ x: number; y: number } | null>(null);
   const textSelectionPointerIdRef = useRef<number | null>(null);
   const lastCursorSendRef = useRef(0);
+  const lastPreviewPointRef = useRef<{ time: number; x: number; y: number } | null>(null);
+  const lastPreviewSendRef = useRef(0);
   const [canvasCursor, setCanvasCursor] = useState("default");
 
   function startPan(clientX: number, clientY: number) {
@@ -66,12 +69,40 @@ export function useCanvasPointerInput({
     setCanvasCursor(editorAppRef.current?.getCursor(clientX, clientY) ?? "default");
   }
 
+  function getPreviewPointer(clientX: number, clientY: number): CollaborationPreviewPointer | null {
+    const editorApp = editorAppRef.current;
+
+    if (!editorApp) {
+      return null;
+    }
+
+    const now = performance.now();
+    const world = editorApp.clientToWorldPoint(clientX, clientY);
+    const previous = lastPreviewPointRef.current;
+    const elapsedSeconds = previous ? Math.max(0.001, (now - previous.time) / 1000) : 0;
+    const pointer = {
+      velocityX: previous ? (world.x - previous.x) / elapsedSeconds : 0,
+      velocityY: previous ? (world.y - previous.y) / elapsedSeconds : 0,
+      x: world.x,
+      y: world.y
+    };
+
+    lastPreviewPointRef.current = {
+      time: now,
+      x: world.x,
+      y: world.y
+    };
+
+    return pointer;
+  }
+
   return {
     canvasCursor,
     pointerHandlers: {
       onContextMenu: (event: ReactPointerEvent<HTMLCanvasElement>) => event.preventDefault(),
       onPointerCancel: () => {
         stopPan();
+        lastPreviewPointRef.current = null;
         editorAppRef.current?.cancelInput();
         setCanvasCursor("default");
         onInteractionEnd?.();
@@ -115,6 +146,8 @@ export function useCanvasPointerInput({
 
           if (didHandleInput && editorAppRef.current) {
             event.currentTarget.setPointerCapture(event.pointerId);
+            lastPreviewPointRef.current = null;
+            lastPreviewSendRef.current = 0;
             onLayersChange(editorAppRef.current.getLayerSummaries());
             updateCanvasCursor(event.clientX, event.clientY);
           }
@@ -156,7 +189,15 @@ export function useCanvasPointerInput({
 
         if (didHandleInput && editorAppRef.current) {
           onLayersChange(editorAppRef.current.getLayerSummaries());
-          onPreviewEditorAction?.(selectedTool);
+          const previewPointer = getPreviewPointer(event.clientX, event.clientY);
+          if (
+            previewPointer &&
+            onPreviewEditorAction &&
+            now - lastPreviewSendRef.current > 50
+          ) {
+            lastPreviewSendRef.current = now;
+            onPreviewEditorAction(selectedTool, previewPointer);
+          }
         }
 
         updateCanvasCursor(event.clientX, event.clientY);
@@ -176,6 +217,8 @@ export function useCanvasPointerInput({
         if (canEditDocument && editorAppRef.current?.pointerUp()) {
           onLayersChange(editorAppRef.current.getLayerSummaries());
         }
+
+        lastPreviewPointRef.current = null;
 
         updateCanvasCursor(event.clientX, event.clientY);
         onInteractionEnd?.();

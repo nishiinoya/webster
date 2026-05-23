@@ -126,7 +126,7 @@ export function areSceneSnapshotsEqual(
   return true;
 }
 
-function cloneLayerForSnapshot(layer: Layer) {
+export function cloneLayerForSnapshot(layer: Layer) {
   const baseOptions = {
     filters: { ...layer.filters },
     crop: layer.crop ? { ...layer.crop } : null,
@@ -402,6 +402,7 @@ function areLayersEqual(left: Layer, right: Layer) {
       areColorArraysEqual(left.materialColor, right.materialColor) &&
       areLayerTexturesEqual(left.materialTexture, right.materialTexture) &&
       areImportedLayerTexturesEqual(left.materialTextureImage, right.materialTextureImage) &&
+      areObject3DMaterialsEqual(left.modelMaterials, right.modelMaterials) &&
       areImported3DModelsEqual(left.importedModel, right.importedModel)
     );
   }
@@ -444,7 +445,6 @@ function areLayersEqual(left: Layer, right: Layer) {
     if (
       left.strokeStyle !== right.strokeStyle ||
       left.strokeWidth !== right.strokeWidth ||
-      left.revision !== right.revision ||
       !areColorArraysEqual(left.color, right.color) ||
       left.paths.length !== right.paths.length
     ) {
@@ -531,7 +531,6 @@ function areMasksEqual(left: LayerMask | null, right: LayerMask | null) {
     left.width !== right.width ||
     left.height !== right.height ||
     left.enabled !== right.enabled ||
-    left.revision !== right.revision ||
     left.data.length !== right.data.length
   ) {
     return false;
@@ -578,6 +577,41 @@ function areLayerTexturesEqual(
     left.contrast === right.contrast &&
     areColorArraysEqual(left.color, right.color)
   );
+}
+
+function areObject3DMaterialsEqual(
+  left: Object3DLayer["modelMaterials"],
+  right: Object3DLayer["modelMaterials"]
+) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((material, index) => {
+    const other = right[index];
+
+    return (
+      material.name === other.name &&
+      material.texturePath === other.texturePath &&
+      areNullableRgbColorsEqual(material.diffuseColor, other.diffuseColor) &&
+      areImportedLayerTexturesEqual(material.textureImage, other.textureImage)
+    );
+  });
+}
+
+function areNullableRgbColorsEqual(
+  left: [number, number, number] | null,
+  right: [number, number, number] | null
+) {
+  if (left === right) {
+    return true;
+  }
+
+  if (!left || !right) {
+    return false;
+  }
+
+  return left[0] === right[0] && left[1] === right[1] && left[2] === right[2];
 }
 
 function areImportedLayerTexturesEqual(

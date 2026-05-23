@@ -30,7 +30,23 @@ type CreatePreviewOperationOptions = {
   alreadyUploadedAssetPaths?: ReadonlySet<string>;
   clientId: string;
   editorApp: EditorApp;
+  pointer?: CollaborationPreviewPointer | null;
   previousScene: WebsterProjectManifest | null;
+  projectId: string;
+  projectVersion: number;
+  tool: string;
+};
+
+export type CollaborationPreviewPointer = {
+  velocityX: number;
+  velocityY: number;
+  x: number;
+  y: number;
+};
+
+type CreateRealtimePreviewOperationOptions = {
+  clientId: string;
+  payload: Record<string, unknown>;
   projectId: string;
   projectVersion: number;
   tool: string;
@@ -56,7 +72,10 @@ export async function createOperationFromEditorAction({
   const { assetReferences, assetUploads, manifest } =
     await createCollaborationSceneSnapshot(editorApp, projectId, alreadyUploadedAssetPaths);
 
-  const { scene, scenePatch } = buildSceneFields(previousScene, manifest);
+  const { scene, scenePatch } = buildSceneFields(previousScene, manifest, {
+    includeSceneFallback: shouldIncludeSceneFallbackForAction(action),
+    preferPatch: shouldPreferPatchForAction(action)
+  });
 
   return {
     assetUploads,
@@ -82,6 +101,7 @@ export async function createPreviewOperationFromEditorScene({
   alreadyUploadedAssetPaths,
   clientId,
   editorApp,
+  pointer,
   previousScene,
   projectId,
   projectVersion,
@@ -104,6 +124,7 @@ export async function createPreviewOperationFromEditorScene({
       kind: getPreviewOperationKind(tool),
       label: `${tool} preview`,
       payload: {
+        pointer: pointer ?? null,
         source: "pointer-preview",
         tool
       },
@@ -113,6 +134,53 @@ export async function createPreviewOperationFromEditorScene({
       ...(scenePatch ? { scenePatch } : {})
     }
   };
+}
+
+export function createRealtimePreviewOperation({
+  clientId,
+  payload,
+  projectId,
+  projectVersion,
+  tool
+}: CreateRealtimePreviewOperationOptions): ProjectOperation {
+  return {
+    baseVersion: projectVersion,
+    clientId,
+    clientOperationId: crypto.randomUUID(),
+    createdAt: new Date().toISOString(),
+    kind: getPreviewOperationKind(tool),
+    label: `${tool} preview`,
+    payload,
+    phase: "preview",
+    projectId
+  };
+}
+
+function shouldPreferPatchForAction(action: SharedEditorAction) {
+  if (
+    action.kind === "gesture" &&
+    (action.tool === "Draw" || action.tool === "Mask Brush" || action.tool === "Crop")
+  ) {
+    return true;
+  }
+
+  if (action.kind === "scene" && (action.operation === "undo" || action.operation === "redo")) {
+    return true;
+  }
+
+  return false;
+}
+
+function shouldIncludeSceneFallbackForAction(action: SharedEditorAction) {
+  if (action.kind === "gesture") {
+    return action.tool === "Crop" || action.tool === "Mask Brush";
+  }
+
+  if (action.kind === "scene" && (action.operation === "undo" || action.operation === "redo")) {
+    return true;
+  }
+
+  return action.kind === "command" && readPayloadType(action.payload) === "mask";
 }
 
 /**
@@ -125,7 +193,8 @@ export async function createPreviewOperationFromEditorScene({
  */
 function buildSceneFields(
   previousScene: WebsterProjectManifest | null,
-  currentScene: WebsterProjectManifest
+  currentScene: WebsterProjectManifest,
+  options: { includeSceneFallback?: boolean; preferPatch?: boolean } = {}
 ): { scene?: WebsterProjectManifest; scenePatch?: ProjectScenePatchOp[] } {
   if (!previousScene) {
     return { scene: currentScene };
@@ -135,6 +204,13 @@ function buildSceneFields(
   if (patch.length === 0) {
     // No change — but still need to ship the op so the server bumps version.
     return { scenePatch: [] };
+  }
+
+  if (options.preferPatch) {
+    return {
+      ...(options.includeSceneFallback ? { scene: currentScene } : {}),
+      scenePatch: patch
+    };
   }
 
   // Heuristic: if the patch is more than ~25% the size of the scene, just
@@ -236,19 +312,28 @@ export async function applyOperationToScene(
 ): Promise<WebsterProjectManifest | null> {
   let resolved: WebsterProjectManifest | null = null;
 
-  if (operation.scene) {
-    resolved = operation.scene;
-  } else if (operation.scenePatch && operation.scenePatch.length > 0) {
+  if (operation.scenePatch && operation.scenePatch.length > 0) {
     if (!currentManifest) {
-      throw new ScenePatchApplyError("No local base manifest to apply patch against");
+      if (operation.scene) {
+        resolved = operation.scene;
+      } else {
+        throw new ScenePatchApplyError("No local base manifest to apply patch against");
+      }
+    } else {
+      try {
+        resolved = applyScenePatch(currentManifest, operation.scenePatch);
+      } catch (err) {
+        if (operation.scene) {
+          resolved = operation.scene;
+        } else {
+          throw new ScenePatchApplyError(
+            `Failed to apply scene patch: ${(err as Error).message}`
+          );
+        }
+      }
     }
-    try {
-      resolved = applyScenePatch(currentManifest, operation.scenePatch);
-    } catch (err) {
-      throw new ScenePatchApplyError(
-        `Failed to apply scene patch: ${(err as Error).message}`
-      );
-    }
+  } else if (operation.scene) {
+    resolved = operation.scene;
   }
 
   if (!resolved) {
@@ -315,7 +400,8 @@ async function createCollaborationSceneSnapshot(
     assetReferences: createAssetReferences(
       manifest as WebsterProjectManifest,
       assetUploads,
-      projectId
+      projectId,
+      alreadyUploadedAssetPaths
     ),
     assetUploads,
     manifest: manifest as WebsterProjectManifest
@@ -470,7 +556,17 @@ function getLayerUpdateOperationKind(payload: unknown): ProjectOperationKind {
     keys.has("rotationY") ||
     keys.has("rotationZ") ||
     keys.has("materialColor") ||
-    keys.has("materialTexture")
+    keys.has("materialTexture") ||
+    keys.has("materialTextureImage") ||
+    keys.has("modelMaterials") ||
+    keys.has("lightX") ||
+    keys.has("lightY") ||
+    keys.has("lightZ") ||
+    keys.has("lightIntensity") ||
+    keys.has("ambient") ||
+    keys.has("shadowOpacity") ||
+    keys.has("shadowDistance") ||
+    keys.has("shadowSoftness")
   ) {
     return "object3d:update";
   }
@@ -532,7 +628,8 @@ function readPayloadType(payload: unknown) {
 function createAssetReferences(
   manifest: WebsterProjectManifest,
   assetUploads: SharedProjectAssetUpload[],
-  projectId: string
+  projectId: string,
+  alreadyUploadedAssetPaths?: ReadonlySet<string>
 ) {
   const references = new Map<string, SharedProjectAssetReference>();
 
@@ -547,6 +644,7 @@ function createAssetReferences(
       projectId
     );
     addTextureAssetReferences(references, layer, projectId);
+    addObject3DModelAssetReferences(references, layer, projectId, alreadyUploadedAssetPaths);
   }
 
   for (const font of manifest.fonts ?? []) {
@@ -693,6 +791,62 @@ function addTextureAssetReferences(
       }
     }
   }
+}
+
+function addObject3DModelAssetReferences(
+  references: Map<string, SharedProjectAssetReference>,
+  layer: WebsterSerializedLayer,
+  projectId: string,
+  alreadyUploadedAssetPaths?: ReadonlySet<string>
+) {
+  if (layer.type !== "object3d") {
+    return;
+  }
+
+  const model = layer["model"];
+
+  if (!model || typeof model !== "object" || !("assetPath" in model)) {
+    return;
+  }
+
+  const assetPath = (model as { assetPath?: unknown }).assetPath;
+
+  if (typeof assetPath !== "string") {
+    return;
+  }
+
+  addKnownAssetReference(references, assetPath, projectId);
+
+  if (!alreadyUploadedAssetPaths) {
+    return;
+  }
+
+  const modelDirectory = assetPath.replace(/\/[^/]*$/u, "");
+
+  for (const uploadedAssetPath of alreadyUploadedAssetPaths) {
+    if (
+      uploadedAssetPath === assetPath ||
+      uploadedAssetPath.startsWith(`${modelDirectory}/`)
+    ) {
+      addKnownAssetReference(references, uploadedAssetPath, projectId);
+    }
+  }
+}
+
+function addKnownAssetReference(
+  references: Map<string, SharedProjectAssetReference>,
+  assetPath: string,
+  projectId: string
+) {
+  if (references.has(assetPath)) {
+    return;
+  }
+
+  references.set(assetPath, {
+    assetPath,
+    downloadUrl: getDefaultAssetDownloadUrl(projectId, assetPath),
+    mimeType: inferAssetMimeType(assetPath)
+  });
 }
 
 function addTextureAssetReference(

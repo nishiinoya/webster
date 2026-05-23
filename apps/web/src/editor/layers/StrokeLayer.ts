@@ -3,6 +3,7 @@ import { transformPoint3x3 } from "../geometry/Matrix3";
 import { getModelMatrix } from "../geometry/TransformGeometry";
 import { Layer } from "./Layer";
 import type { LayerOptions, SerializedStrokeLayer } from "./Layer";
+import type { SerializedStrokePoint, SerializedStrokePath } from "./Layer";
 import type { Selection } from "../selection/SelectionManager";
 
 export type StrokePoint = {
@@ -26,8 +27,8 @@ export type StrokePath = {
 
 export type StrokeLayerOptions = Omit<LayerOptions, "type"> & {
   color?: [number, number, number, number];
-  paths?: Array<StrokePath | StrokePoint[]>;
-  points?: StrokePoint[];
+  paths?: Array<SerializedStrokePath | SerializedStrokePoint[]>;
+  points?: SerializedStrokePoint[];
   strokeStyle?: StrokeStyle;
   strokeWidth?: number;
 };
@@ -131,9 +132,9 @@ export class StrokeLayer extends Layer {
   }
 
   private setWorldPaths(worldPaths: StrokePath[]) {
-    const allPoints = worldPaths.flatMap((path) => path.points);
+    const bounds = getWorldPathBounds(worldPaths, this.strokeWidth);
 
-    if (allPoints.length === 0) {
+    if (!bounds) {
       this.paths = [];
       this.width = 1;
       this.height = 1;
@@ -144,17 +145,10 @@ export class StrokeLayer extends Layer {
       return;
     }
 
-    const maxStrokeWidth = Math.max(...worldPaths.map((path) => path.strokeWidth), this.strokeWidth);
-    const padding = Math.max(2, maxStrokeWidth / 2);
-    const minX = Math.min(...allPoints.map((point) => point.x)) - padding;
-    const minY = Math.min(...allPoints.map((point) => point.y)) - padding;
-    const maxX = Math.max(...allPoints.map((point) => point.x)) + padding;
-    const maxY = Math.max(...allPoints.map((point) => point.y)) + padding;
-
-    this.x = minX;
-    this.y = minY;
-    this.width = Math.max(1, maxX - minX);
-    this.height = Math.max(1, maxY - minY);
+    this.x = bounds.minX;
+    this.y = bounds.minY;
+    this.width = Math.max(1, bounds.maxX - bounds.minX);
+    this.height = Math.max(1, bounds.maxY - bounds.minY);
     this.rotation = 0;
     this.scaleX = 1;
     this.scaleY = 1;
@@ -162,14 +156,14 @@ export class StrokeLayer extends Layer {
       ...path,
       selectionClip: worldSelectionClipToLayer(
         path.selectionClip ?? null,
-        minX,
-        minY,
+        bounds.minX,
+        bounds.minY,
         this.width,
         this.height
       ),
       points: path.points.map((point) => ({
-        x: point.x - minX,
-        y: point.y - minY
+        x: point.x - bounds.minX,
+        y: point.y - bounds.minY
       }))
     }));
     this.revision += 1;
@@ -182,7 +176,7 @@ export class StrokeLayer extends Layer {
       paths: this.paths.map((path) => ({
         ...path,
         color: [...path.color],
-        points: path.points.map((point) => ({ ...point })),
+        points: path.points.map(compactStrokePoint),
         selectionClip: path.selectionClip
           ? {
               ...path.selectionClip,
@@ -197,12 +191,54 @@ export class StrokeLayer extends Layer {
               points: path.selectionClip.points?.map((point) => ({ ...point }))
             }
           : path.selectionClip
-      })) as StrokePath[],
+      })) as SerializedStrokePath[],
       strokeStyle: this.strokeStyle,
       strokeWidth: this.strokeWidth,
       type: "stroke"
     };
   }
+}
+
+function getWorldPathBounds(worldPaths: StrokePath[], fallbackStrokeWidth: number) {
+  let hasPoint = false;
+  let maxStrokeWidth = Math.max(1, fallbackStrokeWidth);
+  let minX = 0;
+  let minY = 0;
+  let maxX = 0;
+  let maxY = 0;
+
+  for (const path of worldPaths) {
+    maxStrokeWidth = Math.max(maxStrokeWidth, path.strokeWidth);
+
+    for (const point of path.points) {
+      if (!hasPoint) {
+        minX = point.x;
+        minY = point.y;
+        maxX = point.x;
+        maxY = point.y;
+        hasPoint = true;
+        continue;
+      }
+
+      minX = Math.min(minX, point.x);
+      minY = Math.min(minY, point.y);
+      maxX = Math.max(maxX, point.x);
+      maxY = Math.max(maxY, point.y);
+    }
+  }
+
+  if (!hasPoint) {
+    return null;
+  }
+
+  const padding = Math.max(2, maxStrokeWidth / 2);
+
+  return {
+    maxX: maxX + padding,
+    maxY: maxY + padding,
+    minX: minX - padding,
+    minY: minY - padding
+  };
 }
 
 function erasePathWithCircle(points: StrokePoint[], center: StrokePoint, radius: number) {
@@ -271,8 +307,8 @@ function erasePathWithCircle(points: StrokePoint[], center: StrokePoint, radius:
 }
 
 function normalizeStrokePaths(
-  paths: Array<StrokePath | StrokePoint[]> | undefined,
-  points: StrokePoint[] | undefined,
+  paths: Array<SerializedStrokePath | SerializedStrokePoint[]> | undefined,
+  points: SerializedStrokePoint[] | undefined,
   fallback: {
     color: [number, number, number, number];
     strokeStyle: StrokeStyle;
@@ -285,7 +321,7 @@ function normalizeStrokePaths(
     if (Array.isArray(path)) {
       return {
         color: fallback.color,
-        points: path,
+        points: path.map(normalizeStrokePoint),
         strokeStyle: fallback.strokeStyle,
         strokeWidth: fallback.strokeWidth
       };
@@ -293,12 +329,22 @@ function normalizeStrokePaths(
 
     return {
       color: path.color ?? fallback.color,
-      points: path.points ?? [],
+      points: (path.points ?? []).map(normalizeStrokePoint),
       strokeStyle: path.strokeStyle ?? fallback.strokeStyle,
       strokeWidth: Math.max(1, path.strokeWidth ?? fallback.strokeWidth),
       selectionClip: cloneSelectionClip(path.selectionClip ?? null)
     };
   });
+}
+
+function normalizeStrokePoint(point: SerializedStrokePoint): StrokePoint {
+  return Array.isArray(point)
+    ? { x: Number(point[0]) || 0, y: Number(point[1]) || 0 }
+    : { x: point.x, y: point.y };
+}
+
+function compactStrokePoint(point: StrokePoint): [number, number] {
+  return [point.x, point.y];
 }
 
 function cloneSelectionClip(selection: StrokeSelectionClip | null) {

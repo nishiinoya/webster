@@ -1,7 +1,8 @@
 import type {
   SharedProjectAssetReference,
   SharedProjectLoadResponse,
-  SharedProjectSnapshotSummary
+  SharedProjectSnapshotSummary,
+  WebsterProjectManifest
 } from "@webster/shared";
 
 export type SharedProjectAssetUpload = {
@@ -67,6 +68,25 @@ export async function uploadLocalWebsterProject(file: Blob, filename: string) {
 export async function loadSharedProject(projectId: string) {
   return fetchJson<SharedProjectLoadResponse>(
     `/shared-projects/${encodeURIComponent(projectId)}`
+  );
+}
+
+export async function saveSharedProject(
+  projectId: string,
+  input: {
+    assetReferences?: SharedProjectAssetReference[];
+    baseVersion: number;
+    clientId: string;
+    manifest: WebsterProjectManifest;
+  }
+) {
+  return fetchJson<SharedProjectLoadResponse>(
+    `/shared-projects/${encodeURIComponent(projectId)}/save`,
+    {
+      body: JSON.stringify(input),
+      headers: { "Content-Type": "application/json" },
+      method: "POST"
+    }
   );
 }
 

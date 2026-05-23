@@ -48,6 +48,7 @@ declare module 'socket.io' {
       .map((s) => s.trim()),
     credentials: true,
   },
+  maxHttpBufferSize: 16 * 1024 * 1024,
 })
 export class CollaborationGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
@@ -373,11 +374,12 @@ export class CollaborationGateway
   // operation:preview
   // ---------------------------------------------------------------------------
   @SubscribeMessage('operation:preview')
-  onOperationPreview(
+  async onOperationPreview(
     @ConnectedSocket() socket: Socket,
     @MessageBody() op: ProjectOperation,
   ) {
     if (!op?.projectId) return;
+    if (!(await this.canEditProject(socket, op.projectId))) return;
     socket.to(`project:${op.projectId}`).emit('operation:preview', op);
   }
 
@@ -408,6 +410,10 @@ export class CollaborationGateway
   private async doCommit(socket: Socket, op: ProjectOperation): Promise<void> {
     const { projectId } = op;
 
+    if (!(await this.canEditProject(socket, projectId))) {
+      return;
+    }
+
     const project = await this.prisma.project.findFirst({
       where: { id: projectId, isDeleted: false },
       select: { id: true, currentVersion: true, metadata: true },
@@ -429,8 +435,8 @@ export class CollaborationGateway
     // for a drawing editor where ops are independent patches, last-write-wins
     // applied in queue order is the correct behaviour.
     if (op.baseVersion !== project.currentVersion) {
-      if (!op.scenePatch?.length && !op.scene) {
-        // No payload to apply — nothing we can do, ask client to resync.
+      if (!op.scenePatch?.length) {
+        // Full-scene snapshots cannot be safely rebased; ask the client to resync.
         socket.emit('project:error', {
           code: 'version_conflict',
           message: `Version conflict: server is at v${project.currentVersion}, op based on v${op.baseVersion}. Please resync.`,
@@ -445,7 +451,19 @@ export class CollaborationGateway
 
     const wasRebased = op.baseVersion !== project.currentVersion;
     const currentManifest = (project.metadata ?? {}) as any;
-    const newManifest = this.operationApplier.apply(currentManifest, op);
+    let newManifest: any;
+    try {
+      newManifest = this.operationApplier.apply(currentManifest, op, {
+        allowSceneFallback: !wasRebased,
+      });
+    } catch {
+      socket.emit('project:error', {
+        code: 'version_conflict',
+        message: `Version conflict: server is at v${project.currentVersion}, op based on v${op.baseVersion}. Please resync.`,
+        projectId,
+      });
+      return;
+    }
     const newVersion = project.currentVersion + 1;
 
     await this.prisma.project.update({
@@ -470,6 +488,57 @@ export class CollaborationGateway
     };
 
     this.server.to(`project:${projectId}`).emit('operation:applied', applied);
+  }
+
+  private async canEditProject(socket: Socket, projectId: string): Promise<boolean> {
+    const user: AuthUser | undefined = socket.data.user;
+
+    if (!user) {
+      socket.emit('project:error', {
+        code: 'forbidden',
+        message: 'Authentication required.',
+        projectId,
+      });
+      return false;
+    }
+
+    if (!this.projectAccessService) {
+      socket.emit('project:error', {
+        code: 'forbidden',
+        message: 'Project access service is unavailable.',
+        projectId,
+      });
+      return false;
+    }
+
+    const role = await this.projectAccessService.resolveRole(projectId, user.id);
+
+    if (!role) {
+      socket.emit('project:error', {
+        code: 'not_found',
+        message: 'Project not found or access denied.',
+        projectId,
+      });
+      return false;
+    }
+
+    const roleRank: Record<string, number> = {
+      commenter: 1,
+      editor: 2,
+      owner: 3,
+      viewer: 1,
+    };
+
+    if ((roleRank[role] ?? 0) < roleRank.editor) {
+      socket.emit('project:error', {
+        code: 'forbidden',
+        message: 'Editor access is required to change this project.',
+        projectId,
+      });
+      return false;
+    }
+
+    return true;
   }
 
   // ---------------------------------------------------------------------------

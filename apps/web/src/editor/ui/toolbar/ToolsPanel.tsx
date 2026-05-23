@@ -92,42 +92,44 @@ function ToolGroup({
         return (
           <div className='grid gap-1.5' key={tool.value}>
             <Tooltip>
-              <TooltipTrigger className='w-full'>
-                <button
-                  aria-pressed={tool.value === selectedTool}
-                  title={tool.label}
-                  className={cn(
-                    'group flex items-center justify-center gap-3 rounded-lg border border-transparent bg-transparent text-center text-[11px] text-[#d9dde3] hover:border-[#4c535c] hover:bg-[#252930] cursor-pointer',
-                    tool.value === selectedTool &&
-                      'border-[#4aa391] bg-[#172722] text-[#dff7f1]',
-                    isDisabled &&
-                      'cursor-not-allowed text-[#737b86] opacity-70',
-                  )}
-                  disabled={isDisabled}
-                  onClick={() => onSelectTool(tool.value)}
-                  type='button'
-                >
-                  <span
+              <TooltipTrigger
+                render={(
+                  <button
+                    aria-pressed={tool.value === selectedTool}
+                    title={tool.label}
                     className={cn(
-                      'grid h-10 w-10 place-items-center rounded-md text-sm font-extrabold text-[#e8f4f1]',
+                      'group flex items-center justify-center gap-3 rounded-lg border border-transparent bg-transparent text-center text-[11px] text-[#d9dde3] hover:border-[#4c535c] hover:bg-[#252930] cursor-pointer',
                       tool.value === selectedTool &&
-                        'border-[#5bb7a4] bg-[#25453e]',
+                        'border-[#4aa391] bg-[#172722] text-[#dff7f1]',
+                      isDisabled &&
+                        'cursor-not-allowed text-[#737b86] opacity-70',
                     )}
-                    aria-hidden='true'
+                    disabled={isDisabled}
+                    onClick={() => onSelectTool(tool.value)}
+                    type='button'
                   >
-                    {typeof tool.icon === 'string' &&
-                    tool.icon.endsWith('.svg') ? (
-                      <img
-                        src={tool.icon}
-                        alt={tool.label}
-                        className='h-6 w-6'
-                      />
-                    ) : (
-                      tool.icon
-                    )}
-                  </span>
-                </button>
-              </TooltipTrigger>
+                    <span
+                      className={cn(
+                        'grid h-10 w-10 place-items-center rounded-md text-sm font-extrabold text-[#e8f4f1]',
+                        tool.value === selectedTool &&
+                          'border-[#5bb7a4] bg-[#25453e]',
+                      )}
+                      aria-hidden='true'
+                    >
+                      {typeof tool.icon === 'string' &&
+                      tool.icon.endsWith('.svg') ? (
+                        <img
+                          src={tool.icon}
+                          alt={tool.label}
+                          className='h-6 w-6'
+                        />
+                      ) : (
+                        tool.icon
+                      )}
+                    </span>
+                  </button>
+                )}
+              />
               <TooltipContent>
                 <p>{tool.description}</p>
               </TooltipContent>

@@ -11,6 +11,7 @@ import type { LayerMask } from "../../masks/LayerMask";
 import type { MaskDirtyRect } from "../../masks/LayerMask";
 import { getTextMaskFrame } from "../../rendering/text/BitmapText";
 import { clamp, getBrushRadiiInMaskSpace, paintMaskEllipse } from "./MaskBrushRaster";
+import type { MaskBrushRadii } from "./MaskBrushRaster";
 import type { MaskBrushPixelPredicate } from "./MaskBrushRaster";
 import type { MaskBrushOptions } from "./MaskBrushTypes";
 import type { ToolPointerEvent } from "../move/MoveTool";
@@ -21,6 +22,19 @@ type StrokeSnapshot = {
   data: Uint8Array;
   layerId: string;
   mask: LayerMask;
+};
+
+export type MaskBrushPreviewPayload = {
+  brush: MaskBrushOptions;
+  layerId: string;
+  maskHeight: number;
+  maskWidth: number;
+  pointOffset?: number;
+  points: MaskPaintPoint[];
+  radii: MaskBrushRadii;
+  source: "mask-brush-preview";
+  strokeId: string;
+  tool: "Mask Brush";
 };
 
 export class MaskBrushTool {
@@ -34,6 +48,10 @@ export class MaskBrushTool {
   private strokeSelectionPredicate: MaskBrushPixelPredicate | undefined;
   private isPainting = false;
   private lastPaintPoint: MaskPaintPoint | null = null;
+  private strokePreviewId: string | null = null;
+  private strokePreviewLayerId: string | null = null;
+  private strokePreviewPoints: MaskPaintPoint[] = [];
+  private sentPreviewPointCount = 0;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -68,6 +86,10 @@ export class MaskBrushTool {
 
     this.isPainting = true;
     this.lastPaintPoint = null;
+    this.strokePreviewId = crypto.randomUUID();
+    this.strokePreviewLayerId = layer.id;
+    this.strokePreviewPoints = [];
+    this.sentPreviewPointCount = 0;
     this.strokeSnapshot = {
       data: new Uint8Array(mask.data),
       layerId: layer.id,
@@ -102,6 +124,10 @@ export class MaskBrushTool {
   cancel() {
     this.isPainting = false;
     this.lastPaintPoint = null;
+    this.strokePreviewId = null;
+    this.strokePreviewLayerId = null;
+    this.strokePreviewPoints = [];
+    this.sentPreviewPointCount = 0;
     this.strokeSnapshot = null;
     this.strokeSelectionPredicate = undefined;
   }
@@ -131,6 +157,43 @@ export class MaskBrushTool {
     return `mask-brush-${Math.round(this.brushOptions.size)}-${this.brushOptions.mode}` as const;
   }
 
+  getPreviewPayload(): MaskBrushPreviewPayload | null {
+    const layer = this.getSelectedLayer();
+
+    if (
+      !this.isPainting ||
+      !this.strokePreviewId ||
+      !this.strokePreviewLayerId ||
+      !layer?.mask ||
+      layer.id !== this.strokePreviewLayerId ||
+      this.strokePreviewPoints.length === 0
+    ) {
+      return null;
+    }
+
+    const pointOffset = Math.max(0, this.sentPreviewPointCount - 2);
+    const points = this.strokePreviewPoints.slice(pointOffset);
+
+    if (this.sentPreviewPointCount >= this.strokePreviewPoints.length) {
+      return null;
+    }
+
+    this.sentPreviewPointCount = this.strokePreviewPoints.length;
+
+    return {
+      brush: { ...this.brushOptions },
+      layerId: layer.id,
+      maskHeight: layer.mask.height,
+      maskWidth: layer.mask.width,
+      pointOffset,
+      points: points.map((point) => ({ ...point })),
+      radii: this.getBrushRadiiInMaskSpace(layer, layer.mask),
+      source: "mask-brush-preview",
+      strokeId: this.strokePreviewId,
+      tool: "Mask Brush"
+    };
+  }
+
   private getSelectedLayer() {
     return this.scene.selectedLayerId ? this.scene.getLayer(this.scene.selectedLayerId) : null;
   }
@@ -147,6 +210,8 @@ export class MaskBrushTool {
     if (!point) {
       return;
     }
+
+    this.strokePreviewPoints.push(point);
 
     const brushRadii = this.getBrushRadiiInMaskSpace(layer, layer.mask);
     const step = Math.max(1, Math.min(brushRadii.x, brushRadii.y) / 4);

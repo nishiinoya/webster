@@ -7,6 +7,11 @@ import type { Object3DMaterialSlot } from "./Object3DLayer";
 
 import type { StrokePath, StrokePoint, StrokeStyle } from "./StrokeLayer";
 
+export type SerializedStrokePoint = StrokePoint | [number, number];
+export type SerializedStrokePath = Omit<StrokePath, "points"> & {
+  points: SerializedStrokePoint[];
+};
+
 export type LayerType =
   | "adjustment"
   | "shape"
@@ -226,8 +231,8 @@ export type SerializedTextLayer = SerializedLayerBase & {
 
 export type SerializedStrokeLayer = SerializedLayerBase & {
   color: [number, number, number, number];
-  paths?: Array<StrokePath | StrokePoint[]>;
-  points?: StrokePoint[];
+  paths?: Array<SerializedStrokePath | SerializedStrokePoint[]>;
+  points?: SerializedStrokePoint[];
   strokeStyle: StrokeStyle;
   strokeWidth: number;
   type: "stroke";

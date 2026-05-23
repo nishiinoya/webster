@@ -3,6 +3,8 @@ import {
   Logger,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
+  ConflictException,
   ServiceUnavailableException,
   Optional,
 } from '@nestjs/common';
@@ -160,29 +162,7 @@ export class SharedProjectsService {
       throw new NotFoundException('Project not found');
     }
 
-    // Load all project_assets
-    const dbAssets = await this.prisma.projectAsset.findMany({
-      where: { projectId },
-      orderBy: { createdAt: 'asc' },
-    });
-
-    const assets: SharedProjectAssetReference[] = dbAssets.map((a) => {
-      // storageKey = projects/<id>/assets/<assetPath>
-      // Extract relative assetPath after 'assets/'
-      const assetsPrefix = `projects/${projectId}/assets/`;
-      const assetPath = a.storageKey.startsWith(assetsPrefix)
-        ? a.storageKey.slice(assetsPrefix.length)
-        : a.storageKey;
-
-      const encodedPath = assetPath.split('/').map(encodeURIComponent).join('/');
-
-      return {
-        assetId: a.id,
-        assetPath,
-        downloadUrl: `/shared-projects/${encodeURIComponent(projectId)}/assets/${encodedPath}`,
-        mimeType: a.mimeType ?? undefined,
-      };
-    });
+    const assets = await this.getProjectAssetReferences(projectId);
 
     // Load top-50 snapshot summaries
     const snapshotRows = await this.prisma.projectSnapshot.findMany({
@@ -214,6 +194,71 @@ export class SharedProjectsService {
       snapshots,
       users,
     };
+  }
+
+  /** POST /api/shared-projects/:projectId/save */
+  async saveProject(
+    projectId: string,
+    user: AuthUser,
+    body: {
+      assetReferences?: SharedProjectAssetReference[];
+      baseVersion?: number;
+      clientId?: string;
+      manifest?: WebsterProjectManifest;
+    },
+  ): Promise<SharedProjectLoadResponse> {
+    if (!this.projectAccess) {
+      throw new ServiceUnavailableException('ProjectAccessService is not available');
+    }
+
+    await this.projectAccess.requireRole(projectId, user.id, 'editor');
+
+    if (!isWebsterProjectManifest(body.manifest)) {
+      throw new BadRequestException('Invalid Webster project manifest');
+    }
+
+    if (!Number.isInteger(body.baseVersion) || body.baseVersion < 0) {
+      throw new BadRequestException('baseVersion must be a non-negative integer');
+    }
+
+    const project = await this.prisma.project.findFirst({
+      where: { id: projectId, isDeleted: false },
+      select: { currentVersion: true },
+    });
+
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
+
+    if (project.currentVersion !== body.baseVersion) {
+      throw new ConflictException(
+        `Project changed before save completed. Server is at v${project.currentVersion}.`,
+      );
+    }
+
+    const updated = await this.prisma.project.update({
+      where: { id: projectId },
+      data: {
+        currentVersion: { increment: 1 },
+        metadata: body.manifest as object,
+      },
+    });
+    const assets = await this.getProjectAssetReferences(projectId);
+
+    await this.roomService?.notifyProjectReplaced(
+      projectId,
+      body.manifest,
+      updated.currentVersion,
+      user,
+      {
+        assetReferences: mergeAssetReferences(assets, body.assetReferences ?? []),
+        clientId: body.clientId,
+        operationId: body.clientId ? `${body.clientId}:cloud-save:${updated.currentVersion}` : undefined,
+        source: 'cloud-save',
+      },
+    );
+
+    return this.loadProject(projectId, user);
   }
 
   /** GET /api/shared-projects/:projectId/export-webster */
@@ -258,7 +303,6 @@ export class SharedProjectsService {
 
     const manifest = (project.metadata ?? {}) as WebsterProjectManifest;
 
-    // Load all assets from DB
     const dbAssets = await this.prisma.projectAsset.findMany({
       where: { projectId },
     });
@@ -297,4 +341,54 @@ export class SharedProjectsService {
 
     return { buffer, projectName: project.projectName };
   }
+
+  private async getProjectAssetReferences(projectId: string): Promise<SharedProjectAssetReference[]> {
+    const dbAssets = await this.prisma.projectAsset.findMany({
+      where: { projectId },
+      orderBy: { createdAt: 'asc' },
+    });
+    const assetsPrefix = `projects/${projectId}/assets/`;
+
+    return dbAssets.map((asset) => {
+      const assetPath = asset.storageKey.startsWith(assetsPrefix)
+        ? asset.storageKey.slice(assetsPrefix.length)
+        : asset.storageKey;
+      const encodedPath = assetPath.split('/').map(encodeURIComponent).join('/');
+
+      return {
+        assetId: asset.id,
+        assetPath,
+        downloadUrl: `/shared-projects/${encodeURIComponent(projectId)}/assets/${encodedPath}`,
+        mimeType: asset.mimeType ?? undefined,
+      };
+    });
+  }
+}
+
+function isWebsterProjectManifest(value: unknown): value is WebsterProjectManifest {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      (value as { app?: unknown }).app === 'webster' &&
+      (value as { version?: unknown }).version === 1 &&
+      Array.isArray((value as { layers?: unknown }).layers) &&
+      Boolean((value as { canvas?: unknown }).canvas),
+  );
+}
+
+function mergeAssetReferences(
+  storedAssets: SharedProjectAssetReference[],
+  providedAssets: SharedProjectAssetReference[],
+) {
+  const byPath = new Map<string, SharedProjectAssetReference>();
+
+  for (const asset of storedAssets) {
+    byPath.set(asset.assetPath, asset);
+  }
+
+  for (const asset of providedAssets) {
+    byPath.set(asset.assetPath, asset);
+  }
+
+  return [...byPath.values()];
 }

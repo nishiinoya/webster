@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Param,
+  Body,
   Req,
   Res,
   UploadedFiles,
@@ -15,7 +16,19 @@ import { Response } from 'express';
 import { SharedProjectsService } from './shared-projects.service';
 import { CurrentUser } from '../../common/auth/current-user.decorator';
 import { AuthUser } from '../../common/types/auth-user';
-import type { SharedProjectLoadResponse, SharedProjectStatePayload } from '@webster/shared';
+import type {
+  SharedProjectAssetReference,
+  SharedProjectLoadResponse,
+  SharedProjectStatePayload,
+  WebsterProjectManifest,
+} from '@webster/shared';
+
+type SaveSharedProjectBody = {
+  assetReferences?: SharedProjectAssetReference[];
+  baseVersion?: number;
+  clientId?: string;
+  manifest?: WebsterProjectManifest;
+};
 
 @Controller('shared-projects')
 export class SharedProjectsController {
@@ -55,6 +68,21 @@ export class SharedProjectsController {
     @CurrentUser() user: AuthUser,
   ): Promise<SharedProjectStatePayload> {
     return this.sharedProjectsService.loadProject(projectId, user);
+  }
+
+  /**
+   * POST /api/shared-projects/:projectId/save
+   * Explicit cloud save. The realtime socket is still responsible for live
+   * collaboration; this endpoint persists a complete editor state snapshot.
+   */
+  @Post(':projectId/save')
+  @HttpCode(HttpStatus.OK)
+  async saveProject(
+    @Param('projectId') projectId: string,
+    @CurrentUser() user: AuthUser,
+    @Body() body: SaveSharedProjectBody,
+  ): Promise<SharedProjectLoadResponse> {
+    return this.sharedProjectsService.saveProject(projectId, user, body);
   }
 
   /**

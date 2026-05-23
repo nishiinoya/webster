@@ -2,6 +2,7 @@ import { Camera2D } from "../../geometry/Camera2D";
 /** Freehand drawing tool implementation. */
 import { StrokeLayer } from "../../layers/StrokeLayer";
 import type { StrokePoint, StrokeSelectionClip, StrokeStyle } from "../../layers/StrokeLayer";
+import type { SerializedStrokeLayer } from "../../layers/Layer";
 import { Scene } from "../../scene/Scene";
 import type { ToolPointerEvent } from "../move/MoveTool";
 
@@ -14,12 +15,36 @@ export type DrawingToolOptions = {
   strokeWidth: number;
 };
 
+export type DrawPreviewStrokeStyle = {
+  color: [number, number, number, number];
+  selectionClip?: StrokeSelectionClip | null;
+  strokeStyle: StrokeStyle;
+  strokeWidth: number;
+};
+
+export type DrawPreviewPayload = {
+  layer?: SerializedStrokeLayer | null;
+  layerId: string;
+  layerIndex: number;
+  mode: "draw" | "replace";
+  pathIndex: number;
+  pointOffset?: number;
+  points: StrokePoint[];
+  source: "draw-preview";
+  style?: DrawPreviewStrokeStyle;
+  tool: "Draw";
+};
+
 export class DrawingTool {
   private activeLayer: StrokeLayer | null = null;
   private activePathIndex = -1;
   private isErasing = false;
   private isDrawing = false;
+  private previewLayerId: string | null = null;
+  private previewStrokeStyle: DrawPreviewStrokeStyle | null = null;
   private points: StrokePoint[] = [];
+  private sentPreviewLayer = false;
+  private sentPreviewPointCount = 0;
   private options: DrawingToolOptions = {
     color: [0.07, 0.08, 0.09, 0.82],
     mode: "draw",
@@ -69,6 +94,8 @@ export class DrawingTool {
       this.points = [];
       this.activeLayer = null;
       this.activePathIndex = -1;
+      this.previewLayerId = null;
+      this.previewStrokeStyle = null;
       return true;
     }
 
@@ -95,11 +122,20 @@ export class DrawingTool {
     this.points = [point];
     this.activeLayer = layer;
     this.activePathIndex = layer.paths.length;
-    layer.appendWorldPath(this.points, {
-      color: this.options.color,
+    this.previewLayerId = layer.id;
+    this.previewStrokeStyle = {
+      color: [...this.options.color],
       selectionClip: cloneSelectionClip(this.scene.selection.current),
       strokeStyle: this.options.style,
       strokeWidth: this.options.strokeWidth
+    };
+    this.sentPreviewLayer = false;
+    this.sentPreviewPointCount = 0;
+    layer.appendWorldPath(this.points, {
+      color: this.previewStrokeStyle.color,
+      selectionClip: this.previewStrokeStyle.selectionClip,
+      strokeStyle: this.previewStrokeStyle.strokeStyle,
+      strokeWidth: this.previewStrokeStyle.strokeWidth
     });
 
     if (!targetLayer) {
@@ -128,6 +164,10 @@ export class DrawingTool {
       this.activeLayer = null;
       this.activePathIndex = -1;
       this.points = [];
+      this.previewLayerId = null;
+      this.previewStrokeStyle = null;
+      this.sentPreviewLayer = false;
+      this.sentPreviewPointCount = 0;
       return true;
     }
 
@@ -173,6 +213,10 @@ export class DrawingTool {
       this.isErasing = false;
       this.activeLayer = null;
       this.isDrawing = false;
+      this.previewLayerId = null;
+      this.previewStrokeStyle = null;
+      this.sentPreviewLayer = false;
+      this.sentPreviewPointCount = 0;
       return true;
     }
 
@@ -193,7 +237,11 @@ export class DrawingTool {
     this.activeLayer = null;
     this.activePathIndex = -1;
     this.isDrawing = false;
+    this.previewLayerId = null;
+    this.previewStrokeStyle = null;
     this.points = [];
+    this.sentPreviewLayer = false;
+    this.sentPreviewPointCount = 0;
 
     return true;
   }
@@ -203,11 +251,66 @@ export class DrawingTool {
     this.activePathIndex = -1;
     this.isErasing = false;
     this.isDrawing = false;
+    this.previewLayerId = null;
+    this.previewStrokeStyle = null;
     this.points = [];
+    this.sentPreviewLayer = false;
+    this.sentPreviewPointCount = 0;
   }
 
   getCursor() {
     return "crosshair" as const;
+  }
+
+  getPreviewPayload(): DrawPreviewPayload | null {
+    if (!this.isDrawing || !this.previewLayerId) {
+      return null;
+    }
+
+    const layerIndex = this.scene.layers.findIndex((layer) => layer.id === this.previewLayerId);
+    const layer = this.previewLayerId ? this.scene.getLayer(this.previewLayerId) : null;
+
+    if (this.isErasing) {
+      return {
+        layer: layer instanceof StrokeLayer ? layer.toJSON() : null,
+        layerId: this.previewLayerId,
+        layerIndex: Math.max(0, layerIndex),
+        mode: "replace",
+        pathIndex: -1,
+        points: [],
+        source: "draw-preview",
+        tool: "Draw"
+      };
+    }
+
+    if (
+      !(layer instanceof StrokeLayer) ||
+      !this.previewStrokeStyle ||
+      this.activePathIndex < 0 ||
+      (this.sentPreviewLayer && this.sentPreviewPointCount >= this.points.length)
+    ) {
+      return null;
+    }
+
+    const includeLayer = !this.sentPreviewLayer;
+    const pointOffset = includeLayer ? 0 : Math.max(0, this.sentPreviewPointCount - 2);
+    const points = this.points.slice(pointOffset);
+
+    this.sentPreviewLayer = true;
+    this.sentPreviewPointCount = this.points.length;
+
+    return {
+      ...(includeLayer ? { layer: layer.toJSON() } : {}),
+      layerId: this.previewLayerId,
+      layerIndex: Math.max(0, layerIndex),
+      mode: "draw",
+      pathIndex: this.activePathIndex,
+      pointOffset,
+      points: points.map((point) => ({ ...point })),
+      source: "draw-preview",
+      style: clonePreviewStrokeStyle(this.previewStrokeStyle),
+      tool: "Draw"
+    };
   }
 
   private clientToWorld(clientX: number, clientY: number) {
@@ -243,6 +346,10 @@ export class DrawingTool {
     }
 
     this.activeLayer = selectedLayer;
+    this.previewLayerId = selectedLayer.id;
+    this.previewStrokeStyle = null;
+    this.sentPreviewLayer = false;
+    this.sentPreviewPointCount = 0;
     this.isErasing = true;
     this.isDrawing = true;
 
@@ -269,6 +376,7 @@ export class DrawingTool {
       this.scene.removeLayer(layer.id);
       this.activeLayer = null;
       this.isErasing = false;
+      this.previewStrokeStyle = null;
     }
 
     return true;
@@ -300,6 +408,15 @@ function cloneSelectionClip(selection: StrokeSelectionClip | null): StrokeSelect
         shape: selection.shape
       }
     : null;
+}
+
+function clonePreviewStrokeStyle(style: DrawPreviewStrokeStyle): DrawPreviewStrokeStyle {
+  return {
+    color: [...style.color],
+    selectionClip: cloneSelectionClip(style.selectionClip ?? null),
+    strokeStyle: style.strokeStyle,
+    strokeWidth: style.strokeWidth
+  };
 }
 
 function getStrokePreset(style: StrokeStyle) {
