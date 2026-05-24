@@ -31,6 +31,29 @@ enum PermissionLevel {
   @@map("permission_level")
 }
 
+enum ProjectInviteStatus {
+  pending
+  accepted
+  revoked
+  expired
+
+  @@map("project_invite_status")
+}
+
+enum ProjectLinkAccessMode {
+  restricted
+  anyone_with_link
+
+  @@map("project_link_access_mode")
+}
+
+enum ProjectCommentStatus {
+  open
+  resolved
+
+  @@map("project_comment_status")
+}
+
 enum AssetType {
   image
   vector
@@ -62,6 +85,8 @@ model User {
   createdSnapshots  ProjectSnapshot[]  @relation("SnapshotCreator")
   grantedAccesses   ProjectAccess[]    @relation("AccessCreator")
   receivedAccesses  ProjectAccess[]    @relation("AccessReceiver")
+  sentInvites       ProjectInvite[]    @relation("InviteCreator")
+  acceptedInvites   ProjectInvite[]    @relation("InviteAcceptor")
   comments          ProjectComment[]   @relation("CommentAuthor")
   resolvedComments  ProjectComment[]   @relation("CommentResolver")
 
@@ -119,6 +144,8 @@ model Project {
   assets    ProjectAsset[]
   snapshots ProjectSnapshot[]
   accesses  ProjectAccess[]
+  invites   ProjectInvite[]
+  linkAccess ProjectLinkAccess?
   comments  ProjectComment[]
 
   @@map("projects")
@@ -167,36 +194,80 @@ model ProjectAccess {
   expiresAt        DateTime?       @map("expires_at") @db.Timestamptz
   createdBy        String          @map("created_by") @db.Uuid
   createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  revokedAt        DateTime?       @map("revoked_at") @db.Timestamptz
 
   // Relations
   project        Project @relation(fields: [projectId], references: [id])
   sharedWithUser User?   @relation("AccessReceiver", fields: [sharedWithUserId], references: [id])
   creator        User    @relation("AccessCreator", fields: [createdBy], references: [id])
 
+  @@index([projectId, sharedWithUserId])
   @@map("project_accesses")
+}
+
+model ProjectInvite {
+  id               String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId        String              @map("project_id") @db.Uuid
+  invitedEmail     String?             @map("invited_email") @db.VarChar
+  invitedByUserId  String              @map("invited_by_user_id") @db.Uuid
+  permission       PermissionLevel     @default(viewer)
+  tokenHash        String              @unique @map("token_hash") @db.VarChar
+  status           ProjectInviteStatus @default(pending)
+  expiresAt        DateTime?           @map("expires_at") @db.Timestamptz
+  acceptedByUserId String?             @map("accepted_by_user_id") @db.Uuid
+  acceptedAt       DateTime?           @map("accepted_at") @db.Timestamptz
+  createdAt        DateTime            @default(now()) @map("created_at") @db.Timestamptz
+
+  project        Project @relation(fields: [projectId], references: [id])
+  invitedByUser  User    @relation("InviteCreator", fields: [invitedByUserId], references: [id])
+  acceptedByUser User?   @relation("InviteAcceptor", fields: [acceptedByUserId], references: [id])
+
+  @@index([projectId, status])
+  @@index([invitedEmail, status])
+  @@map("project_invites")
+}
+
+model ProjectLinkAccess {
+  projectId  String                @id @map("project_id") @db.Uuid
+  mode       ProjectLinkAccessMode @default(restricted)
+  permission PermissionLevel       @default(viewer)
+  tokenHash  String?               @unique @map("token_hash") @db.VarChar
+  updatedAt  DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@map("project_link_access")
 }
 
 model ProjectComment {
   id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   projectId       String    @map("project_id") @db.Uuid
   parentCommentId String?   @map("parent_comment_id") @db.Uuid
-  userId          String    @map("user_id") @db.Uuid
-  content         String    @db.Text
-  xCoordinate     Decimal?  @map("x_coordinate") @db.Decimal(8, 4)
-  yCoordinate     Decimal?  @map("y_coordinate") @db.Decimal(8, 4)
+  authorUserId    String    @map("user_id") @db.Uuid
+  layerId         String?   @map("layer_id") @db.VarChar
+  text            String    @map("content") @db.Text
+  x               Decimal?  @map("x_coordinate") @db.Decimal(12, 4)
+  y               Decimal?  @map("y_coordinate") @db.Decimal(12, 4)
+  localX          Decimal?  @map("local_x") @db.Decimal(12, 4)
+  localY          Decimal?  @map("local_y") @db.Decimal(12, 4)
+  status          ProjectCommentStatus @default(open)
   isResolved      Boolean   @default(false) @map("is_resolved")
   resolvedAt      DateTime? @map("resolved_at") @db.Timestamptz
-  resolvedBy      String?   @map("resolved_by") @db.Uuid
+  resolvedByUserId String?  @map("resolved_by") @db.Uuid
   isDeleted       Boolean   @default(false) @map("is_deleted")
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
   project       Project          @relation(fields: [projectId], references: [id])
-  author        User             @relation("CommentAuthor", fields: [userId], references: [id])
-  resolver      User?            @relation("CommentResolver", fields: [resolvedBy], references: [id])
+  author        User             @relation("CommentAuthor", fields: [authorUserId], references: [id])
+  resolver      User?            @relation("CommentResolver", fields: [resolvedByUserId], references: [id])
   parentComment ProjectComment?  @relation("CommentThread", fields: [parentCommentId], references: [id])
   replies       ProjectComment[] @relation("CommentThread")
 
+  @@index([projectId, status])
+  @@index([parentCommentId])
   @@map("project_comments")
 }

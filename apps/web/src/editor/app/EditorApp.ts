@@ -1341,6 +1341,14 @@ export class EditorApp {
     return layer;
   }
 
+  hitTestLayerAtClientPoint(clientX: number, clientY: number) {
+    const screenPoint = this.getCanvasPoint(clientX, clientY);
+    const worldPoint = this.camera.screenToWorld(screenPoint.x, screenPoint.y);
+    const layer = this.scene.hitTestLayer(worldPoint.x, worldPoint.y);
+
+    return layer ? { id: layer.id, name: layer.name } : null;
+  }
+
   pointerDown(event: ToolPointerEvent) {
     const historyConfig = getGestureHistoryConfig(this.selectedTool);
     const before = historyConfig ? this.captureAppSnapshot() : null;
@@ -2443,6 +2451,14 @@ export class EditorApp {
   /** Convert document world coords to canvas-relative screen pixels. */
   worldToCanvasPoint(worldX: number, worldY: number) {
     return this.camera.worldToScreen(worldX, worldY);
+  }
+
+  centerCameraOnWorldPoint(worldX: number, worldY: number) {
+    const bounds = this.canvas.getBoundingClientRect();
+    const screen = this.camera.worldToScreen(worldX, worldY);
+
+    this.camera.pan(bounds.width / 2 - screen.x, bounds.height / 2 - screen.y);
+    this.notifyCameraChange();
   }
 
   private notifyCameraChange() {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import type {
   AppliedProjectOperation,
+  ProjectCommentEventPayload,
   ProjectErrorPayload,
   ProjectOperation,
   ProjectRole,
@@ -82,6 +83,7 @@ type UseCollaborationOptions = {
   activeDocumentTitle: string;
   editorAppRef: MutableRefObject<EditorApp | null>;
   onDocumentLoaded: (document: { height: number; title: string; width: number }) => void;
+  onCommentEvent?: (type: string, payload: ProjectCommentEventPayload) => void;
   onLayersChange: (layers: ReturnType<EditorApp["getLayerSummaries"]>) => void;
   onRequestHandled: (requestId: number) => void;
   onStateChange: (state: SharedProjectUiState) => void;
@@ -89,6 +91,7 @@ type UseCollaborationOptions = {
 };
 
 const localCapabilities: ProjectRoleCapabilities = {
+  canComment: false,
   canCreateSnapshots: false,
   canDownloadWebster: false,
   canEdit: true,
@@ -115,6 +118,7 @@ export function useCollaboration({
   activeDocumentTitle,
   editorAppRef,
   onDocumentLoaded,
+  onCommentEvent,
   onLayersChange,
   onRequestHandled,
   onStateChange,
@@ -640,6 +644,7 @@ export function useCollaboration({
             users
           }));
         },
+        onCommentEvent,
         onPreviewOperation: (operation) => {
           applyRemotePreview(operation);
         },
@@ -687,7 +692,7 @@ export function useCollaboration({
       clientRef.current = client;
       client.connect();
     },
-    [applyRemotePreview, applySharedProjectState, clientId, editorAppRef, onLayersChange]
+    [applyRemotePreview, applySharedProjectState, clientId, editorAppRef, onCommentEvent, onLayersChange]
   );
 
   const loadAndJoinSharedProject = useCallback(
@@ -1354,6 +1359,7 @@ export function useCollaboration({
   ]);
 
   return {
+    canCommentSharedProject: state.mode === "shared" && state.capabilities.canComment,
     canEditSharedProject: state.mode === "local" || state.capabilities.canEdit,
     currentUserIdRef,
     flushDeferredRemoteOps,

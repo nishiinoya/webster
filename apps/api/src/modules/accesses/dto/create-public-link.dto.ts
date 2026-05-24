@@ -1,11 +1,11 @@
 import {
-  IsEnum,
   IsISO8601,
+  IsIn,
   IsOptional,
 } from 'class-validator';
 
 export class CreatePublicLinkDto {
-  @IsEnum(['viewer', 'editor', 'commenter'])
+  @IsIn(['viewer', 'editor', 'commenter'])
   permission: 'viewer' | 'editor' | 'commenter';
 
   @IsOptional()

@@ -142,7 +142,7 @@ export class SharedProjectsService {
   ): Promise<SharedProjectStatePayload> {
     // Resolve role — 404 if no access at all
     const internalRole = this.projectAccess
-      ? await this.projectAccess.resolveRole(projectId, user.id)
+      ? await this.projectAccess.resolveOrGrantLinkRole(projectId, user.id)
       : null;
 
     if (!internalRole) {

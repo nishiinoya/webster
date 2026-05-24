@@ -4,11 +4,11 @@ import { ProjectRole } from '@webster/shared';
 
 export type EffectiveRole = 'owner' | 'editor' | 'viewer' | 'commenter' | null;
 
-const ROLE_RANK: Record<NonNullable<EffectiveRole>, number> = {
+const ACCESS_PRIORITY: Record<Exclude<EffectiveRole, null>, number> = {
   owner: 4,
   editor: 3,
-  viewer: 2,
-  commenter: 1,
+  commenter: 2,
+  viewer: 1,
 };
 
 @Injectable()
@@ -25,18 +25,52 @@ export class ProjectAccessService {
 
     if (project.ownerId === userId) return 'owner';
 
-    const access = await this.prisma.projectAccess.findFirst({
+    const accesses = await this.prisma.projectAccess.findMany({
       where: {
         projectId,
         sharedWithUserId: userId,
+        revokedAt: null,
         OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
       },
       select: { permission: true },
     });
 
-    if (!access) return null;
+    if (accesses.length === 0) return null;
+
+    const access = accesses.sort(
+      (a, b) => ACCESS_PRIORITY[b.permission] - ACCESS_PRIORITY[a.permission],
+    )[0];
 
     return access.permission as EffectiveRole;
+  }
+
+  async resolveOrGrantLinkRole(
+    projectId: string,
+    userId: string,
+  ): Promise<EffectiveRole> {
+    const existingRole = await this.resolveRole(projectId, userId);
+
+    if (existingRole) {
+      return existingRole;
+    }
+
+    const linkAccess = await this.prisma.projectLinkAccess.findFirst({
+      where: { projectId, project: { isDeleted: false } },
+      select: { mode: true, permission: true },
+    });
+
+    if (linkAccess?.mode !== 'anyone_with_link') {
+      return null;
+    }
+
+    await this.upsertUserAccess(
+      projectId,
+      userId,
+      linkAccess.permission,
+      userId,
+    );
+
+    return linkAccess.permission as EffectiveRole;
   }
 
   async requireRole(
@@ -52,10 +86,7 @@ export class ProjectAccessService {
 
     if (min === null) return;
 
-    const userRank = ROLE_RANK[role];
-    const minRank = ROLE_RANK[min];
-
-    if (userRank < minRank) {
+    if (!roleAllows(role, min)) {
       throw new ForbiddenException('Insufficient permissions');
     }
   }
@@ -63,7 +94,65 @@ export class ProjectAccessService {
   toFrontendRole(role: EffectiveRole): ProjectRole {
     if (role === 'owner') return 'owner';
     if (role === 'editor') return 'editor';
-    // 'viewer' and 'commenter' both map to 'viewer' on the frontend
+    if (role === 'commenter') return 'commenter';
     return 'viewer';
   }
+
+  async upsertUserAccess(
+    projectId: string,
+    userId: string,
+    permission: 'viewer' | 'commenter' | 'editor',
+    createdBy: string,
+  ) {
+    const existing = await this.prisma.projectAccess.findFirst({
+      where: { projectId, sharedWithUserId: userId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (existing) {
+      return this.prisma.projectAccess.update({
+        where: { id: existing.id },
+        data: {
+          permission: highestPermission(existing.permission, permission),
+          revokedAt: null,
+          expiresAt: null,
+        },
+      });
+    }
+
+    return this.prisma.projectAccess.create({
+      data: {
+        projectId,
+        sharedWithUserId: userId,
+        permission,
+        createdBy,
+      },
+    });
+  }
+}
+
+function roleAllows(
+  role: Exclude<EffectiveRole, null>,
+  min: Exclude<EffectiveRole, null>,
+) {
+  if (min === 'viewer') {
+    return true;
+  }
+
+  if (min === 'commenter') {
+    return role === 'owner' || role === 'editor' || role === 'commenter';
+  }
+
+  if (min === 'editor') {
+    return role === 'owner' || role === 'editor';
+  }
+
+  return role === 'owner';
+}
+
+function highestPermission(
+  current: 'viewer' | 'commenter' | 'editor',
+  next: 'viewer' | 'commenter' | 'editor',
+) {
+  return ACCESS_PRIORITY[next] > ACCESS_PRIORITY[current] ? next : current;
 }

@@ -7,6 +7,11 @@ export class UpdateCommentDto {
   content?: string;
 
   @IsOptional()
+  @IsString()
+  @MinLength(1)
+  text?: string;
+
+  @IsOptional()
   @IsBoolean()
   isResolved?: boolean;
 }

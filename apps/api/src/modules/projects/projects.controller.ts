@@ -24,6 +24,14 @@ export class ProjectsController {
     return this.projectsService.findAll(user.id);
   }
 
+  @Post('invites/:inviteId/accept')
+  acceptInvite(
+    @Param('inviteId') inviteId: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.projectsService.acceptPendingInvite(inviteId, user.id);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.projectsService.findOne(id, user.id);

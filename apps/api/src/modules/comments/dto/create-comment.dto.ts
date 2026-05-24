@@ -20,6 +20,18 @@ export class CreateCommentDto {
   y?: number;
 
   @IsOptional()
+  @IsString()
+  layerId?: string;
+
+  @IsOptional()
+  @IsNumber()
+  localX?: number;
+
+  @IsOptional()
+  @IsNumber()
+  localY?: number;
+
+  @IsOptional()
   @IsUUID()
   parentCommentId?: string;
 }

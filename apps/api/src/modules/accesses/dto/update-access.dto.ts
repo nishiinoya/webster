@@ -1,12 +1,12 @@
 import {
-  IsEnum,
   IsISO8601,
+  IsIn,
   IsOptional,
 } from 'class-validator';
 
 export class UpdateAccessDto {
   @IsOptional()
-  @IsEnum(['viewer', 'editor', 'commenter'])
+  @IsIn(['viewer', 'editor', 'commenter'])
   permission?: 'viewer' | 'editor' | 'commenter';
 
   @IsOptional()

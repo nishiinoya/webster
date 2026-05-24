@@ -1,11 +1,15 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
+  Dispatch,
   DragEvent as ReactDragEvent,
+  FormEvent,
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
+  SetStateAction,
 } from 'react';
+import type { ProjectComment, ProjectCommentEventPayload } from '@webster/shared';
 import type {
   DocumentCommand,
   EditorClipboardCommand,
@@ -48,6 +52,15 @@ import type { ShapeKind } from '../layers/ShapeLayer';
 import type { StrokeStyle } from '../layers/StrokeLayer';
 import type { SelectionMode } from '../selection/SelectionManager';
 import { cn } from './classNames';
+import {
+  createProjectComment,
+  deleteProjectComment,
+  getCurrentUser,
+  listProjectComments,
+  reopenProjectComment,
+  resolveProjectComment,
+  updateProjectComment,
+} from '../collaboration/sharedProjectApi';
 
 type CanvasViewProps = {
   activeDocument: EditorDocumentTab;
@@ -216,6 +229,26 @@ export function CanvasView({
   const handledClipboardCommandRequestIdRef = useRef<number | null>(null);
   const handledTemplateInsertRequestIdRef = useRef<number | null>(null);
   const [fps, setFps] = useState(0);
+  const [comments, setComments] = useState<ProjectComment[]>([]);
+  const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  const [pendingComment, setPendingComment] = useState<{
+    layerId: string | null;
+    text: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [commentError, setCommentError] = useState<string | null>(null);
+  const [isLoadingComments, setIsLoadingComments] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [, setCameraRenderTick] = useState(0);
+  const handleCameraZoomChange = useCallback(
+    (zoom: number) => {
+      onZoomChange(zoom);
+      setCameraRenderTick((tick) => tick + 1);
+    },
+    [onZoomChange],
+  );
   const { editorAppRef, editorReadyId, setWebglError, webglError } =
     useEditorApp({
       canvasRef,
@@ -225,7 +258,7 @@ export function CanvasView({
         collaborationActionHandlerRef.current(action),
       onLayersChange,
       onStrokeLayerCreated,
-      onZoomChange,
+      onZoomChange: handleCameraZoomChange,
       magicSelectionTolerance,
       selectedShape,
       selectedSelectionMode,
@@ -239,6 +272,7 @@ export function CanvasView({
       selectedTool,
     });
   const {
+    canCommentSharedProject,
     canEditSharedProject,
     currentUserIdRef,
     flushDeferredRemoteOps,
@@ -251,6 +285,7 @@ export function CanvasView({
   } = useCollaboration({
     activeDocumentTitle: activeDocument.title,
     editorAppRef,
+    onCommentEvent: handleCommentEvent,
     onDocumentLoaded: onSharedDocumentLoaded,
     onLayersChange,
     onRequestHandled: onCollaborationRequestHandled,
@@ -269,10 +304,15 @@ export function CanvasView({
   }, [handleLocalEditorAction, sendPreviewFromCurrentScene]);
 
   useEffect(() => {
-    if (!canEditSharedProject && selectedTool !== 'Pan') {
+    const canUseTool =
+      canEditSharedProject ||
+      selectedTool === 'Pan' ||
+      (selectedTool === 'Comment' && canCommentSharedProject);
+
+    if (!canUseTool) {
       onSelectTool('Pan');
     }
-  }, [canEditSharedProject, onSelectTool, selectedTool]);
+  }, [canCommentSharedProject, canEditSharedProject, onSelectTool, selectedTool]);
 
   const { canvasCursor, pointerHandlers } = useCanvasPointerInput({
     canEditDocument: canEditSharedProject,
@@ -339,6 +379,59 @@ export function CanvasView({
     projectSaveRequest,
     setWebglError,
   });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    getCurrentUser()
+      .then((user) => {
+        if (!cancelled) {
+          setCurrentUserId(user.id);
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const projectId =
+      collaborationState.mode === 'shared' ? collaborationState.projectId : null;
+
+    if (!projectId) {
+      setComments([]);
+      setActiveCommentId(null);
+      setPendingComment(null);
+      setCommentError(null);
+      return;
+    }
+
+    setIsLoadingComments(true);
+    listProjectComments(projectId)
+      .then((response) => {
+        if (!cancelled) {
+          setComments(response.comments);
+          setCommentError(null);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setCommentError(error instanceof Error ? error.message : 'Unable to load comments.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingComments(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [collaborationState.mode, collaborationState.projectId]);
 
   useEffect(() => {
     if (!clipboardCommandRequest || !editorAppRef.current) {
@@ -410,6 +503,185 @@ export function CanvasView({
     rememberActiveScene,
     setWebglError,
   ]);
+
+  function handleCommentEvent(
+    type: string,
+    payload: ProjectCommentEventPayload,
+  ) {
+    if (payload.projectId !== collaborationState.projectId) {
+      return;
+    }
+
+    setComments((current) => {
+      if (type === 'comment:delete' && payload.commentId) {
+        return removeCommentFromTree(current, payload.commentId);
+      }
+
+      if (!payload.comment) {
+        return current;
+      }
+
+      return upsertCommentInTree(current, payload.comment);
+    });
+  }
+
+  function handleCommentPointerDown(event: ReactPointerEvent<HTMLCanvasElement>) {
+    if (event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    event.currentTarget.focus();
+
+    if (collaborationState.mode !== 'shared' || !collaborationState.projectId) {
+      setCommentError('Upload the project before adding comments.');
+      return;
+    }
+
+    if (!canCommentSharedProject || !editorAppRef.current) {
+      setCommentError('Commenter access is required to add comments.');
+      return;
+    }
+
+    const point = editorAppRef.current.clientToWorldPoint(event.clientX, event.clientY);
+    const hitLayer = editorAppRef.current.hitTestLayerAtClientPoint(
+      event.clientX,
+      event.clientY,
+    );
+
+    setPendingComment({
+      layerId: hitLayer?.id ?? null,
+      text: '',
+      x: point.x,
+      y: point.y,
+    });
+    setActiveCommentId(null);
+    setCommentError(null);
+  }
+
+  async function submitPendingComment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (
+      !pendingComment ||
+      collaborationState.mode !== 'shared' ||
+      !collaborationState.projectId
+    ) {
+      return;
+    }
+
+    const text = pendingComment.text.trim();
+
+    if (!text) {
+      return;
+    }
+
+    try {
+      const comment = await createProjectComment(collaborationState.projectId, {
+        content: text,
+        layerId: pendingComment.layerId,
+        x: pendingComment.x,
+        y: pendingComment.y,
+      });
+
+      setComments((current) => upsertCommentInTree(current, comment));
+      setActiveCommentId(comment.id);
+      setPendingComment(null);
+      setCommentError(null);
+    } catch (error) {
+      setCommentError(error instanceof Error ? error.message : 'Unable to create comment.');
+    }
+  }
+
+  async function submitReply(rootComment: ProjectComment) {
+    if (collaborationState.mode !== 'shared' || !collaborationState.projectId) {
+      return;
+    }
+
+    const text = (replyDrafts[rootComment.id] ?? '').trim();
+
+    if (!text) {
+      return;
+    }
+
+    try {
+      const reply = await createProjectComment(collaborationState.projectId, {
+        content: text,
+        parentCommentId: rootComment.id,
+      });
+
+      setComments((current) => upsertCommentInTree(current, reply));
+      setReplyDrafts((current) => ({ ...current, [rootComment.id]: '' }));
+      setCommentError(null);
+    } catch (error) {
+      setCommentError(error instanceof Error ? error.message : 'Unable to reply.');
+    }
+  }
+
+  async function updateCommentText(comment: ProjectComment) {
+    if (collaborationState.mode !== 'shared' || !collaborationState.projectId) {
+      return;
+    }
+
+    const text = window.prompt('Edit comment', comment.text);
+
+    if (text === null || !text.trim()) {
+      return;
+    }
+
+    try {
+      const updated = await updateProjectComment(
+        collaborationState.projectId,
+        comment.id,
+        { text: text.trim() },
+      );
+
+      setComments((current) => upsertCommentInTree(current, updated));
+    } catch (error) {
+      setCommentError(error instanceof Error ? error.message : 'Unable to update comment.');
+    }
+  }
+
+  async function deleteComment(comment: ProjectComment) {
+    if (collaborationState.mode !== 'shared' || !collaborationState.projectId) {
+      return;
+    }
+
+    if (!window.confirm('Delete this comment?')) {
+      return;
+    }
+
+    try {
+      await deleteProjectComment(collaborationState.projectId, comment.id);
+      setComments((current) => removeCommentFromTree(current, comment.id));
+    } catch (error) {
+      setCommentError(error instanceof Error ? error.message : 'Unable to delete comment.');
+    }
+  }
+
+  async function setCommentResolved(comment: ProjectComment, resolved: boolean) {
+    if (collaborationState.mode !== 'shared' || !collaborationState.projectId) {
+      return;
+    }
+
+    try {
+      const updated = resolved
+        ? await resolveProjectComment(collaborationState.projectId, comment.id)
+        : await reopenProjectComment(collaborationState.projectId, comment.id);
+
+      setComments((current) => upsertCommentInTree(current, updated));
+    } catch (error) {
+      setCommentError(error instanceof Error ? error.message : 'Unable to update comment.');
+    }
+  }
+
+  function focusComment(comment: ProjectComment) {
+    setActiveCommentId(comment.id);
+
+    if (comment.x !== null && comment.y !== null) {
+      editorAppRef.current?.centerCameraOnWorldPoint(comment.x, comment.y);
+    }
+  }
 
   useEffect(() => {
     if (!templateSaveRequest || !editorAppRef.current) {
@@ -911,6 +1183,20 @@ export function CanvasView({
     selectionCommandRequest,
   ]);
 
+  const canvasPointerHandlers = {
+    ...pointerHandlers,
+    onPointerDown:
+      selectedTool === 'Comment'
+        ? handleCommentPointerDown
+        : pointerHandlers.onPointerDown,
+  };
+  const openComments = comments.filter((comment) => comment.status === 'open');
+  const resolvedComments = comments.filter(
+    (comment) => comment.status === 'resolved',
+  );
+  const activeComment =
+    activeCommentId ? findCommentById(comments, activeCommentId) : null;
+
   return (
     <section
       className='relative min-h-0 min-w-0 overflow-hidden bg-[#101113] bg-[length:32px_32px]'
@@ -939,7 +1225,7 @@ export function CanvasView({
               onDrop={handleCanvasDrop}
               tabIndex={0}
               style={{ cursor: getCanvasCursorStyle(canvasCursor) }}
-              {...pointerHandlers}
+              {...canvasPointerHandlers}
             />
             {webglError ? (
               <p className='absolute inset-4 m-0 grid place-items-center rounded-lg border border-[#b96a6a] bg-[rgba(28,20,20,0.94)] text-center text-[13px] font-bold text-[#ffd0d0]'>
@@ -982,10 +1268,98 @@ export function CanvasView({
                     );
                   })
               : null}
+            {collaborationState.mode === 'shared'
+              ? openComments
+                  .filter((comment) => comment.x !== null && comment.y !== null)
+                  .map((comment) => {
+                    const screen = editorAppRef.current?.worldToCanvasPoint(
+                      comment.x ?? 0,
+                      comment.y ?? 0,
+                    );
+
+                    return (
+                      <button
+                        aria-label={`Open comment by ${comment.author.displayName || comment.author.email}`}
+                        className={cn(
+                          'absolute z-[4] grid h-7 w-7 -translate-x-1/2 -translate-y-full place-items-center rounded-full border-2 border-[#101113] bg-[#f2b84b] text-[12px] font-extrabold text-[#101113] shadow-[0_8px_18px_rgba(0,0,0,0.32)] hover:bg-[#ffd37a]',
+                          activeCommentId === comment.id && 'bg-[#7ee0c7]',
+                        )}
+                        key={comment.id}
+                        onClick={() => focusComment(comment)}
+                        style={{
+                          left: screen?.x ?? 0,
+                          top: screen?.y ?? 0,
+                        }}
+                        type="button"
+                      >
+                        {comment.replies?.length ? comment.replies.length + 1 : 1}
+                      </button>
+                    );
+                  })
+              : null}
+            {pendingComment ? (
+              <form
+                className="absolute z-[5] grid w-[min(280px,calc(100%-24px))] gap-2 rounded-lg border border-[#3b424b] bg-[#17191d] p-3 shadow-[0_18px_36px_rgba(0,0,0,0.4)]"
+                onSubmit={submitPendingComment}
+                style={{
+                  left: Math.min(
+                    (editorAppRef.current?.worldToCanvasPoint(pendingComment.x, pendingComment.y).x ?? 12) + 12,
+                    9999,
+                  ),
+                  top:
+                    (editorAppRef.current?.worldToCanvasPoint(pendingComment.x, pendingComment.y).y ?? 12) +
+                    12,
+                }}
+              >
+                <textarea
+                  autoFocus
+                  className="min-h-[86px] resize-none rounded-md border border-[#30353d] bg-[#101113] p-2 text-[13px] font-bold text-[#eef1f4]"
+                  onChange={(event) =>
+                    setPendingComment((current) =>
+                      current ? { ...current, text: event.target.value } : current,
+                    )
+                  }
+                  placeholder="Add a comment"
+                  value={pendingComment.text}
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    className={commentButtonClass}
+                    onClick={() => setPendingComment(null)}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                  <button className={commentPrimaryButtonClass} type="submit">
+                    Comment
+                  </button>
+                </div>
+              </form>
+            ) : null}
           </div>
           <p className='pointer-events-none absolute left-1/2 top-12 z-[2] m-0 -translate-x-1/2 rounded-lg border border-white/10 bg-[rgba(23,25,29,0.9)] px-3 py-2 text-[13px] font-bold text-[#eef1f4]'>
             {activeDocument.title}
           </p>
+          {collaborationState.mode === 'shared' ? (
+            <CommentPanel
+              activeComment={activeComment}
+              canComment={canCommentSharedProject}
+              canModerate={collaborationState.role === 'owner' || collaborationState.role === 'editor'}
+              commentError={commentError}
+              currentUserId={currentUserId}
+              isLoading={isLoadingComments}
+              onDelete={deleteComment}
+              onEdit={updateCommentText}
+              onFocus={focusComment}
+              onReply={submitReply}
+              onResolve={(comment) => setCommentResolved(comment, true)}
+              onReopen={(comment) => setCommentResolved(comment, false)}
+              openComments={openComments}
+              replyDrafts={replyDrafts}
+              resolvedComments={resolvedComments}
+              setReplyDrafts={setReplyDrafts}
+            />
+          ) : null}
           <p className='pointer-events-none absolute bottom-[18px] right-[18px] z-[2] m-0 rounded-lg border border-white/10 bg-[rgba(23,25,29,0.9)] px-3 py-2 text-[13px] font-semibold text-[#eef1f4]'>
             Workspace - {selectedTool} tool selected
           </p>
@@ -1070,3 +1444,295 @@ function isDroppableAssetFile(file: File) {
 function isModelAssetFile(file: File) {
   return /\.(obj|mtl|zip|glb|gltf|bin|stl|ply|fbx|dae|3ds)$/iu.test(file.name);
 }
+
+function CommentPanel({
+  activeComment,
+  canComment,
+  canModerate,
+  commentError,
+  currentUserId,
+  isLoading,
+  onDelete,
+  onEdit,
+  onFocus,
+  onReply,
+  onResolve,
+  onReopen,
+  openComments,
+  replyDrafts,
+  resolvedComments,
+  setReplyDrafts,
+}: {
+  activeComment: ProjectComment | null;
+  canComment: boolean;
+  canModerate: boolean;
+  commentError: string | null;
+  currentUserId: string | null;
+  isLoading: boolean;
+  onDelete: (comment: ProjectComment) => void;
+  onEdit: (comment: ProjectComment) => void;
+  onFocus: (comment: ProjectComment) => void;
+  onReply: (comment: ProjectComment) => void;
+  onResolve: (comment: ProjectComment) => void;
+  onReopen: (comment: ProjectComment) => void;
+  openComments: ProjectComment[];
+  replyDrafts: Record<string, string>;
+  resolvedComments: ProjectComment[];
+  setReplyDrafts: Dispatch<SetStateAction<Record<string, string>>>;
+}) {
+  return (
+    <aside className="absolute bottom-[96px] right-3 top-3 z-[4] grid w-[min(340px,calc(100%-24px))] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-lg border border-[#30353d] bg-[rgba(23,25,29,0.95)] shadow-[0_18px_36px_rgba(0,0,0,0.36)]">
+      <div className="border-b border-[#30353d] px-3 py-2">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="m-0 text-[13px] font-extrabold uppercase text-[#dce1e6]">
+            Comments
+          </h2>
+          <span className="text-[11px] font-extrabold text-[#8b929b]">
+            {openComments.length} open
+          </span>
+        </div>
+        {commentError ? (
+          <p className="m-0 mt-1 text-[12px] font-bold text-[#ffd0d0]">{commentError}</p>
+        ) : null}
+      </div>
+      <div className="min-h-0 overflow-auto p-2">
+        {isLoading ? (
+          <p className={commentMutedClass}>Loading...</p>
+        ) : openComments.length === 0 ? (
+          <p className={commentMutedClass}>No open comments.</p>
+        ) : (
+          <div className="grid gap-2">
+            {openComments.map((comment) => (
+              <CommentThread
+                canComment={canComment}
+                canModerate={canModerate}
+                comment={comment}
+                currentUserId={currentUserId}
+                isActive={activeComment?.id === comment.id}
+                key={comment.id}
+                onDelete={onDelete}
+                onEdit={onEdit}
+                onFocus={onFocus}
+                onReply={onReply}
+                onResolve={onResolve}
+                replyDraft={replyDrafts[comment.id] ?? ''}
+                setReplyDraft={(value) =>
+                  setReplyDrafts((current) => ({ ...current, [comment.id]: value }))
+                }
+              />
+            ))}
+          </div>
+        )}
+        <details className="mt-2 rounded-md border border-[#30353d] bg-[#17191d]">
+          <summary className="cursor-default px-3 py-2 text-[12px] font-extrabold uppercase text-[#8b929b]">
+            Resolved ({resolvedComments.length})
+          </summary>
+          <div className="grid gap-2 border-t border-[#30353d] p-2">
+            {resolvedComments.length === 0 ? (
+              <p className={commentMutedClass}>No resolved comments.</p>
+            ) : (
+              resolvedComments.map((comment) => (
+                <CommentThread
+                  canComment={false}
+                  canModerate={canModerate}
+                  comment={comment}
+                  currentUserId={currentUserId}
+                  isActive={activeComment?.id === comment.id}
+                  key={comment.id}
+                  onDelete={onDelete}
+                  onEdit={onEdit}
+                  onFocus={onFocus}
+                  onReopen={onReopen}
+                  replyDraft=""
+                  setReplyDraft={() => undefined}
+                />
+              ))
+            )}
+          </div>
+        </details>
+      </div>
+    </aside>
+  );
+}
+
+function CommentThread({
+  canComment,
+  canModerate,
+  comment,
+  currentUserId,
+  isActive,
+  onDelete,
+  onEdit,
+  onFocus,
+  onReply,
+  onResolve,
+  onReopen,
+  replyDraft,
+  setReplyDraft,
+}: {
+  canComment: boolean;
+  canModerate: boolean;
+  comment: ProjectComment;
+  currentUserId: string | null;
+  isActive: boolean;
+  onDelete: (comment: ProjectComment) => void;
+  onEdit: (comment: ProjectComment) => void;
+  onFocus: (comment: ProjectComment) => void;
+  onReply?: (comment: ProjectComment) => void;
+  onResolve?: (comment: ProjectComment) => void;
+  onReopen?: (comment: ProjectComment) => void;
+  replyDraft: string;
+  setReplyDraft: (value: string) => void;
+}) {
+  const isAuthor = currentUserId === comment.authorUserId;
+  const canUpdateStatus = canModerate || isAuthor;
+  const canDeleteComment = canModerate || (isAuthor && comment.status === 'open');
+
+  return (
+    <article
+      className={cn(
+        'grid gap-2 rounded-md border border-[#30353d] bg-[#202329] p-2.5',
+        isActive && 'border-[#4aa391] bg-[#203731]',
+      )}
+    >
+      <button
+        className="grid gap-1 text-left"
+        onClick={() => onFocus(comment)}
+        type="button"
+      >
+        <span className="flex items-center justify-between gap-2">
+          <strong className="truncate text-[12px] text-[#eef1f4]">
+            {comment.author.displayName || comment.author.email}
+          </strong>
+          <span className="text-[10px] font-bold uppercase text-[#8b929b]">
+            {comment.layerId ? 'Layer' : 'Project'}
+          </span>
+        </span>
+        <span className="whitespace-pre-wrap text-[13px] font-semibold leading-5 text-[#dce1e6]">
+          {comment.text}
+        </span>
+      </button>
+      {comment.replies && comment.replies.length > 0 ? (
+        <div className="grid gap-1 border-l border-[#3b424b] pl-2">
+          {comment.replies.map((reply) => (
+            <div className="grid gap-0.5" key={reply.id}>
+              <span className="text-[11px] font-bold text-[#9aa1ab]">
+                {reply.author.displayName || reply.author.email}
+              </span>
+              <span className="whitespace-pre-wrap text-[12px] font-semibold leading-5 text-[#dce1e6]">
+                {reply.text}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {isAuthor && comment.status === 'open' ? (
+          <>
+            <button className={commentTinyButtonClass} onClick={() => onEdit(comment)} type="button">
+              Edit
+            </button>
+          </>
+        ) : null}
+        {canDeleteComment ? (
+          <button className={commentTinyButtonClass} onClick={() => onDelete(comment)} type="button">
+            Delete
+          </button>
+        ) : null}
+        {comment.status === 'open' && onResolve && canUpdateStatus ? (
+          <button className={commentTinyButtonClass} onClick={() => onResolve(comment)} type="button">
+            Resolve
+          </button>
+        ) : null}
+        {comment.status === 'resolved' && onReopen && canUpdateStatus ? (
+          <button className={commentTinyButtonClass} onClick={() => onReopen(comment)} type="button">
+            Reopen
+          </button>
+        ) : null}
+      </div>
+      {canComment && comment.status === 'open' && onReply ? (
+        <form
+          className="grid gap-1.5"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onReply(comment);
+          }}
+        >
+          <textarea
+            className="min-h-[58px] resize-none rounded-md border border-[#30353d] bg-[#101113] p-2 text-[12px] font-semibold text-[#eef1f4]"
+            onChange={(event) => setReplyDraft(event.target.value)}
+            placeholder="Reply"
+            value={replyDraft}
+          />
+          <button className={commentPrimaryButtonClass} type="submit">
+            Reply
+          </button>
+        </form>
+      ) : null}
+    </article>
+  );
+}
+
+function upsertCommentInTree(comments: ProjectComment[], comment: ProjectComment) {
+  if (comment.parentCommentId) {
+    return comments.map((root) =>
+      root.id === comment.parentCommentId
+        ? { ...root, replies: upsertById(root.replies ?? [], comment) }
+        : root,
+    );
+  }
+
+  const existing = comments.find((root) => root.id === comment.id);
+  const nextComment = existing
+    ? { ...comment, replies: comment.replies?.length ? comment.replies : existing.replies }
+    : comment;
+
+  return upsertById(comments, nextComment);
+}
+
+function removeCommentFromTree(comments: ProjectComment[], commentId: string) {
+  return comments
+    .filter((comment) => comment.id !== commentId)
+    .map((comment) => ({
+      ...comment,
+      replies: (comment.replies ?? []).filter((reply) => reply.id !== commentId),
+    }));
+}
+
+function findCommentById(comments: ProjectComment[], commentId: string): ProjectComment | null {
+  for (const comment of comments) {
+    if (comment.id === commentId) {
+      return comment;
+    }
+
+    const reply = (comment.replies ?? []).find((candidate) => candidate.id === commentId);
+
+    if (reply) {
+      return reply;
+    }
+  }
+
+  return null;
+}
+
+function upsertById<T extends { id: string }>(items: T[], nextItem: T) {
+  const index = items.findIndex((item) => item.id === nextItem.id);
+
+  if (index < 0) {
+    return [...items, nextItem];
+  }
+
+  return items.map((item, itemIndex) => (itemIndex === index ? nextItem : item));
+}
+
+const commentMutedClass =
+  'm-0 rounded-md border border-[#30353d] bg-[#17191d] p-2.5 text-[12px] font-bold text-[#8b929b]';
+
+const commentButtonClass =
+  'rounded-md border border-[#333941] bg-[#202329] px-2.5 py-1.5 text-[12px] font-bold text-[#dce1e6] hover:border-[#4c535c] hover:bg-[#252930]';
+
+const commentPrimaryButtonClass =
+  'rounded-md border border-[#4aa391] bg-[#203731] px-2.5 py-1.5 text-[12px] font-bold text-[#eef1f4] hover:bg-[#25453e]';
+
+const commentTinyButtonClass =
+  'rounded-md border border-[#333941] bg-[#171a1f] px-2 py-1 text-[11px] font-bold text-[#cfd4da] hover:border-[#4aa391] hover:bg-[#203731]';

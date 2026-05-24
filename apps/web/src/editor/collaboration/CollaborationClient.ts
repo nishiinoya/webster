@@ -2,6 +2,7 @@ import { io } from "socket.io-client";
 import type { Socket } from "socket.io-client";
 import type {
   AppliedProjectOperation,
+  ProjectCommentEventPayload,
   ProjectErrorPayload,
   ProjectOperation,
   SharedProjectPresence,
@@ -20,6 +21,7 @@ type CollaborationClientOptions = {
   onReadyToResend: () => void;
   onState: (payload: SharedProjectStatePayload) => void;
   onStatusChange: (status: CollaborationConnectionStatus) => void;
+  onCommentEvent?: (type: string, payload: ProjectCommentEventPayload) => void;
   onPreviewOperation: (operation: ProjectOperation) => void;
   projectId: string;
   webSocketUrl: string;
@@ -121,6 +123,18 @@ export class CollaborationClient {
     socket.on("project:error", (payload: ProjectErrorPayload) => {
       this.options.onError(payload);
     });
+
+    for (const eventName of [
+      "comment:create",
+      "comment:update",
+      "comment:delete",
+      "comment:resolve",
+      "comment:reopen"
+    ] as const) {
+      socket.on(eventName, (payload: ProjectCommentEventPayload) => {
+        this.options.onCommentEvent?.(eventName, payload);
+      });
+    }
   }
 
   disconnect() {

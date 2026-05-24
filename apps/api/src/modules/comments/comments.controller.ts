@@ -64,4 +64,22 @@ export class CommentsController {
       currentUser,
     );
   }
+
+  @Post(':commentId/resolve')
+  resolveComment(
+    @Param('id') projectId: string,
+    @Param('commentId') commentId: string,
+    @CurrentUser() currentUser: AuthUser,
+  ) {
+    return this.commentsService.resolveComment(projectId, commentId, currentUser);
+  }
+
+  @Post(':commentId/reopen')
+  reopenComment(
+    @Param('id') projectId: string,
+    @Param('commentId') commentId: string,
+    @CurrentUser() currentUser: AuthUser,
+  ) {
+    return this.commentsService.reopenComment(projectId, commentId, currentUser);
+  }
 }

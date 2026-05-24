@@ -17,6 +17,7 @@ export type ToolDefinition = {
 };
 
 type ToolsPanelProps = {
+  canCommentDocument: boolean;
   canEditDocument: boolean;
   onSelectTool: (tool: string) => void;
   onSelectShape: (shape: ShapeKind) => void;
@@ -27,6 +28,7 @@ type ToolsPanelProps = {
 
 export function ToolsPanel({
   canEditDocument,
+  canCommentDocument,
   onSelectShape,
   onSelectTool,
   selectedShape,
@@ -45,6 +47,7 @@ export function ToolsPanel({
         onSelectShape={onSelectShape}
         onSelectTool={onSelectTool}
         canEditDocument={canEditDocument}
+        canCommentDocument={canCommentDocument}
         selectedShape={selectedShape}
         selectedTool={selectedTool}
         tools={availableTools}
@@ -58,6 +61,7 @@ export function ToolsPanel({
             onSelectShape={onSelectShape}
             onSelectTool={onSelectTool}
             canEditDocument={canEditDocument}
+            canCommentDocument={canCommentDocument}
             selectedShape={selectedShape}
             selectedTool={selectedTool}
             tools={laterTools}
@@ -72,6 +76,7 @@ function ToolGroup({
   onSelectTool,
   onSelectShape,
   canEditDocument,
+  canCommentDocument,
   selectedShape,
   selectedTool,
   tools,
@@ -79,6 +84,7 @@ function ToolGroup({
   onSelectTool: (tool: string) => void;
   onSelectShape: (shape: ShapeKind) => void;
   canEditDocument: boolean;
+  canCommentDocument: boolean;
   selectedShape: ShapeKind;
   selectedTool: string;
   tools: ToolDefinition[];
@@ -87,7 +93,10 @@ function ToolGroup({
     <div className='grid place-items-center'>
       {tools.map((tool) => {
         const isDisabled =
-          tool.status === 'later' || (!canEditDocument && tool.value !== 'Pan');
+          tool.status === 'later' ||
+          (!canEditDocument &&
+            tool.value !== 'Pan' &&
+            !(canCommentDocument && tool.value === 'Comment'));
 
         return (
           <div className='grid gap-1.5' key={tool.value}>

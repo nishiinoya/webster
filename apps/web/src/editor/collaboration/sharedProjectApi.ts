@@ -1,4 +1,5 @@
 import type {
+  ProjectComment,
   SharedProjectAssetReference,
   SharedProjectLoadResponse,
   SharedProjectSnapshotSummary,
@@ -224,14 +225,36 @@ export function toAbsoluteAvatarUrl(avatarUrl: string | null | undefined) {
 export type ProjectSummary = {
   id: string;
   projectName: string;
-  mimeType: string;
-  sizeBytes: string;
   updatedAt: string;
-  role: "owner" | "editor" | "viewer";
+  role: "owner" | "editor" | "viewer" | "commenter";
+  owner?: {
+    id: string;
+    email: string;
+    displayName: string | null;
+  };
+};
+
+export type ProjectInviteSummary = {
+  id: string;
+  projectId: string;
+  projectName: string;
+  invitedEmail: string | null;
+  invitedByUser: {
+    id: string;
+    email: string;
+    displayName: string | null;
+  };
+  permission: ProjectAccessPermission;
+  expiresAt: string | null;
+  createdAt: string;
 };
 
 export async function listProjects() {
-  return fetchJson<{ projects: ProjectSummary[] }>("/projects");
+  return fetchJson<{
+    owned: ProjectSummary[];
+    sharedWithMe: ProjectSummary[];
+    pendingInvites: ProjectInviteSummary[];
+  }>("/projects");
 }
 
 export type ProjectAccessPermission = 'viewer' | 'editor' | 'commenter';
@@ -240,11 +263,33 @@ export type ProjectAccessEntry = {
   id: string;
   permission: ProjectAccessPermission;
   expiresAt: string | null;
+  createdAt?: string;
+  updatedAt?: string;
   sharedWithUser: { id: string; email: string; displayName: string | null } | null;
 };
 
+export type ProjectPendingInviteEntry = {
+  id: string;
+  invitedEmail: string | null;
+  invitedByUser: { id: string; email: string; displayName: string | null };
+  permission: ProjectAccessPermission;
+  expiresAt: string | null;
+  createdAt: string;
+  status: "pending" | "accepted" | "revoked" | "expired";
+};
+
+export type ProjectLinkAccess = {
+  mode: "restricted" | "anyone_with_link";
+  permission: ProjectAccessPermission;
+  updatedAt: string | null;
+};
+
 export async function listProjectAccesses(projectId: string) {
-  return fetchJson<{ accesses: ProjectAccessEntry[] }>(
+  return fetchJson<{
+    accesses: ProjectAccessEntry[];
+    pendingInvites: ProjectPendingInviteEntry[];
+    linkAccess: ProjectLinkAccess;
+  }>(
     `/projects/${encodeURIComponent(projectId)}/accesses`
   );
 }
@@ -254,7 +299,11 @@ export async function grantProjectAccess(
   email: string,
   permission: ProjectAccessPermission
 ) {
-  return fetchJson<ProjectAccessEntry>(`/projects/${encodeURIComponent(projectId)}/accesses`, {
+  return fetchJson<{
+    access: ProjectAccessEntry | null;
+    invite: ProjectPendingInviteEntry | null;
+    inviteLink: string | null;
+  }>(`/projects/${encodeURIComponent(projectId)}/accesses`, {
     body: JSON.stringify({ email, permission }),
     headers: { "Content-Type": "application/json" },
     method: "POST"
@@ -270,6 +319,114 @@ export async function revokeProjectAccess(projectId: string, accessId: string) {
   if (!response.ok && response.status !== 204) {
     throw new Error(await readApiError(response, "Unable to revoke access."));
   }
+}
+
+export async function revokeProjectInvite(projectId: string, inviteId: string) {
+  const response = await authedFetch(
+    `${getSharedProjectApiBaseUrl()}/projects/${encodeURIComponent(projectId)}/accesses/invites/${encodeURIComponent(inviteId)}`,
+    { method: "DELETE" }
+  );
+
+  if (!response.ok && response.status !== 204) {
+    throw new Error(await readApiError(response, "Unable to revoke invite."));
+  }
+}
+
+export async function updateProjectLinkAccess(
+  projectId: string,
+  input: { mode: ProjectLinkAccess["mode"]; permission: ProjectAccessPermission }
+) {
+  return fetchJson<{ linkAccess: ProjectLinkAccess; inviteLink: string | null }>(
+    `/projects/${encodeURIComponent(projectId)}/accesses/link-access`,
+    {
+      body: JSON.stringify(input),
+      headers: { "Content-Type": "application/json" },
+      method: "PATCH"
+    }
+  );
+}
+
+export async function acceptProjectInvite(token: string) {
+  return fetchJson<{ projectId: string; projectName: string; role: ProjectAccessPermission }>(
+    "/invites/accept",
+    {
+      body: JSON.stringify({ token }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST"
+    }
+  );
+}
+
+export async function acceptPendingProjectInvite(inviteId: string) {
+  return fetchJson<{ projectId: string; projectName: string; role: ProjectAccessPermission }>(
+    `/projects/invites/${encodeURIComponent(inviteId)}/accept`,
+    { method: "POST" }
+  );
+}
+
+export async function listProjectComments(projectId: string) {
+  return fetchJson<{ comments: ProjectComment[] }>(
+    `/projects/${encodeURIComponent(projectId)}/comments`
+  );
+}
+
+export async function createProjectComment(
+  projectId: string,
+  input: {
+    content: string;
+    layerId?: string | null;
+    localX?: number | null;
+    localY?: number | null;
+    parentCommentId?: string | null;
+    x?: number | null;
+    y?: number | null;
+  }
+) {
+  return fetchJson<ProjectComment>(`/projects/${encodeURIComponent(projectId)}/comments`, {
+    body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+    method: "POST"
+  });
+}
+
+export async function updateProjectComment(
+  projectId: string,
+  commentId: string,
+  input: { text?: string; content?: string; isResolved?: boolean }
+) {
+  return fetchJson<ProjectComment>(
+    `/projects/${encodeURIComponent(projectId)}/comments/${encodeURIComponent(commentId)}`,
+    {
+      body: JSON.stringify(input),
+      headers: { "Content-Type": "application/json" },
+      method: "PATCH"
+    }
+  );
+}
+
+export async function deleteProjectComment(projectId: string, commentId: string) {
+  const response = await authedFetch(
+    `${getSharedProjectApiBaseUrl()}/projects/${encodeURIComponent(projectId)}/comments/${encodeURIComponent(commentId)}`,
+    { method: "DELETE" }
+  );
+
+  if (!response.ok && response.status !== 204) {
+    throw new Error(await readApiError(response, "Unable to delete comment."));
+  }
+}
+
+export async function resolveProjectComment(projectId: string, commentId: string) {
+  return fetchJson<ProjectComment>(
+    `/projects/${encodeURIComponent(projectId)}/comments/${encodeURIComponent(commentId)}/resolve`,
+    { method: "POST" }
+  );
+}
+
+export async function reopenProjectComment(projectId: string, commentId: string) {
+  return fetchJson<ProjectComment>(
+    `/projects/${encodeURIComponent(projectId)}/comments/${encodeURIComponent(commentId)}/reopen`,
+    { method: "POST" }
+  );
 }
 
 export async function restoreProjectSnapshot(projectId: string, snapshotId: string) {

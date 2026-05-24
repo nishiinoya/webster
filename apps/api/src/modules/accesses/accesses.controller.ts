@@ -15,6 +15,7 @@ import { AccessesService } from './accesses.service';
 import { GrantAccessDto } from './dto/grant-access.dto';
 import { UpdateAccessDto } from './dto/update-access.dto';
 import { CreatePublicLinkDto } from './dto/create-public-link.dto';
+import { UpdateLinkAccessDto } from './dto/update-link-access.dto';
 import { CurrentUser } from '../../common/auth/current-user.decorator';
 import { AuthUser } from '../../common/types/auth-user';
 
@@ -35,8 +36,29 @@ export class AccessesController {
     @Param('id') projectId: string,
     @Body() dto: GrantAccessDto,
     @CurrentUser() currentUser: AuthUser,
+    @Req() req: Request,
   ) {
-    return this.accessesService.grantAccess(projectId, dto, currentUser);
+    return this.accessesService.grantAccess(
+      projectId,
+      dto,
+      currentUser,
+      getAppBaseUrl(req),
+    );
+  }
+
+  @Patch('link-access')
+  updateLinkAccess(
+    @Param('id') projectId: string,
+    @Body() dto: UpdateLinkAccessDto,
+    @CurrentUser() currentUser: AuthUser,
+    @Req() req: Request,
+  ) {
+    return this.accessesService.updateLinkAccess(
+      projectId,
+      dto,
+      currentUser,
+      getAppBaseUrl(req),
+    );
   }
 
   @Patch(':accessId')
@@ -64,6 +86,16 @@ export class AccessesController {
     return this.accessesService.revokeAccess(projectId, accessId, currentUser);
   }
 
+  @Delete('invites/:inviteId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  revokeInvite(
+    @Param('id') projectId: string,
+    @Param('inviteId') inviteId: string,
+    @CurrentUser() currentUser: AuthUser,
+  ) {
+    return this.accessesService.revokeInvite(projectId, inviteId, currentUser);
+  }
+
   @Post('public-link')
   createPublicLink(
     @Param('id') projectId: string,
@@ -75,7 +107,30 @@ export class AccessesController {
       projectId,
       dto,
       currentUser,
-      `${req.protocol}://${req.get('host')}`,
+      getAppBaseUrl(req),
     );
   }
+}
+
+@Controller('invites')
+export class InviteAcceptController {
+  constructor(private readonly accessesService: AccessesService) {}
+
+  @Post('accept')
+  acceptInvite(
+    @Body() body: { token?: string },
+    @CurrentUser() currentUser: AuthUser,
+  ) {
+    return this.accessesService.acceptInviteToken(body.token ?? '', currentUser);
+  }
+}
+
+function getAppBaseUrl(req: Request) {
+  const corsOrigin = process.env.CORS_ORIGIN?.split(',')[0]?.trim();
+
+  if (corsOrigin) {
+    return corsOrigin.replace(/\/+$/u, '');
+  }
+
+  return `${req.protocol}://${req.get('host')}`;
 }

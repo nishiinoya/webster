@@ -38,9 +38,10 @@ export type WebsterSerializedLayer = Record<string, unknown> & {
   type: string;
 };
 
-export type ProjectRole = "owner" | "editor" | "viewer";
+export type ProjectRole = "owner" | "editor" | "viewer" | "commenter";
 
 export type ProjectRoleCapabilities = {
+  canComment: boolean;
   canCreateSnapshots: boolean;
   canDownloadWebster: boolean;
   canEdit: boolean;
@@ -50,6 +51,7 @@ export type ProjectRoleCapabilities = {
 
 export const projectRoleCapabilities: Record<ProjectRole, ProjectRoleCapabilities> = {
   owner: {
+    canComment: true,
     canCreateSnapshots: true,
     canDownloadWebster: true,
     canEdit: true,
@@ -57,13 +59,23 @@ export const projectRoleCapabilities: Record<ProjectRole, ProjectRoleCapabilitie
     canRestoreSnapshots: true
   },
   editor: {
+    canComment: true,
     canCreateSnapshots: true,
     canDownloadWebster: true,
     canEdit: true,
     canManageMembers: false,
     canRestoreSnapshots: false
   },
+  commenter: {
+    canComment: true,
+    canCreateSnapshots: false,
+    canDownloadWebster: false,
+    canEdit: false,
+    canManageMembers: false,
+    canRestoreSnapshots: false
+  },
   viewer: {
+    canComment: false,
     canCreateSnapshots: false,
     canDownloadWebster: false,
     canEdit: false,
@@ -130,6 +142,42 @@ export type SharedProjectStatePayload = {
   snapshot: WebsterProjectManifest;
   snapshots?: SharedProjectSnapshotSummary[];
   users?: SharedProjectPresence[];
+};
+
+export type ProjectCommentStatus = "open" | "resolved";
+
+export type ProjectCommentAuthor = {
+  displayName: string | null;
+  email: string;
+  id: string;
+};
+
+export type ProjectComment = {
+  author: ProjectCommentAuthor;
+  authorUserId: string;
+  createdAt: string;
+  deletedAt: string | null;
+  id: string;
+  layerId: string | null;
+  localX?: number | null;
+  localY?: number | null;
+  parentCommentId: string | null;
+  projectId: string;
+  replies?: ProjectComment[];
+  resolvedAt: string | null;
+  resolvedByUser?: ProjectCommentAuthor | null;
+  resolvedByUserId: string | null;
+  status: ProjectCommentStatus;
+  text: string;
+  updatedAt: string;
+  x: number | null;
+  y: number | null;
+};
+
+export type ProjectCommentEventPayload = {
+  comment?: ProjectComment;
+  commentId?: string;
+  projectId: string;
 };
 
 export type ProjectOperationPhase = "preview" | "commit";
@@ -223,6 +271,11 @@ export type ClientToServerCollaborationEvent =
     };
 
 export type ServerToClientCollaborationEvent =
+  | { payload: ProjectCommentEventPayload; type: "comment:create" }
+  | { payload: ProjectCommentEventPayload; type: "comment:update" }
+  | { payload: ProjectCommentEventPayload; type: "comment:delete" }
+  | { payload: ProjectCommentEventPayload; type: "comment:resolve" }
+  | { payload: ProjectCommentEventPayload; type: "comment:reopen" }
   | { payload: SharedProjectStatePayload; type: "project:state" }
   | { payload: AppliedProjectOperation; type: "operation:applied" }
   | { payload: ProjectOperation; type: "operation:preview" }

@@ -24,6 +24,7 @@ type ToolbarProps = {
   canEditDocument: boolean;
   canDownloadSharedProject: boolean;
   canGroupSelectedLayers: boolean;
+  canManageSharing: boolean;
   canRedo: boolean;
   canUndo: boolean;
   canvasSize: { height: number; width: number } | null;
@@ -77,6 +78,7 @@ type ToolbarProps = {
   saveStatus: SaveStatus;
   onlineUserCount: number;
   pendingCommitCount: number;
+  projectStorageLabel: string;
   projectRole: string | null;
   selectedLayer: LayerSummary | null;
   selectedSelectionMode: SelectionMode;
@@ -155,6 +157,7 @@ export function Toolbar({
   canEditDocument,
   canDownloadSharedProject,
   canGroupSelectedLayers,
+  canManageSharing,
   canRedo,
   canUndo,
   canvasSize,
@@ -204,6 +207,7 @@ export function Toolbar({
   saveStatus,
   onlineUserCount,
   pendingCommitCount,
+  projectStorageLabel,
   projectRole,
   selectedLayer,
   selectedSelectionMode,
@@ -382,13 +386,19 @@ export function Toolbar({
         >
           W
         </span>
-        <div>
+        <div className='min-w-0'>
           <p className='m-0 mb-0.5 text-[11px] font-bold uppercase tracking-normal text-[#8b929b]'>
             Webster
           </p>
-          <h1 className='m-0 truncate text-[17px] font-bold tracking-normal text-[#f2f4f7]'>
-            {documentTitle}
-          </h1>
+          <div className='flex min-w-0 flex-wrap items-center gap-1.5'>
+            <h1 className='m-0 max-w-[260px] truncate text-[17px] font-bold tracking-normal text-[#f2f4f7]'>
+              {documentTitle}
+            </h1>
+            <span className={titleBadgeClass}>{projectStorageLabel}</span>
+            {projectRole ? (
+              <span className={titleBadgeClass}>{capitalizeRole(projectRole)}</span>
+            ) : null}
+          </div>
         </div>
       </div>
       <nav
@@ -465,14 +475,14 @@ export function Toolbar({
             </button>
             <button
               className={toolbarMenuItemClass}
-              disabled={!canEditDocument}
+              disabled={isSharedMode ? !canManageSharing : !canEditDocument}
               onClick={(event) => {
                 closeMenu(event);
                 onShareProject();
               }}
               type='button'
             >
-              {isSharedMode ? 'Share project...' : 'Add to cloud...'}
+              {isSharedMode ? 'Share project...' : 'Upload & share...'}
             </button>
             <button
               className={toolbarMenuItemClass}
@@ -1670,6 +1680,9 @@ const maskBrushInputClass =
 const statusPillClass =
   'rounded-lg border border-[#33373d] bg-[#22252a] px-2.5 py-[7px]';
 
+const titleBadgeClass =
+  'rounded-md border border-[#33373d] bg-[#22252a] px-2 py-0.5 text-[10px] font-extrabold uppercase text-[#aeb6bf]';
+
 const statusButtonClass =
   'rounded-lg border border-[#33373d] bg-[#22252a] px-2.5 py-[7px] text-[#c9cdd2] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]';
 
@@ -1682,6 +1695,10 @@ function getAvatarInitials(name: string) {
     return parts[0].slice(0, 2).toUpperCase();
   }
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function capitalizeRole(role: string) {
+  return role.charAt(0).toUpperCase() + role.slice(1);
 }
 
 function getSaveStatusLabel(status: SaveStatus) {

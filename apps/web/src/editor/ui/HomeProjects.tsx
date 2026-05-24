@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
+  acceptPendingProjectInvite,
   listProjects,
+  type ProjectInviteSummary,
   type ProjectSummary
 } from "../collaboration/sharedProjectApi";
 import {
@@ -12,24 +14,35 @@ type HomeProjectsProps = {
   onOpenProject: (projectId: string, projectName: string) => void;
 };
 
-type Tab = "recent" | "all";
-
-const ALL_PAGE_SIZE = 8;
+type Tab = "recent" | "owned" | "shared" | "invites";
 
 export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
   const [tab, setTab] = useState<Tab>("recent");
   const [recent, setRecent] = useState<RecentSharedProject[]>([]);
-  const [allProjects, setAllProjects] = useState<ProjectSummary[]>([]);
-  const [isLoadingAll, setIsLoadingAll] = useState(true);
-  const [allError, setAllError] = useState<string | null>(null);
-  const [page, setPage] = useState(0);
+  const [owned, setOwned] = useState<ProjectSummary[]>([]);
+  const [sharedWithMe, setSharedWithMe] = useState<ProjectSummary[]>([]);
+  const [pendingInvites, setPendingInvites] = useState<ProjectInviteSummary[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [acceptingInviteId, setAcceptingInviteId] = useState<string | null>(null);
 
-  const pageCount = Math.max(1, Math.ceil(allProjects.length / ALL_PAGE_SIZE));
-  const currentPage = Math.min(page, pageCount - 1);
-  const pageProjects = allProjects.slice(
-    currentPage * ALL_PAGE_SIZE,
-    currentPage * ALL_PAGE_SIZE + ALL_PAGE_SIZE
-  );
+  const projectsById = useMemo(() => {
+    const map = new Map<string, ProjectSummary>();
+
+    for (const project of [...owned, ...sharedWithMe]) {
+      map.set(project.id, project);
+    }
+
+    return map;
+  }, [owned, sharedWithMe]);
+
+  const recentProjects = recent
+    .map((entry) => {
+      const project = projectsById.get(entry.projectId);
+
+      return project ? { ...project, openedAt: entry.openedAt } : null;
+    })
+    .filter((project): project is ProjectSummary & { openedAt: number } => Boolean(project));
 
   useEffect(() => {
     setRecent(listRecentlyOpenedProjects(10));
@@ -38,133 +51,201 @@ export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
   useEffect(() => {
     let cancelled = false;
 
-    listProjects()
-      .then((response) => {
+    loadCloudProjects();
+
+    async function loadCloudProjects() {
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const response = await listProjects();
+
         if (!cancelled) {
-          setAllProjects(response.projects);
+          setOwned(response.owned);
+          setSharedWithMe(response.sharedWithMe);
+          setPendingInvites(response.pendingInvites);
         }
-      })
-      .catch((error) => {
+      } catch (err) {
         if (!cancelled) {
-          setAllError(error instanceof Error ? error.message : "Unable to load projects.");
+          setError(err instanceof Error ? err.message : "Unable to load projects.");
         }
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) {
-          setIsLoadingAll(false);
+          setIsLoading(false);
         }
-      });
+      }
+    }
 
     return () => {
       cancelled = true;
     };
   }, []);
 
+  async function acceptInvite(invite: ProjectInviteSummary) {
+    setAcceptingInviteId(invite.id);
+    setError(null);
+
+    try {
+      const accepted = await acceptPendingProjectInvite(invite.id);
+
+      setPendingInvites((current) => current.filter((item) => item.id !== invite.id));
+      onOpenProject(accepted.projectId, accepted.projectName);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to accept invite.");
+    } finally {
+      setAcceptingInviteId(null);
+    }
+  }
+
   return (
-    <div className="grid w-[min(620px,100%)] gap-3 text-left">
-      <div className="flex items-center gap-2">
-        <button
-          aria-pressed={tab === "recent"}
-          className={tabClass(tab === "recent")}
-          onClick={() => setTab("recent")}
-          type="button"
-        >
-          Recent cloud
-        </button>
-        <button
-          aria-pressed={tab === "all"}
-          className={tabClass(tab === "all")}
-          onClick={() => setTab("all")}
-          type="button"
-        >
-          All cloud
-        </button>
+    <div className="grid w-[min(680px,100%)] gap-3 text-left">
+      <div className="flex flex-wrap items-center gap-2">
+        <ProjectTab active={tab === "recent"} onClick={() => setTab("recent")}>
+          Recent
+        </ProjectTab>
+        <ProjectTab active={tab === "owned"} onClick={() => setTab("owned")}>
+          My projects
+        </ProjectTab>
+        <ProjectTab active={tab === "shared"} onClick={() => setTab("shared")}>
+          Shared with me
+        </ProjectTab>
+        <ProjectTab active={tab === "invites"} onClick={() => setTab("invites")}>
+          Invites
+        </ProjectTab>
       </div>
 
-      {tab === "recent" ? (
-        recent.length > 0 ? (
-          <div className="grid gap-2">
-            {recent.map((entry) => (
-              <ProjectRow
-                key={entry.projectId}
-                onOpen={() => onOpenProject(entry.projectId, entry.projectName)}
-                subtitle={formatWhen(entry.openedAt)}
-                title={entry.projectName}
-              />
-            ))}
-          </div>
+      {isLoading ? (
+        <EmptyNote>Loading...</EmptyNote>
+      ) : error ? (
+        <EmptyNote tone="error">{error}</EmptyNote>
+      ) : tab === "recent" ? (
+        recentProjects.length > 0 ? (
+          <ProjectList
+            projects={recentProjects}
+            getSubtitle={(project) => formatWhen(project.openedAt)}
+            onOpenProject={onOpenProject}
+          />
         ) : (
           <EmptyNote>No cloud projects opened here yet.</EmptyNote>
         )
-      ) : (
+      ) : tab === "owned" ? (
+        owned.length > 0 ? (
+          <ProjectList
+            projects={owned}
+            getSubtitle={(project) => formatWhen(Date.parse(project.updatedAt))}
+            onOpenProject={onOpenProject}
+          />
+        ) : (
+          <EmptyNote>No cloud projects yet.</EmptyNote>
+        )
+      ) : tab === "shared" ? (
+        sharedWithMe.length > 0 ? (
+          <ProjectList
+            projects={sharedWithMe}
+            getSubtitle={(project) =>
+              `${formatWhen(Date.parse(project.updatedAt))}${
+                project.owner ? ` by ${project.owner.displayName || project.owner.email}` : ""
+              }`
+            }
+            onOpenProject={onOpenProject}
+          />
+        ) : (
+          <EmptyNote>No shared projects yet.</EmptyNote>
+        )
+      ) : pendingInvites.length > 0 ? (
         <div className="grid gap-2">
-          {isLoadingAll ? (
-            <EmptyNote>Loading...</EmptyNote>
-          ) : allError ? (
-            <EmptyNote tone="error">{allError}</EmptyNote>
-          ) : allProjects.length > 0 ? (
-            <>
-              {pageProjects.map((project) => (
-                <ProjectRow
-                  key={project.id}
-                  onOpen={() => onOpenProject(project.id, project.projectName)}
-                  subtitle={`${capitalize(project.role)} · ${formatWhen(Date.parse(project.updatedAt))}`}
-                  title={project.projectName}
-                />
-              ))}
-              {pageCount > 1 ? (
-                <div className="mt-1 flex items-center justify-between gap-3">
-                  <button
-                    className={pagerClass}
-                    disabled={currentPage === 0}
-                    onClick={() => setPage((p) => Math.max(0, p - 1))}
-                    type="button"
-                  >
-                    Prev
-                  </button>
-                  <span className="text-[12px] font-bold text-[#8b929b]">
-                    Page {currentPage + 1} of {pageCount}
-                  </span>
-                  <button
-                    className={pagerClass}
-                    disabled={currentPage >= pageCount - 1}
-                    onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
-                    type="button"
-                  >
-                    Next
-                  </button>
-                </div>
-              ) : null}
-            </>
-          ) : (
-            <EmptyNote>No cloud projects yet.</EmptyNote>
-          )}
+          {pendingInvites.map((invite) => (
+            <InviteRow
+              invite={invite}
+              isAccepting={acceptingInviteId === invite.id}
+              key={invite.id}
+              onAccept={() => acceptInvite(invite)}
+            />
+          ))}
         </div>
+      ) : (
+        <EmptyNote>No pending invites.</EmptyNote>
       )}
+    </div>
+  );
+}
+
+function ProjectList<T extends ProjectSummary>({
+  getSubtitle,
+  onOpenProject,
+  projects
+}: {
+  getSubtitle: (project: T) => string;
+  onOpenProject: (projectId: string, projectName: string) => void;
+  projects: T[];
+}) {
+  return (
+    <div className="grid gap-2">
+      {projects.map((project) => (
+        <ProjectRow
+          key={project.id}
+          onOpen={() => onOpenProject(project.id, project.projectName)}
+          project={project}
+          subtitle={getSubtitle(project)}
+        />
+      ))}
     </div>
   );
 }
 
 function ProjectRow({
   onOpen,
-  subtitle,
-  title
+  project,
+  subtitle
 }: {
   onOpen: () => void;
+  project: ProjectSummary;
   subtitle: string;
-  title: string;
 }) {
   return (
     <button
-      className="flex min-h-[52px] w-full items-center justify-between gap-4 rounded-lg border border-[#30353d] bg-[#17191d] px-3 py-2.5 text-left font-bold text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]"
+      className="grid min-h-[58px] w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-4 rounded-lg border border-[#30353d] bg-[#17191d] px-3 py-2.5 text-left font-bold text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]"
       onClick={onOpen}
       type="button"
     >
-      <span className="truncate">{title}</span>
-      <strong className="whitespace-nowrap text-xs font-bold text-[#9aa1ab]">
-        {subtitle}
-      </strong>
+      <span className="min-w-0">
+        <span className="block truncate">{project.projectName}</span>
+        <span className="block truncate text-[12px] text-[#8b929b]">{subtitle}</span>
+      </span>
+      <RoleBadge role={project.role} />
     </button>
+  );
+}
+
+function InviteRow({
+  invite,
+  isAccepting,
+  onAccept
+}: {
+  invite: ProjectInviteSummary;
+  isAccepting: boolean;
+  onAccept: () => void;
+}) {
+  return (
+    <div className="grid min-h-[62px] grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-[#30353d] bg-[#17191d] px-3 py-2.5">
+      <span className="min-w-0">
+        <span className="block truncate font-bold text-[#eef1f4]">{invite.projectName}</span>
+        <span className="block truncate text-[12px] font-bold text-[#8b929b]">
+          From {invite.invitedByUser.displayName || invite.invitedByUser.email} - {formatWhen(Date.parse(invite.createdAt))}
+        </span>
+      </span>
+      <span className="flex items-center gap-2">
+        <RoleBadge role={invite.permission} />
+        <button
+          className={pagerClass}
+          disabled={isAccepting}
+          onClick={onAccept}
+          type="button"
+        >
+          {isAccepting ? "Accepting..." : "Accept"}
+        </button>
+      </span>
+    </div>
   );
 }
 
@@ -186,8 +267,37 @@ function EmptyNote({
   );
 }
 
+function ProjectTab({
+  active,
+  children,
+  onClick
+}: {
+  active: boolean;
+  children: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      aria-pressed={active}
+      className={tabClass(active)}
+      onClick={onClick}
+      type="button"
+    >
+      {children}
+    </button>
+  );
+}
+
+function RoleBadge({ role }: { role: ProjectSummary["role"] | ProjectInviteSummary["permission"] }) {
+  return (
+    <strong className="whitespace-nowrap rounded-md border border-[#3b424b] bg-[#202329] px-2 py-1 text-[11px] font-extrabold uppercase text-[#cfd4da]">
+      {capitalize(role)}
+    </strong>
+  );
+}
+
 const pagerClass =
-  "rounded-md border border-[#30353d] bg-[#17191d] px-3 py-1.5 text-[12px] font-bold text-[#dce1e6] hover:border-[#4aa391] disabled:opacity-40 disabled:hover:border-[#30353d]";
+  "rounded-md border border-[#30353d] bg-[#202329] px-3 py-1.5 text-[12px] font-bold text-[#dce1e6] hover:border-[#4aa391] disabled:opacity-40 disabled:hover:border-[#30353d]";
 
 function tabClass(active: boolean) {
   return `rounded-lg border px-3 py-2 text-[13px] font-bold ${

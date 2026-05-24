@@ -110,12 +110,20 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
           data: { createdBy: bySubject.id },
         });
         await tx.projectComment.updateMany({
-          where: { userId: byEmail.id },
-          data: { userId: bySubject.id },
+          where: { authorUserId: byEmail.id },
+          data: { authorUserId: bySubject.id },
         });
         await tx.projectComment.updateMany({
-          where: { resolvedBy: byEmail.id },
-          data: { resolvedBy: bySubject.id },
+          where: { resolvedByUserId: byEmail.id },
+          data: { resolvedByUserId: bySubject.id },
+        });
+        await tx.projectInvite.updateMany({
+          where: { invitedByUserId: byEmail.id },
+          data: { invitedByUserId: bySubject.id },
+        });
+        await tx.projectInvite.updateMany({
+          where: { acceptedByUserId: byEmail.id },
+          data: { acceptedByUserId: bySubject.id },
         });
         await tx.projectSnapshot.updateMany({
           where: { createdBy: byEmail.id },

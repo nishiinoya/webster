@@ -1,7 +1,7 @@
 import {
   IsEmail,
-  IsEnum,
   IsISO8601,
+  IsIn,
   IsOptional,
 } from 'class-validator';
 
@@ -9,7 +9,7 @@ export class GrantAccessDto {
   @IsEmail()
   email: string;
 
-  @IsEnum(['viewer', 'editor', 'commenter'])
+  @IsIn(['viewer', 'editor', 'commenter'])
   permission: 'viewer' | 'editor' | 'commenter';
 
   @IsOptional()

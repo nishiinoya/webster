@@ -2,6 +2,7 @@
 
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
+import { MessageCircle } from 'lucide-react';
 import type {
   DocumentCommand,
   EditorClipboardCommand,
@@ -68,6 +69,7 @@ import type {
   SharedProjectRequest,
   SharedProjectUiState,
 } from '../collaboration/useCollaboration';
+import { acceptProjectInvite } from '../collaboration/sharedProjectApi';
 
 const initialTabs: EditorDocumentTab[] = [];
 
@@ -95,6 +97,12 @@ const editorTools: ToolDefinition[] = [
     icon: '/icons/hand-icon.svg',
     label: 'Pan',
     value: 'Pan',
+  },
+  {
+    description: 'Place review pins and discuss the project.',
+    icon: <MessageCircle size={22} strokeWidth={2.2} />,
+    label: 'Comment',
+    value: 'Comment',
   },
   {
     description: 'Paint the selected layer mask.',
@@ -182,6 +190,7 @@ const emptyHistoryState: HistoryStateSnapshot = {
 
 const initialSharedProjectState: SharedProjectUiState = {
   capabilities: {
+    canComment: false,
     canCreateSnapshots: false,
     canDownloadWebster: false,
     canEdit: true,
@@ -237,6 +246,7 @@ export function EditorPage() {
   const [isExportImageDialogOpen, setIsExportImageDialogOpen] = useState(false);
   const [isNewDocumentDialogOpen, setIsNewDocumentDialogOpen] = useState(false);
   const [isShareProjectDialogOpen, setIsShareProjectDialogOpen] = useState(false);
+  const [isUploadSharePromptOpen, setIsUploadSharePromptOpen] = useState(false);
   const [openShareDialogAfterCloudUpload, setOpenShareDialogAfterCloudUpload] =
     useState(false);
   const [isObject3DImportDialogOpen, setIsObject3DImportDialogOpen] =
@@ -437,6 +447,12 @@ export function EditorPage() {
       sharedProjectState.projectId,
       sharedProjectState.projectName ?? 'Untitled project',
     );
+
+    setTabs((currentTabs) =>
+      currentTabs.map((tab) =>
+        tab.isActive ? { ...tab, source: 'shared' } : tab,
+      ),
+    );
   }, [sharedProjectState.mode, sharedProjectState.projectId, sharedProjectState.projectName]);
 
   useEffect(() => {
@@ -469,7 +485,26 @@ export function EditorPage() {
     if (typeof window === 'undefined') return;
     didApplyUrlProjectIdRef.current = true;
 
-    const urlProjectId = new URL(window.location.href).searchParams.get('projectId');
+    const url = new URL(window.location.href);
+    const inviteToken = url.searchParams.get('invite');
+    if (inviteToken) {
+      void acceptProjectInvite(inviteToken)
+        .then((result) => {
+          const nextUrl = new URL(window.location.href);
+          nextUrl.searchParams.delete('invite');
+          nextUrl.searchParams.set('projectId', result.projectId);
+          window.history.replaceState(null, '', nextUrl.toString());
+          openSharedProjectById(result.projectId, result.projectName);
+        })
+        .catch((error) => {
+          setRecentProjectError(
+            error instanceof Error ? error.message : 'Unable to accept invite.',
+          );
+        });
+      return;
+    }
+
+    const urlProjectId = url.searchParams.get('projectId');
     if (!urlProjectId) return;
     if (sharedProjectState.mode === 'shared' && sharedProjectState.projectId === urlProjectId) {
       return;
@@ -480,6 +515,7 @@ export function EditorPage() {
       height: 600,
       id: `document-${documentCounterRef.current}`,
       isActive: true,
+      source: 'shared',
       title: `Shared ${urlProjectId}`,
       width: 800,
     };
@@ -644,6 +680,7 @@ export function EditorPage() {
       height: size.height,
       id: `document-${documentCounterRef.current}`,
       isActive: true,
+      source: 'local-only',
       title: `Untitled ${documentCounterRef.current}`,
       width: size.width,
     };
@@ -676,6 +713,7 @@ export function EditorPage() {
       height: storedTemplate.height,
       id: `document-${documentCounterRef.current}`,
       isActive: true,
+      source: 'local-only',
       title,
       width: storedTemplate.width,
     };
@@ -811,6 +849,15 @@ export function EditorPage() {
       return;
     }
 
+    setIsUploadSharePromptOpen(true);
+  }
+
+  function uploadLocalProjectAndContinueSharing() {
+    if (!activeDocument) {
+      return;
+    }
+
+    setIsUploadSharePromptOpen(false);
     setOpenShareDialogAfterCloudUpload(true);
     setCollaborationRequest({
       id: Date.now(),
@@ -843,6 +890,7 @@ export function EditorPage() {
       height: 600,
       id: `document-${documentCounterRef.current}`,
       isActive: true,
+      source: 'shared',
       title: title?.trim() || `Shared ${trimmed}`,
       width: 800,
     };
@@ -919,6 +967,7 @@ export function EditorPage() {
           ? {
               ...tab,
               height: document.height,
+              source: 'shared',
               title: document.title,
               width: document.width,
             }
@@ -999,6 +1048,7 @@ export function EditorPage() {
       height: 800,
       id: `document-${documentCounterRef.current}`,
       isActive: true,
+      source: 'local-file',
       title:
         file.name.replace(/\.webster$/i, '') ||
         `Untitled ${documentCounterRef.current}`,
@@ -1032,6 +1082,7 @@ export function EditorPage() {
         height: dimensions.height,
         id: `document-${documentCounterRef.current}`,
         isActive: true,
+        source: 'local-only',
         title,
         width: dimensions.width,
       };
@@ -1255,6 +1306,7 @@ export function EditorPage() {
         }
         canEditDocument={canEditDocument}
         canGroupSelectedLayers={canGroupSelectedLayers}
+        canManageSharing={sharedProjectState.capabilities.canManageMembers}
         canRedo={canEditDocument && activeHistoryState.canRedo}
         canUndo={canEditDocument && activeHistoryState.canUndo}
         canvasSize={
@@ -1371,6 +1423,7 @@ export function EditorPage() {
           (sharedProjectState.mode === 'shared' ? 1 : 0)
         }
         pendingCommitCount={sharedProjectState.pendingCommitCount}
+        projectStorageLabel={getProjectStorageLabel(activeDocument, sharedProjectState)}
         projectRole={sharedProjectState.role}
         selectedLayer={selectedLayer}
         selectedSelectionMode={selectedSelectionMode}
@@ -1402,6 +1455,7 @@ export function EditorPage() {
         aria-label='Editor workspace'
       >
         <ToolsPanel
+          canCommentDocument={sharedProjectState.capabilities.canComment}
           canEditDocument={canEditDocument}
           onSelectTool={setSelectedTool}
           onSelectShape={setSelectedShape}
@@ -1927,6 +1981,40 @@ export function EditorPage() {
           projectId={sharedProjectState.projectId}
         />
       ) : null}
+      {isUploadSharePromptOpen ? (
+        <div
+          aria-modal='true'
+          className='fixed inset-0 z-40 grid place-items-center bg-black/60 p-6'
+          role='dialog'
+        >
+          <div className='grid w-[min(420px,100%)] gap-4 rounded-lg border border-[#383e46] bg-[#17191d] p-5 shadow-[0_24px_48px_rgba(0,0,0,0.42)]'>
+            <div>
+              <h2 className='m-0 text-lg font-bold text-[#f2f4f7]'>
+                Upload & share
+              </h2>
+              <p className='m-0 mt-2 text-[13px] font-bold leading-5 text-[#a7b0b9]'>
+                This project is local only. Upload it to cloud to invite people.
+              </p>
+            </div>
+            <div className='flex justify-end gap-2'>
+              <button
+                className='rounded-lg border border-[#333941] bg-[#202329] px-3 py-2 font-bold text-[#eef1f4] hover:border-[#4c535c] hover:bg-[#252930]'
+                onClick={() => setIsUploadSharePromptOpen(false)}
+                type='button'
+              >
+                Cancel
+              </button>
+              <button
+                className='rounded-lg border border-[#4aa391] bg-[#203731] px-3 py-2 font-bold text-[#eef1f4] hover:bg-[#25453e]'
+                onClick={uploadLocalProjectAndContinueSharing}
+                type='button'
+              >
+                Upload & continue
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {layerAssetCommandPendingState ? (
         <ProgressOverlay state={layerAssetCommandPendingState} />
       ) : null}
@@ -2056,6 +2144,19 @@ function hasSelectedAncestorLayer(
   }
 
   return false;
+}
+
+function getProjectStorageLabel(
+  activeDocument: EditorDocumentTab | null,
+  sharedProjectState: SharedProjectUiState,
+) {
+  if (sharedProjectState.mode === 'shared') {
+    return sharedProjectState.role === 'owner'
+      ? 'My cloud project'
+      : 'Shared with me';
+  }
+
+  return activeDocument?.source === 'local-file' ? 'Local file' : 'Local only';
 }
 
 function loadImageDimensions(file: File) {

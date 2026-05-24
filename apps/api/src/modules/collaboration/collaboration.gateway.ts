@@ -147,12 +147,20 @@ export class CollaborationGateway
             data: { createdBy: bySubject.id },
           });
           await tx.projectComment.updateMany({
-            where: { userId: byEmail.id },
-            data: { userId: bySubject.id },
+            where: { authorUserId: byEmail.id },
+            data: { authorUserId: bySubject.id },
           });
           await tx.projectComment.updateMany({
-            where: { resolvedBy: byEmail.id },
-            data: { resolvedBy: bySubject.id },
+            where: { resolvedByUserId: byEmail.id },
+            data: { resolvedByUserId: bySubject.id },
+          });
+          await tx.projectInvite.updateMany({
+            where: { invitedByUserId: byEmail.id },
+            data: { invitedByUserId: bySubject.id },
+          });
+          await tx.projectInvite.updateMany({
+            where: { acceptedByUserId: byEmail.id },
+            data: { acceptedByUserId: bySubject.id },
           });
           await tx.projectSnapshot.updateMany({
             where: { createdBy: byEmail.id },
@@ -251,7 +259,7 @@ export class CollaborationGateway
 
     // Access check
     if (this.projectAccessService) {
-      const role = await this.projectAccessService.resolveRole(projectId, user.id);
+      const role = await this.projectAccessService.resolveOrGrantLinkRole(projectId, user.id);
       if (!role) {
         socket.emit('project:error', {
           code: 'forbidden',
@@ -281,7 +289,7 @@ export class CollaborationGateway
     const frontendRole =
       this.projectAccessService
         ? this.projectAccessService.toFrontendRole(
-            await this.projectAccessService.resolveRole(projectId, user.id),
+            await this.projectAccessService.resolveOrGrantLinkRole(projectId, user.id),
           )
         : 'viewer';
 
@@ -511,7 +519,7 @@ export class CollaborationGateway
       return false;
     }
 
-    const role = await this.projectAccessService.resolveRole(projectId, user.id);
+    const role = await this.projectAccessService.resolveOrGrantLinkRole(projectId, user.id);
 
     if (!role) {
       socket.emit('project:error', {
