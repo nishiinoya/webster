@@ -1,4 +1,5 @@
 import { editorRenderOptions, imageExportRenderOptions, Renderer } from "../rendering/Renderer";
+import type { ProjectComment } from "@webster/shared";
 import { InputController } from "../tools/input/InputController";
 import type { MaskBrushOptions } from "../tools/mask-brush/MaskBrushTypes";
 import type { MaskBrushPreviewPayload } from "../tools/mask-brush/MaskBrushTool";
@@ -103,6 +104,20 @@ import type {
   SharedEditorAction,
   SharedEditorActionDraft
 } from "./history/SharedEditorAction";
+import {
+  createEmptyCommentOverlayState,
+  findCommentById
+} from "../comments/CommentModel";
+import type {
+  CommentDraftState,
+  EditorCommentOverlayState
+} from "../comments/CommentModel";
+import { startPendingCommentAtClientPoint as startCommentToolPendingAtClientPoint } from "../comments/CommentTool";
+import {
+  getCommentAtScreenPoint,
+  hitTestCommentOverlay
+} from "../rendering/overlays/commentHitTesting";
+import type { CommentOverlayHit } from "../rendering/overlays/commentHitTesting";
 
 export type { ImageExportBackground, ImageExportFormat } from "./export/exportFileUtils";
 export type { HistoryEntrySummary, HistoryStateSnapshot } from "./history/EditorHistory";
@@ -290,6 +305,7 @@ export class EditorApp {
   private lastCameraSnapshot: CameraSnapshot | null = null;
   private selectedTool = "Move";
   private showCanvasBorder = true;
+  private commentOverlayState: EditorCommentOverlayState = createEmptyCommentOverlayState();
   private textEditLayerId: string | null = null;
   private textCaretIndex = 0;
   private textSelectionEnd: number | null = null;
@@ -406,6 +422,7 @@ export class EditorApp {
 
       this.renderer.render(this.scene, this.camera, {
         ...editorRenderOptions,
+        commentOverlay: this.commentOverlayState,
         showCanvasBorder: this.showCanvasBorder,
         showImageWarpControls: this.selectedTool === "Transform",
         showRotationHandle: this.selectedTool === "Transform",
@@ -752,6 +769,51 @@ export class EditorApp {
 
   setShowCanvasBorder(showCanvasBorder: boolean) {
     this.showCanvasBorder = showCanvasBorder;
+  }
+
+  setComments(comments: ProjectComment[]) {
+    const activeCommentId =
+      this.commentOverlayState.activeCommentId &&
+      findCommentById(comments, this.commentOverlayState.activeCommentId)
+        ? this.commentOverlayState.activeCommentId
+        : null;
+    const hoveredCommentId =
+      this.commentOverlayState.hoveredCommentId &&
+      findCommentById(comments, this.commentOverlayState.hoveredCommentId)
+        ? this.commentOverlayState.hoveredCommentId
+        : null;
+
+    this.commentOverlayState = {
+      ...this.commentOverlayState,
+      activeCommentId,
+      comments,
+      hoveredCommentId
+    };
+  }
+
+  setActiveComment(commentId: string | null) {
+    this.commentOverlayState = {
+      ...this.commentOverlayState,
+      activeCommentId: commentId
+    };
+  }
+
+  setHoveredComment(commentId: string | null) {
+    this.commentOverlayState = {
+      ...this.commentOverlayState,
+      hoveredCommentId: commentId
+    };
+  }
+
+  setCommentDraftState(draft: CommentDraftState) {
+    this.commentOverlayState = {
+      ...this.commentOverlayState,
+      draft
+    };
+  }
+
+  getCommentDraftState() {
+    return this.commentOverlayState.draft;
   }
 
   setMaskBrushOptions(options: Partial<MaskBrushOptions>) {
@@ -1346,7 +1408,7 @@ export class EditorApp {
     const worldPoint = this.camera.screenToWorld(screenPoint.x, screenPoint.y);
     const layer = this.scene.hitTestLayer(worldPoint.x, worldPoint.y);
 
-    return layer ? { id: layer.id, name: layer.name } : null;
+    return layer ? { id: layer.id, layer, name: layer.name } : null;
   }
 
   pointerDown(event: ToolPointerEvent) {
@@ -1888,7 +1950,58 @@ export class EditorApp {
   }
 
   getCursor(clientX: number, clientY: number) {
+    if (this.selectedTool === "Comment") {
+      return "crosshair";
+    }
+
     return this.inputController.getCursor(clientX, clientY);
+  }
+
+  getCommentAtClientPoint(clientX: number, clientY: number) {
+    const point = this.getCanvasPoint(clientX, clientY);
+
+    return getCommentAtScreenPoint(
+      this.commentOverlayState,
+      this.scene,
+      this.camera,
+      this.getCommentViewport(),
+      point
+    );
+  }
+
+  getCommentOverlayHitAtClientPoint(clientX: number, clientY: number): CommentOverlayHit | null {
+    const point = this.getCanvasPoint(clientX, clientY);
+
+    return hitTestCommentOverlay(
+      this.commentOverlayState,
+      this.scene,
+      this.camera,
+      this.getCommentViewport(),
+      point
+    );
+  }
+
+  startPendingCommentAtClientPoint(clientX: number, clientY: number) {
+    const pendingComment = startCommentToolPendingAtClientPoint(
+      {
+        clientToWorldPoint: this.clientToWorldPoint.bind(this),
+        hitTestLayerAtClientPoint: this.hitTestLayerAtClientPoint.bind(this)
+      },
+      clientX,
+      clientY
+    );
+
+    this.commentOverlayState = {
+      ...this.commentOverlayState,
+      activeCommentId: null,
+      draft: {
+        ...this.commentOverlayState.draft,
+        mode: { type: "pending" },
+        pendingComment
+      }
+    };
+
+    return pendingComment;
   }
 
   startTextEditAtClientPoint(clientX: number, clientY: number) {
@@ -2451,6 +2564,13 @@ export class EditorApp {
   /** Convert document world coords to canvas-relative screen pixels. */
   worldToCanvasPoint(worldX: number, worldY: number) {
     return this.camera.worldToScreen(worldX, worldY);
+  }
+
+  private getCommentViewport() {
+    return {
+      height: Math.max(1, this.canvas.clientHeight),
+      width: Math.max(1, this.canvas.clientWidth)
+    };
   }
 
   centerCameraOnWorldPoint(worldX: number, worldY: number) {
