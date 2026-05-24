@@ -2,11 +2,13 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { ProjectAccessService } from './project-access.service';
+import { EntitlementsService } from '../entitlements/entitlements.service';
 import { WebsterProjectManifest } from '@webster/shared';
 
 export interface ProjectSummary {
@@ -54,6 +56,7 @@ export class ProjectsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly projectAccess: ProjectAccessService,
+    @Optional() private readonly entitlements: EntitlementsService | null,
   ) {}
 
   async findAll(userId: string): Promise<{
@@ -234,6 +237,8 @@ export class ProjectsService {
     userId: string,
     dto: CreateProjectDto,
   ): Promise<ProjectDetail> {
+    await this.entitlements?.assertCanCreateProject(userId);
+
     const project = await this.prisma.project.create({
       data: {
         ownerId: userId,

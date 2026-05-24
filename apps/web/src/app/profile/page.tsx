@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useAuth0 } from '@auth0/auth0-react';
 import {
   getCurrentUser,
@@ -9,6 +10,7 @@ import {
   updateCurrentUser,
   uploadAvatar,
 } from '@/editor/collaboration/sharedProjectApi';
+import { useSubscription } from '@/editor/collaboration/useSubscription';
 
 const AVATAR_MAX_DIMENSION = 256;
 
@@ -25,7 +27,7 @@ export default function ProfilePage() {
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [section, setSection] = useState<'profile' | 'subscription'>('profile');
-  const [promoCode, setPromoCode] = useState('');
+  const subscription = useSubscription();
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   // The display name as last loaded/saved — used to decide whether the
   // display-name PATCH actually needs to fire on Save.
@@ -143,6 +145,14 @@ export default function ProfilePage() {
   return (
     <main className='min-h-screen bg-[#0f1213] py-12 px-6 text-[#e7e9ec]'>
       <div className='mx-auto w-[min(980px,100%)]'>
+        <div className='mb-6'>
+          <Link
+            href='/'
+            className='inline-flex items-center gap-2 rounded-md border border-[#273230] bg-[#0f1413] px-3 py-2 text-sm font-semibold text-[#9aa1ab] hover:border-[#4aa391] hover:text-[#dff3ea]'
+          >
+            ← Home
+          </Link>
+        </div>
         <header className='mb-8 text-center'>
           <h1 className='bg-linear-to-r from-[#4aa391] via-[#6fd6c1] to-[#d9f5ee] bg-clip-text text-transparent text-4xl font-extrabold'>
             Settings
@@ -268,40 +278,35 @@ export default function ProfilePage() {
                   Subscription
                 </h2>
 
-                <label className='mb-2 block text-xs font-semibold text-[#9aa1ab]'>
-                  Promo code
-                </label>
-                <div className='mb-4 flex gap-2'>
-                  <input
-                    value={promoCode}
-                    onChange={(e) => setPromoCode(e.target.value)}
-                    className='flex-1 rounded-md border border-[#30353d] bg-[#0b0d0d] px-3 py-2 text-sm text-[#eef1f4]'
-                    placeholder='Enter promo code'
-                  />
-                  <button
-                    onClick={() =>
-                      window.alert(
-                        promoCode
-                          ? `Applied promo: ${promoCode} (demo)`
-                          : 'Please enter a promo code.',
-                      )
-                    }
-                    className='rounded-4xl border border-[#4aa391] bg-[#203731] px-4 py-2 font-extrabold text-[#eef1f4]'
-                  >
-                    Apply
-                  </button>
-                </div>
+                {subscription.loading ? (
+                  <p className='text-sm text-[#9aa1ab]'>Loading subscription...</p>
+                ) : (
+                  <>
+                    <div className='mb-4 flex flex-wrap items-center gap-3'>
+                      <span className='rounded-md border border-[#3b424b] bg-[#202329] px-3 py-1 text-sm font-extrabold uppercase text-[#cfd4da]'>
+                        {subscription.isPro ? 'Pro' : 'Free'}
+                      </span>
+                      {subscription.data?.status ? (
+                        <span className='text-sm text-[#9aa1ab]'>
+                          Status: {subscription.data.status}
+                        </span>
+                      ) : null}
+                    </div>
 
-                <div className='mb-4'>
-                  <button
-                    onClick={() =>
-                      window.alert('Redirecting to payment (demo)')
-                    }
-                    className='w-full rounded-4xl border border-[#4aa391] bg-[#203731] px-4 py-2 font-extrabold text-[#eef1f4]'
-                  >
-                    Pay
-                  </button>
-                </div>
+                    {subscription.error ? (
+                      <p className='mb-3 text-sm font-bold text-[#ffb9b9]'>
+                        {subscription.error}
+                      </p>
+                    ) : null}
+
+                    <Link
+                      href='/billing'
+                      className='inline-block rounded-4xl border border-[#4aa391] bg-[#203731] px-4 py-2 font-extrabold text-[#eef1f4]'
+                    >
+                      Manage subscription
+                    </Link>
+                  </>
+                )}
               </section>
             )}
           </div>

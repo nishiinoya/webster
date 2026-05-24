@@ -17,3 +17,4 @@ pnpm-debug.log*
 Thumbs.db
 font-source/
 .claude/
+PAID_TIER_LOCKS.md

@@ -380,16 +380,21 @@ export function Toolbar({
       ref={toolbarRef}
     >
       <div className='flex min-w-0 items-center gap-3'>
-        <span
-          className='grid h-9 w-9 flex-none place-items-center rounded-lg border border-[#4aa391] bg-[#276f63] font-extrabold text-white'
-          aria-hidden='true'
+        <a
+          href='/'
+          aria-label='Go to home page'
+          title='Home'
+          className='grid h-9 w-9 flex-none place-items-center rounded-lg border border-[#4aa391] bg-[#276f63] font-extrabold text-white transition hover:border-[#6fd6c1] hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6fd6c1]'
         >
           W
-        </span>
+        </a>
         <div className='min-w-0'>
-          <p className='m-0 mb-0.5 text-[11px] font-bold uppercase tracking-normal text-[#8b929b]'>
+          <a
+            href='/'
+            className='m-0 mb-0.5 block w-fit text-[11px] font-bold uppercase tracking-normal text-[#8b929b] hover:text-[#dff3ea]'
+          >
             Webster
-          </p>
+          </a>
           <div className='flex min-w-0 flex-wrap items-center gap-1.5'>
             <h1 className='m-0 max-w-[260px] truncate text-[17px] font-bold tracking-normal text-[#f2f4f7]'>
               {documentTitle}

@@ -46,6 +46,7 @@ import {
   getAccessToken,
   getCurrentUser,
   getSharedProjectWebSocketUrl,
+  isUpgradeRequiredError,
   listProjectSnapshots,
   loadSharedProject,
   restoreProjectSnapshot,
@@ -69,6 +70,8 @@ export type SharedProjectUiState = {
   connectionStatus: CollaborationConnectionStatus;
   currentVersion: number | null;
   error: string | null;
+  /** True when `error` is a 402 free-tier limit the user can fix by upgrading. */
+  errorRequiresUpgrade: boolean;
   isBusy: boolean;
   mode: "local" | "shared";
   pendingCommitCount: number;
@@ -104,6 +107,7 @@ const initialState: SharedProjectUiState = {
   connectionStatus: "disconnected",
   currentVersion: null,
   error: null,
+  errorRequiresUpgrade: false,
   isBusy: false,
   mode: "local",
   pendingCommitCount: 0,
@@ -393,6 +397,7 @@ export function useCollaboration({
         connectionStatus: currentState.connectionStatus,
         currentVersion: payload.currentVersion,
         error: null,
+        errorRequiresUpgrade: false,
         isBusy: false,
         mode: "shared",
         pendingCommitCount: pendingQueueRef.current.size,
@@ -742,6 +747,7 @@ export function useCollaboration({
       setState((currentState) => ({
         ...currentState,
         error: null,
+        errorRequiresUpgrade: false,
         isBusy: true
       }));
 
@@ -1339,6 +1345,7 @@ export function useCollaboration({
         setState((currentState) => ({
           ...currentState,
           error: error instanceof Error ? error.message : "Shared project request failed.",
+          errorRequiresUpgrade: isUpgradeRequiredError(error),
           isBusy: false
         }));
       } finally {

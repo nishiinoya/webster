@@ -7,6 +7,7 @@ import { ValidationPipe } from '@nestjs/common';
 import configuration from './config/configuration';
 import { validate } from './config/env.validation';
 import { PrismaModule } from './database/prisma.module';
+import { EntitlementsModule } from './modules/entitlements/entitlements.module';
 import { AuthModule } from './common/auth/auth.module';
 import { JwtAuthGuard } from './common/auth/jwt-auth.guard';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
@@ -37,6 +38,7 @@ import { CollaborationModule } from './modules/collaboration/collaboration.modul
     }),
     EventEmitterModule.forRoot(),
     PrismaModule,
+    EntitlementsModule,
     AuthModule,
     // Feature modules
     UsersModule,

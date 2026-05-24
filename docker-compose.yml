@@ -7,9 +7,16 @@
 # inlined at Next build time, so the `web` image must be rebuilt when you
 # change any NEXT_PUBLIC_* value: `docker compose up -d --build web`.
 #
-# Stripe CLI is gated behind the `stripe` profile so it doesn't crash-loop
-# without a key. Opt in when you need to forward webhooks locally:
-#   docker compose --profile stripe up -d stripe-cli
+# Stripe (realistic local setup, no manual secret copying):
+#   - `stripe-secret` is a one-shot init that fetches the Stripe CLI's STABLE
+#     webhook signing secret (`stripe listen --print-secret`) into a shared
+#     volume. It no-ops when STRIPE_SECRET_KEY is unset, so non-Stripe runs are
+#     unaffected. The `api` reads that secret at boot, so signature verification
+#     "just works" — same as a fixed webhook endpoint secret in production.
+#   - `stripe-cli` (profile `stripe`) forwards real webhook events to the api.
+# Bring the whole thing up with webhooks flowing:
+#   docker compose --profile stripe up -d --build
+# (The signing secret is stable per account, so the init + forwarder agree.)
 
 services:
   postgres:
@@ -71,6 +78,10 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      stripe-secret:
+        condition: service_completed_successfully
+    volumes:
+      - stripe_secret:/stripe:ro
     environment:
       DATABASE_URL: postgresql://webster:webster@postgres:5432/webster
       PORT: "4000"
@@ -85,9 +96,17 @@ services:
       S3_FORCE_PATH_STYLE: "true"
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
-      STRIPE_PRICE_PRO_MONTHLY: ${STRIPE_PRICE_PRO_MONTHLY:-}
-      STRIPE_PRICE_PRO_YEARLY: ${STRIPE_PRICE_PRO_YEARLY:-}
-    command: sh -c "npx prisma migrate deploy && node dist/apps/api/src/main.js"
+      # Inline plan amounts — no Stripe product/price registration needed.
+      STRIPE_PRODUCT_NAME: ${STRIPE_PRODUCT_NAME:-Webster Pro}
+      STRIPE_CURRENCY: ${STRIPE_CURRENCY:-usd}
+      STRIPE_MONTHLY_AMOUNT_CENTS: ${STRIPE_MONTHLY_AMOUNT_CENTS:-999}
+      STRIPE_YEARLY_AMOUNT_CENTS: ${STRIPE_YEARLY_AMOUNT_CENTS:-9900}
+    # Pick up the webhook signing secret written by `stripe-secret` (if any),
+    # otherwise fall back to the STRIPE_WEBHOOK_SECRET env value above.
+    command: >
+      sh -c "npx prisma migrate deploy &&
+      if [ -s /stripe/whsec ]; then export STRIPE_WEBHOOK_SECRET=$$(cat /stripe/whsec); echo 'Loaded Stripe webhook secret from stripe-secret init'; fi &&
+      node dist/apps/api/src/main.js"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:4000/api/health || exit 1"]
       interval: 15s
@@ -116,6 +135,24 @@ services:
       - api
     restart: unless-stopped
 
+  # One-shot init: fetches the account's STABLE webhook signing secret and
+  # writes it where the api can read it. No-ops (and exits 0) when no Stripe key
+  # is configured, so it never blocks a plain `docker compose up`.
+  stripe-secret:
+    image: stripe/stripe-cli:latest
+    # Single-line shell command on purpose: YAML folded scalars preserve
+    # newlines on more-indented lines, which makes a leading `&&` parse as a
+    # syntax error. Keep it flat.
+    entrypoint: ["sh", "-c", "if [ -n \"$$STRIPE_API_KEY\" ]; then stripe listen --print-secret > /stripe/whsec 2>/dev/null && echo 'stripe-secret: wrote webhook signing secret' || { echo 'stripe-secret: could not fetch secret (check STRIPE_SECRET_KEY)'; : > /stripe/whsec; }; else echo 'stripe-secret: no STRIPE_SECRET_KEY, skipping'; : > /stripe/whsec; fi"]
+    environment:
+      STRIPE_API_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_CLI_TELEMETRY_OPTOUT: "1"
+    volumes:
+      - stripe_secret:/stripe
+    restart: "no"
+
+  # Forwards real Stripe webhook events into the api. Uses the same stable
+  # signing secret the api loaded above, so signatures verify end-to-end.
   stripe-cli:
     profiles: ["stripe"]
     image: stripe/stripe-cli:latest
@@ -123,6 +160,7 @@ services:
     environment:
       STRIPE_API_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_DEVICE_NAME: webster-dev
+      STRIPE_CLI_TELEMETRY_OPTOUT: "1"
     depends_on:
       api:
         condition: service_healthy
@@ -131,3 +169,4 @@ services:
 volumes:
   postgres_data:
   minio_data:
+  stripe_secret:

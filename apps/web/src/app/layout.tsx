@@ -47,11 +47,52 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 }
 
 function AuthBridge() {
-  const { getAccessTokenSilently } = useAuth0();
+  const { getAccessTokenSilently, loginWithRedirect } = useAuth0();
 
   useEffect(() => {
-    setAccessTokenGetter(getAccessTokenSilently);
-  }, [getAccessTokenSilently]);
+    // Guard so parallel API calls (every home tab fires one) don't each kick off
+    // their own redirect when consent is missing.
+    let consentRedirectStarted = false;
+
+    setAccessTokenGetter(async () => {
+      try {
+        return await getAccessTokenSilently();
+      } catch (err) {
+        const code =
+          typeof err === "object" && err !== null
+            ? (err as { error?: string }).error
+            : undefined;
+
+        // Silent token acquisition runs without UI, so it can't show Auth0's
+        // consent screen. On localhost Auth0 can't skip consent, so any user
+        // other than the tenant owner (who is auto-consented) hits
+        // `consent_required`/`login_required` on their first API call. Send them
+        // through one interactive consent, then back to where they were.
+        if (code === "consent_required" || code === "login_required") {
+          if (!consentRedirectStarted) {
+            consentRedirectStarted = true;
+
+            if (typeof window !== "undefined") {
+              try {
+                const target = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+                if (target && target !== "/") {
+                  window.sessionStorage.setItem("auth0:returnTo", target);
+                }
+              } catch {
+                // sessionStorage may be unavailable; fail open
+              }
+            }
+
+            void loginWithRedirect({
+              authorizationParams: { prompt: "consent" },
+            });
+          }
+        }
+
+        throw err;
+      }
+    });
+  }, [getAccessTokenSilently, loginWithRedirect]);
 
   return null;
 }

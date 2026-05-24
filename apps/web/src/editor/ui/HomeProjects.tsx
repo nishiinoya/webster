@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   acceptPendingProjectInvite,
+  deleteProject,
+  isUpgradeRequiredError,
   listProjects,
   type ProjectInviteSummary,
   type ProjectSummary
@@ -9,6 +11,7 @@ import {
   listRecentlyOpenedProjects,
   type RecentSharedProject
 } from "../projects/recentSharedProjects";
+import { useSubscription } from "../collaboration/useSubscription";
 
 type HomeProjectsProps = {
   onOpenProject: (projectId: string, projectName: string) => void;
@@ -24,7 +27,10 @@ export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
   const [pendingInvites, setPendingInvites] = useState<ProjectInviteSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorRequiresUpgrade, setErrorRequiresUpgrade] = useState(false);
   const [acceptingInviteId, setAcceptingInviteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const subscription = useSubscription();
 
   const projectsById = useMemo(() => {
     const map = new Map<string, ProjectSummary>();
@@ -84,6 +90,7 @@ export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
   async function acceptInvite(invite: ProjectInviteSummary) {
     setAcceptingInviteId(invite.id);
     setError(null);
+    setErrorRequiresUpgrade(false);
 
     try {
       const accepted = await acceptPendingProjectInvite(invite.id);
@@ -92,13 +99,39 @@ export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
       onOpenProject(accepted.projectId, accepted.projectName);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to accept invite.");
+      setErrorRequiresUpgrade(isUpgradeRequiredError(err));
     } finally {
       setAcceptingInviteId(null);
     }
   }
 
+  async function deleteOwnedProject(project: ProjectSummary) {
+    if (
+      !window.confirm(
+        `Delete "${project.projectName}"? This removes it for everyone it's shared with.`
+      )
+    ) {
+      return;
+    }
+
+    setDeletingId(project.id);
+    setError(null);
+    setErrorRequiresUpgrade(false);
+
+    try {
+      await deleteProject(project.id);
+      setOwned((current) => current.filter((item) => item.id !== project.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to delete project.");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   return (
     <div className="grid w-[min(680px,100%)] gap-3 text-left">
+      <PlanBanner subscription={subscription} ownedCount={owned.length} />
+
       <div className="flex flex-wrap items-center gap-2">
         <ProjectTab active={tab === "recent"} onClick={() => setTab("recent")}>
           Recent
@@ -117,10 +150,23 @@ export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
       {isLoading ? (
         <EmptyNote>Loading...</EmptyNote>
       ) : error ? (
-        <EmptyNote tone="error">{error}</EmptyNote>
+        <EmptyNote tone="error">
+          <span className="flex flex-wrap items-center gap-2">
+            <span>{error}</span>
+            {errorRequiresUpgrade ? (
+              <a
+                className="rounded-md border border-[#4aa391] bg-[#203731] px-2.5 py-1 text-[11px] font-extrabold text-[#eef1f4]"
+                href="/billing"
+              >
+                Upgrade
+              </a>
+            ) : null}
+          </span>
+        </EmptyNote>
       ) : tab === "recent" ? (
         recentProjects.length > 0 ? (
           <ProjectList
+            key="recent"
             projects={recentProjects}
             getSubtitle={(project) => formatWhen(project.openedAt)}
             onOpenProject={onOpenProject}
@@ -131,9 +177,12 @@ export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
       ) : tab === "owned" ? (
         owned.length > 0 ? (
           <ProjectList
+            key="owned"
             projects={owned}
             getSubtitle={(project) => formatWhen(Date.parse(project.updatedAt))}
             onOpenProject={onOpenProject}
+            onDeleteProject={deleteOwnedProject}
+            deletingId={deletingId}
           />
         ) : (
           <EmptyNote>No cloud projects yet.</EmptyNote>
@@ -141,6 +190,7 @@ export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
       ) : tab === "shared" ? (
         sharedWithMe.length > 0 ? (
           <ProjectList
+            key="shared"
             projects={sharedWithMe}
             getSubtitle={(project) =>
               `${formatWhen(Date.parse(project.updatedAt))}${
@@ -170,50 +220,111 @@ export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
   );
 }
 
+const PROJECTS_PER_PAGE = 6;
+
 function ProjectList<T extends ProjectSummary>({
+  deletingId,
   getSubtitle,
+  onDeleteProject,
   onOpenProject,
   projects
 }: {
+  deletingId?: string | null;
   getSubtitle: (project: T) => string;
+  onDeleteProject?: (project: T) => void;
   onOpenProject: (projectId: string, projectName: string) => void;
   projects: T[];
 }) {
+  const [page, setPage] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(projects.length / PROJECTS_PER_PAGE));
+  // Clamp in case the list shrank (e.g. after a refetch) below the current page.
+  const safePage = Math.min(page, pageCount - 1);
+  const start = safePage * PROJECTS_PER_PAGE;
+  const visible = projects.slice(start, start + PROJECTS_PER_PAGE);
+
   return (
     <div className="grid gap-2">
-      {projects.map((project) => (
-        <ProjectRow
-          key={project.id}
-          onOpen={() => onOpenProject(project.id, project.projectName)}
-          project={project}
-          subtitle={getSubtitle(project)}
-        />
-      ))}
+      <div className="grid gap-2">
+        {visible.map((project) => (
+          <ProjectRow
+            key={project.id}
+            isDeleting={deletingId === project.id}
+            onDelete={onDeleteProject ? () => onDeleteProject(project) : undefined}
+            onOpen={() => onOpenProject(project.id, project.projectName)}
+            project={project}
+            subtitle={getSubtitle(project)}
+          />
+        ))}
+      </div>
+
+      {pageCount > 1 ? (
+        <div className="flex items-center justify-between gap-2 pt-1">
+          <button
+            className={pagerClass}
+            disabled={safePage === 0}
+            onClick={() => setPage(safePage - 1)}
+            type="button"
+          >
+            Prev
+          </button>
+          <span className="text-[12px] font-bold text-[#8b929b]">
+            Page {safePage + 1} of {pageCount}
+          </span>
+          <button
+            className={pagerClass}
+            disabled={safePage >= pageCount - 1}
+            onClick={() => setPage(safePage + 1)}
+            type="button"
+          >
+            Next
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
 
 function ProjectRow({
+  isDeleting,
+  onDelete,
   onOpen,
   project,
   subtitle
 }: {
+  isDeleting?: boolean;
+  onDelete?: () => void;
   onOpen: () => void;
   project: ProjectSummary;
   subtitle: string;
 }) {
   return (
-    <button
-      className="grid min-h-[58px] w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-4 rounded-lg border border-[#30353d] bg-[#17191d] px-3 py-2.5 text-left font-bold text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731]"
-      onClick={onOpen}
-      type="button"
-    >
-      <span className="min-w-0">
+    <div className="grid min-h-[58px] w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-[#30353d] bg-[#17191d] px-3 py-2.5 hover:border-[#4aa391]">
+      <button
+        className="flex min-w-0 flex-col text-left font-bold text-[#eef1f4]"
+        onClick={onOpen}
+        type="button"
+      >
         <span className="block truncate">{project.projectName}</span>
-        <span className="block truncate text-[12px] text-[#8b929b]">{subtitle}</span>
+        <span className="block truncate text-[12px] font-normal text-[#8b929b]">
+          {subtitle}
+        </span>
+      </button>
+      <span className="flex items-center gap-2">
+        <RoleBadge role={project.role} />
+        {onDelete ? (
+          <button
+            aria-label={`Delete ${project.projectName}`}
+            className="rounded-md border border-[#5a2a2e] bg-[#241619] px-2.5 py-1.5 text-[12px] font-bold text-[#ffb9b9] hover:border-[#e06b6b] hover:bg-[#3a1d20] disabled:opacity-40 disabled:hover:border-[#5a2a2e]"
+            disabled={isDeleting}
+            onClick={onDelete}
+            title="Delete project"
+            type="button"
+          >
+            {isDeleting ? "Deleting..." : "Delete"}
+          </button>
+        ) : null}
       </span>
-      <RoleBadge role={project.role} />
-    </button>
+    </div>
   );
 }
 
@@ -248,6 +359,61 @@ function InviteRow({
     </div>
   );
 }
+
+function PlanBanner({
+  ownedCount,
+  subscription
+}: {
+  ownedCount: number;
+  subscription: ReturnType<typeof useSubscription>;
+}) {
+  const { data, isPro, limits, loading } = subscription;
+
+  // Avoid a flash before the first load resolves.
+  if (loading && !data) {
+    return null;
+  }
+
+  if (isPro) {
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#2f6d61] bg-[#11201c] px-3 py-2 text-[12px] font-bold text-[#a9e2d2]">
+        <span>Pro plan — unlimited projects &amp; collaborators, 3D models unlocked.</span>
+        <a className={planLinkClass} href="/billing">
+          Manage
+        </a>
+      </div>
+    );
+  }
+
+  const maxProjects = limits.maxProjects;
+  const maxShares = limits.maxSharesPerProject;
+  const atProjectLimit =
+    typeof maxProjects === "number" && ownedCount >= maxProjects;
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#30353d] bg-[#11161a] px-3 py-2 text-[12px] font-bold text-[#aab1ba]">
+      <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="rounded-md border border-[#3b424b] bg-[#202329] px-2 py-0.5 uppercase tracking-wide text-[#cfd4da]">
+          Free plan
+        </span>
+        <span className={atProjectLimit ? "text-[#ffb9b9]" : undefined}>
+          {ownedCount}
+          {typeof maxProjects === "number" ? `/${maxProjects}` : ""} projects
+        </span>
+        <span aria-hidden>·</span>
+        <span>up to {maxShares ?? "∞"} collaborators / project</span>
+        <span aria-hidden>·</span>
+        <span>3D models locked</span>
+      </span>
+      <a className={planLinkClass} href="/billing">
+        Upgrade
+      </a>
+    </div>
+  );
+}
+
+const planLinkClass =
+  "flex-none rounded-md border border-[#4aa391] bg-[#203731] px-2.5 py-1 text-[11px] font-extrabold text-[#eef1f4] hover:border-[#6fd6c1]";
 
 function EmptyNote({
   children,

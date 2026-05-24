@@ -8,6 +8,7 @@ import {
 import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
 import { ProjectAccessService } from '../projects/project-access.service';
+import { EntitlementsService } from '../entitlements/entitlements.service';
 import { GrantAccessDto } from './dto/grant-access.dto';
 import { UpdateAccessDto } from './dto/update-access.dto';
 import { UpdateLinkAccessDto } from './dto/update-link-access.dto';
@@ -21,6 +22,7 @@ export class AccessesService {
   constructor(
     private readonly prisma: PrismaService,
     @Optional() private readonly projectAccessService: ProjectAccessService,
+    @Optional() private readonly entitlements: EntitlementsService | null,
   ) {}
 
   private async requireOwner(projectId: string, userId: string): Promise<void> {
@@ -121,6 +123,19 @@ export class AccessesService {
       where: { email: normalizedEmail },
       select: { id: true, email: true, displayName: true },
     });
+
+    const isNewCollaborator = targetUser
+      ? !(await this.prisma.projectAccess.findFirst({
+          where: { projectId, sharedWithUserId: targetUser.id, revokedAt: null },
+          select: { id: true },
+        }))
+      : !(await this.prisma.projectInvite.findFirst({
+          where: { projectId, invitedEmail: normalizedEmail, status: 'pending' },
+          select: { id: true },
+        }));
+    if (isNewCollaborator) {
+      await this.entitlements?.assertCanShareProject(projectId, currentUser.id);
+    }
 
     if (targetUser) {
       const access = await this.projectAccessService!.upsertUserAccess(

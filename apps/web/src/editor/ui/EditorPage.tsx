@@ -70,6 +70,7 @@ import type {
   SharedProjectUiState,
 } from '../collaboration/useCollaboration';
 import { acceptProjectInvite } from '../collaboration/sharedProjectApi';
+import { useSubscription } from '../collaboration/useSubscription';
 
 const initialTabs: EditorDocumentTab[] = [];
 
@@ -200,6 +201,7 @@ const initialSharedProjectState: SharedProjectUiState = {
   connectionStatus: 'disconnected',
   currentVersion: null,
   error: null,
+  errorRequiresUpgrade: false,
   isBusy: false,
   mode: 'local',
   pendingCommitCount: 0,
@@ -211,6 +213,7 @@ const initialSharedProjectState: SharedProjectUiState = {
 };
 
 export function EditorPage() {
+  const subscription = useSubscription();
   const emptyImageInputRef = useRef<HTMLInputElement | null>(null);
   const emptyProjectInputRef = useRef<HTMLInputElement | null>(null);
   const sidePanelsRef = useRef<HTMLElement | null>(null);
@@ -612,6 +615,19 @@ export function EditorPage() {
     mode: 'add' | 'replace',
     initialFiles: File[] = [],
   ) {
+    // 3D models are a Pro feature. Gate every entry point at this single
+    // chokepoint. While the subscription is still loading we treat the user as
+    // not-Pro (fail safe) rather than letting the dialog slip through.
+    if (!subscription.isPro) {
+      const goToBilling = window.confirm(
+        '3D models are a Pro feature. Go to billing to upgrade?',
+      );
+      if (goToBilling) {
+        window.location.assign('/billing');
+      }
+      return;
+    }
+
     setObject3DImportMode(mode);
     setObject3DImportInitialFiles(initialFiles);
     setLayerAssetCommandPendingState(null);
@@ -1626,7 +1642,7 @@ export function EditorPage() {
             />
           ) : (
             <section
-              className=' min-h-0 min-w-0 place-items-center bg-[#101113] p-7 flex'
+              className=' min-h-0 min-w-0 place-items-center bg-[#101113] p-7 flex overflow-y-auto'
               aria-label='No open documents'
             >
               <div className='flex-1 flex items-center justify-center'>
@@ -2025,12 +2041,20 @@ export function EditorPage() {
         <ImageLayerCommandOverlay state={imageLayerCommandPendingState} />
       ) : null}
       {sharedProjectState.error ? (
-        <p
-          className='fixed bottom-4 left-1/2 z-50 m-0 max-w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-lg border border-[#b96a6a] bg-[rgba(28,20,20,0.96)] px-4 py-3 text-center text-[13px] font-bold text-[#ffd0d0] shadow-[0_18px_36px_rgba(0,0,0,0.42)]'
+        <div
+          className='fixed bottom-4 left-1/2 z-50 m-0 grid max-w-[min(560px,calc(100vw-32px))] -translate-x-1/2 justify-items-center gap-2 rounded-lg border border-[#b96a6a] bg-[rgba(28,20,20,0.96)] px-4 py-3 text-center text-[13px] font-bold text-[#ffd0d0] shadow-[0_18px_36px_rgba(0,0,0,0.42)]'
           role='status'
         >
-          {sharedProjectState.error}
-        </p>
+          <span>{sharedProjectState.error}</span>
+          {sharedProjectState.errorRequiresUpgrade ? (
+            <a
+              className='rounded-4xl border border-[#4aa391] bg-[#203731] px-4 py-1.5 font-extrabold text-[#eef1f4]'
+              href='/billing'
+            >
+              Upgrade
+            </a>
+          ) : null}
+        </div>
       ) : null}
     </main>
   );

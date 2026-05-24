@@ -13,6 +13,7 @@ import { StorageService } from '../storage/storage.service';
 import { WebsterPackageService } from '../webster/webster-package.service';
 import { ProjectAccessService } from '../projects/project-access.service';
 import { RoomService } from '../collaboration/room.service';
+import { EntitlementsService } from '../entitlements/entitlements.service';
 import { AuthUser } from '../../common/types/auth-user';
 import type {
   SharedProjectLoadResponse,
@@ -33,6 +34,7 @@ export class SharedProjectsService {
     @Optional() private readonly websterPackage: WebsterPackageService | null,
     @Optional() private readonly projectAccess: ProjectAccessService | null,
     @Optional() private readonly roomService: RoomService | null,
+    @Optional() private readonly entitlements: EntitlementsService | null,
   ) {}
 
   /** POST /api/shared-projects/import-webster */
@@ -46,6 +48,9 @@ export class SharedProjectsService {
     }
 
     const { manifest, assets } = await this.websterPackage.unpack(buffer);
+
+    await this.entitlements?.assertCanCreateProject(user.id);
+    await this.entitlements?.assertManifest3DAllowed(user.id, manifest);
 
     // Derive project name from filename (strip .webster) or manifest template name
     const projectName =
@@ -223,12 +228,14 @@ export class SharedProjectsService {
 
     const project = await this.prisma.project.findFirst({
       where: { id: projectId, isDeleted: false },
-      select: { currentVersion: true },
+      select: { currentVersion: true, ownerId: true },
     });
 
     if (!project) {
       throw new NotFoundException('Project not found');
     }
+
+    await this.entitlements?.assertManifest3DAllowed(project.ownerId, body.manifest);
 
     if (project.currentVersion !== body.baseVersion) {
       throw new ConflictException(

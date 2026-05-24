@@ -10,7 +10,11 @@ import { PrismaService } from '../../database/prisma.service';
 import { StripeService } from './stripe.service';
 import { StartCheckoutDto } from './dto/start-checkout.dto';
 import { AuthUser } from '../../common/types/auth-user';
-import { Subscription, SubscriptionStatus } from '@prisma/client';
+import { SubscriptionStatus } from '@prisma/client';
+import {
+  EntitlementsService,
+  EntitlementSnapshot,
+} from '../entitlements/entitlements.service';
 
 export interface StripePaymentSucceededPayload {
   userId: string;
@@ -28,37 +32,61 @@ export class SubscriptionsService {
     private readonly prisma: PrismaService,
     private readonly stripeService: StripeService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly entitlements: EntitlementsService,
   ) {}
 
-  async getMySubscription(userId: string): Promise<Subscription | null> {
-    return this.prisma.subscription.findUnique({ where: { userId } });
+  // Change 1: return the full entitlement snapshot instead of the raw Prisma row.
+  async getMySubscription(userId: string): Promise<EntitlementSnapshot> {
+    return this.entitlements.getSnapshot(userId);
+  }
+
+  // Change 2: delegate to StripeService which owns the cache.
+  async getPlans() {
+    return this.stripeService.getPlans();
   }
 
   async createCheckoutSession(
     user: AuthUser,
     dto: StartCheckoutDto,
   ): Promise<{ url: string }> {
-    const { priceProMonthly, priceProYearly } = this.stripeService;
-
-    if (dto.priceId !== priceProMonthly && dto.priceId !== priceProYearly) {
+    if (dto.priceId !== 'monthly' && dto.priceId !== 'yearly') {
       throw new BadRequestException(
-        `Invalid priceId. Must be one of the configured pro plan price IDs.`,
+        `Invalid plan. Must be 'monthly' or 'yearly'.`,
       );
     }
 
-    // Resolve existing Stripe customer if we have a subscription row
+    // Change 3: Resolve existing Stripe customer ID for returning subscribers.
+    // We store the Stripe subscription ID (providerSubId), not the customer ID.
+    // To reuse the customer on a new checkout we retrieve the Stripe subscription
+    // and read customer from it. Any failure is non-fatal — we just proceed
+    // without a pre-filled customer.
+    let customerId: string | undefined;
     const existingSub = await this.prisma.subscription.findUnique({
       where: { userId: user.id },
     });
+    if (existingSub?.providerSubId) {
+      try {
+        const stripeSub = await this.stripeService.client.subscriptions.retrieve(
+          existingSub.providerSubId,
+        );
+        customerId =
+          typeof stripeSub.customer === 'string'
+            ? stripeSub.customer
+            : (stripeSub.customer as Stripe.Customer | Stripe.DeletedCustomer)
+                .id;
+      } catch (err) {
+        this.logger.warn(
+          `Could not retrieve Stripe subscription for customer reuse: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
 
     const session = await this.stripeService.createCheckoutSession({
-      priceId: dto.priceId,
+      plan: dto.priceId,
       successUrl: dto.successUrl,
       cancelUrl: dto.cancelUrl,
       userId: user.id,
-      customerId: existingSub?.providerSubId
-        ? undefined // providerSubId is the subscription ID, not customer ID — skip for now
-        : undefined,
+      customerId,
     });
 
     if (!session.url) {

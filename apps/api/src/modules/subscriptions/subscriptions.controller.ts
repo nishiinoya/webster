@@ -18,7 +18,7 @@ import { SubscriptionsService } from './subscriptions.service';
 import { StartCheckoutDto } from './dto/start-checkout.dto';
 
 class PortalDto {
-  @IsUrl()
+  @IsUrl({ require_tld: false })
   returnUrl!: string;
 }
 
@@ -29,6 +29,13 @@ export class SubscriptionsController {
   @Get('me')
   getMySubscription(@CurrentUser() user: AuthUser) {
     return this.subscriptionsService.getMySubscription(user.id);
+  }
+
+  // Change 2: public endpoint returning plan metadata for all configured prices.
+  @Public()
+  @Get('plans')
+  getPlans() {
+    return this.subscriptionsService.getPlans();
   }
 
   @Post('checkout')

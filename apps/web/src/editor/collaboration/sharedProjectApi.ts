@@ -102,7 +102,7 @@ export async function downloadSharedProjectFile(projectId: string) {
   );
 
   if (!response.ok) {
-    throw new Error(await readApiError(response, "Unable to download shared project."));
+    throw await toApiError(response, "Unable to download shared project.");
   }
 
   return response.blob();
@@ -222,6 +222,65 @@ export function toAbsoluteAvatarUrl(avatarUrl: string | null | undefined) {
   return `${getSharedProjectApiBaseUrl()}${avatarUrl.startsWith("/") ? "" : "/"}${avatarUrl}`;
 }
 
+export type SubscriptionInfo = {
+  plan: "free" | "pro";
+  isPro: boolean;
+  status: "active" | "canceled" | "past_due" | "trialing" | null;
+  currentPeriodEnd: string | null;
+  limits: {
+    maxProjects: number | null;
+    maxSharesPerProject: number | null;
+    allow3D: boolean;
+  };
+  usage: {
+    projectCount: number;
+  };
+};
+
+export type SubscriptionPlan = {
+  priceId: string;
+  interval: "month" | "year";
+  amount: number;
+  currency: string;
+  productName: string | null;
+};
+
+export type PaymentRecord = {
+  id: string;
+  amount: string;
+  currency: string;
+  providerTxId: string;
+  createdAt: string;
+};
+
+export async function getMySubscription() {
+  return fetchJson<SubscriptionInfo>("/subscriptions/me");
+}
+
+export async function listSubscriptionPlans() {
+  return fetchJson<{ plans: SubscriptionPlan[] }>("/subscriptions/plans");
+}
+
+export async function startCheckout(priceId: string, successUrl: string, cancelUrl: string) {
+  return fetchJson<{ url: string }>("/subscriptions/checkout", {
+    body: JSON.stringify({ priceId, successUrl, cancelUrl }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST"
+  });
+}
+
+export async function openBillingPortal(returnUrl: string) {
+  return fetchJson<{ url: string }>("/subscriptions/portal", {
+    body: JSON.stringify({ returnUrl }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST"
+  });
+}
+
+export async function listPayments() {
+  return fetchJson<{ payments: PaymentRecord[] }>("/payments");
+}
+
 export type ProjectSummary = {
   id: string;
   projectName: string;
@@ -255,6 +314,17 @@ export async function listProjects() {
     sharedWithMe: ProjectSummary[];
     pendingInvites: ProjectInviteSummary[];
   }>("/projects");
+}
+
+export async function deleteProject(projectId: string) {
+  const response = await authedFetch(
+    `${getSharedProjectApiBaseUrl()}/projects/${encodeURIComponent(projectId)}`,
+    { method: "DELETE" }
+  );
+
+  if (!response.ok && response.status !== 204) {
+    throw await toApiError(response, "Unable to delete project.");
+  }
 }
 
 export type ProjectAccessPermission = 'viewer' | 'editor' | 'commenter';
@@ -317,7 +387,7 @@ export async function revokeProjectAccess(projectId: string, accessId: string) {
   );
 
   if (!response.ok && response.status !== 204) {
-    throw new Error(await readApiError(response, "Unable to revoke access."));
+    throw await toApiError(response, "Unable to revoke access.");
   }
 }
 
@@ -328,7 +398,7 @@ export async function revokeProjectInvite(projectId: string, inviteId: string) {
   );
 
   if (!response.ok && response.status !== 204) {
-    throw new Error(await readApiError(response, "Unable to revoke invite."));
+    throw await toApiError(response, "Unable to revoke invite.");
   }
 }
 
@@ -411,7 +481,7 @@ export async function deleteProjectComment(projectId: string, commentId: string)
   );
 
   if (!response.ok && response.status !== 204) {
-    throw new Error(await readApiError(response, "Unable to delete comment."));
+    throw await toApiError(response, "Unable to delete comment.");
   }
 }
 
@@ -494,20 +564,52 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${getSharedProjectApiBaseUrl()}${path}`, mergedInit);
 
   if (!response.ok) {
-    throw new Error(await readApiError(response, "Shared project request failed."));
+    throw await toApiError(response, "Shared project request failed.");
   }
 
   return response.json() as Promise<T>;
 }
 
-async function readApiError(response: Response, fallback: string) {
-  try {
-    const payload = (await response.json()) as { message?: unknown };
+/**
+ * Error carrying the HTTP status (and backend `code` if present) so callers can
+ * distinguish e.g. a 402 free-tier limit from a generic failure. Backward
+ * compatible: existing callers that only read `.message` keep working.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code?: string;
 
-    return typeof payload.message === "string" ? payload.message : fallback;
-  } catch {
-    return fallback;
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
   }
+}
+
+/** True when an error is a 402 "upgrade to Pro" free-tier limit response. */
+export function isUpgradeRequiredError(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 402;
+}
+
+async function toApiError(response: Response, fallback: string): Promise<ApiError> {
+  let message = fallback;
+  let code: string | undefined;
+
+  try {
+    const payload = (await response.json()) as { message?: unknown; code?: unknown };
+
+    if (typeof payload.message === "string") {
+      message = payload.message;
+    }
+    if (typeof payload.code === "string") {
+      code = payload.code;
+    }
+  } catch {
+    // Non-JSON body — keep the fallback message.
+  }
+
+  return new ApiError(message, response.status, code);
 }
 
 function toAbsoluteAssetUrl(url: string) {

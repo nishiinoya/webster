@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import {
   grantProjectAccess,
+  isUpgradeRequiredError,
   listProjectAccesses,
   revokeProjectAccess,
   revokeProjectInvite,
@@ -10,6 +11,7 @@ import {
   type ProjectLinkAccess,
   type ProjectPendingInviteEntry
 } from "../../collaboration/sharedProjectApi";
+import { useSubscription } from "../../collaboration/useSubscription";
 
 type ShareProjectDialogProps = {
   onClose: () => void;
@@ -27,10 +29,16 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
   const [isUpdatingLink, setIsUpdatingLink] = useState(false);
   const [isLoadingAccesses, setIsLoadingAccesses] = useState(true);
   const [dialogError, setDialogError] = useState<string | null>(null);
+  const [dialogErrorRequiresUpgrade, setDialogErrorRequiresUpgrade] = useState(false);
   const [dialogSuccess, setDialogSuccess] = useState<string | null>(null);
   const [freshInviteLink, setFreshInviteLink] = useState<string | null>(null);
   const [copied, setCopied] = useState<"project" | "invite" | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const subscription = useSubscription();
+  const collaboratorCount = accesses.length + pendingInvites.length;
+  const shareLimit = subscription.limits.maxSharesPerProject;
+  const showShareLimit =
+    !subscription.isPro && !subscription.loading && typeof shareLimit === "number";
 
   const projectLink =
     typeof window !== "undefined"
@@ -84,6 +92,7 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
 
     setRevokingId(entry.id);
     setDialogError(null);
+    setDialogErrorRequiresUpgrade(false);
     setDialogSuccess(null);
 
     try {
@@ -105,6 +114,7 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
 
     setRevokingId(entry.id);
     setDialogError(null);
+    setDialogErrorRequiresUpgrade(false);
     setDialogSuccess(null);
 
     try {
@@ -127,6 +137,7 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
 
     setIsInviting(true);
     setDialogError(null);
+    setDialogErrorRequiresUpgrade(false);
     setDialogSuccess(null);
     setFreshInviteLink(null);
 
@@ -147,6 +158,7 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
       setEmail("");
     } catch (error) {
       setDialogError(error instanceof Error ? error.message : "Unable to invite.");
+      setDialogErrorRequiresUpgrade(isUpgradeRequiredError(error));
     } finally {
       setIsInviting(false);
     }
@@ -155,6 +167,7 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
   async function saveLinkAccess() {
     setIsUpdatingLink(true);
     setDialogError(null);
+    setDialogErrorRequiresUpgrade(false);
     setDialogSuccess(null);
     setFreshInviteLink(null);
 
@@ -228,6 +241,25 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
 
         <section className={dialogSectionClass} aria-label="Invite people">
           <h3 className={dialogSectionTitleClass}>Invite people</h3>
+          {showShareLimit ? (
+            <p className={helperTextClass}>
+              Free plan —{" "}
+              <span
+                className={
+                  collaboratorCount >= (shareLimit as number)
+                    ? "text-[#ffb9b9]"
+                    : "text-[#cfd4da]"
+                }
+              >
+                {collaboratorCount}/{shareLimit}
+              </span>{" "}
+              collaborators on this project.{" "}
+              <a className="font-extrabold text-[#6fd6c1] underline" href="/billing">
+                Upgrade
+              </a>{" "}
+              to add more.
+            </p>
+          ) : null}
           <form className="grid gap-2" onSubmit={submitInvite}>
             <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto]">
               <input
@@ -381,7 +413,17 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
         </section>
 
         {dialogError ? (
-          <p className="m-0 text-[12px] font-bold text-[#ffd0d0]">{dialogError}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="m-0 text-[12px] font-bold text-[#ffd0d0]">{dialogError}</p>
+            {dialogErrorRequiresUpgrade ? (
+              <a
+                className="rounded-md border border-[#4aa391] bg-[#203731] px-2.5 py-1 text-[11px] font-extrabold text-[#eef1f4]"
+                href="/billing"
+              >
+                Upgrade
+              </a>
+            ) : null}
+          </div>
         ) : null}
         {dialogSuccess ? (
           <p className="m-0 text-[12px] font-bold text-[#a9e2d2]">{dialogSuccess}</p>

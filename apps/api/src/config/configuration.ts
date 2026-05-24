@@ -21,7 +21,24 @@ export default () => ({
   stripe: {
     secretKey: process.env.STRIPE_SECRET_KEY ?? '',
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
-    priceProMonthly: process.env.STRIPE_PRICE_PRO_MONTHLY ?? '',
-    priceProYearly: process.env.STRIPE_PRICE_PRO_YEARLY ?? '',
+    // Inline plan definition — no Stripe product/price needs to exist; we pass
+    // price_data at checkout time and Stripe creates everything on the fly.
+    productName: process.env.STRIPE_PRODUCT_NAME ?? 'Webster Pro',
+    currency: (process.env.STRIPE_CURRENCY ?? 'usd').toLowerCase(),
+    monthlyAmountCents: parseInt(
+      process.env.STRIPE_MONTHLY_AMOUNT_CENTS ?? '999',
+      10,
+    ),
+    yearlyAmountCents: parseInt(
+      process.env.STRIPE_YEARLY_AMOUNT_CENTS ?? '9900',
+      10,
+    ),
+  },
+  limits: {
+    freeMaxProjects: parseInt(process.env.FREE_MAX_PROJECTS ?? '3', 10),
+    freeMaxSharesPerProject: parseInt(
+      process.env.FREE_MAX_SHARES_PER_PROJECT ?? '3',
+      10,
+    ),
   },
 });

@@ -57,6 +57,14 @@ class EnvironmentVariables {
   @IsString()
   @IsOptional()
   STRIPE_PRICE_PRO_YEARLY: string;
+
+  @IsNumber()
+  @IsOptional()
+  FREE_MAX_PROJECTS: number = 3;
+
+  @IsNumber()
+  @IsOptional()
+  FREE_MAX_SHARES_PER_PROJECT: number = 3;
 }
 
 export function validate(config: Record<string, unknown>) {

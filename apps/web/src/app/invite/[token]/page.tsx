@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { acceptProjectInvite } from "@/editor/collaboration/sharedProjectApi";
 
@@ -41,6 +42,12 @@ export default function InvitePage() {
           <>
             <h1 className="m-0 text-[22px] font-extrabold text-[#f2f4f7]">Invite unavailable</h1>
             <p className="m-0 max-w-[420px] text-sm font-bold text-[#ffd0d0]">{error}</p>
+            <Link
+              href="/"
+              className="mt-1 inline-flex items-center gap-2 rounded-md border border-[#30353d] bg-[#202329] px-3 py-2 text-sm font-extrabold text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731]"
+            >
+              ← Home
+            </Link>
           </>
         ) : (
           <>
