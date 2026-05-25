@@ -236,6 +236,7 @@ export function CanvasView({
   >(() => undefined);
   const handledClipboardCommandRequestIdRef = useRef<number | null>(null);
   const handledTemplateInsertRequestIdRef = useRef<number | null>(null);
+  const handledTemplateSaveRequestIdRef = useRef<number | null>(null);
   const [fps, setFps] = useState(0);
   const [comments, setComments] = useState<ProjectComment[]>([]);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
@@ -1018,6 +1019,12 @@ export function CanvasView({
 
     let didCancel = false;
     const request = templateSaveRequest;
+
+    if (handledTemplateSaveRequestIdRef.current === request.id) {
+      return;
+    }
+
+    handledTemplateSaveRequestIdRef.current = request.id;
 
     async function saveTemplate() {
       if (!editorAppRef.current) {

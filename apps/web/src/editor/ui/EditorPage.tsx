@@ -1,6 +1,10 @@
 'use client';
 
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
+import type {
+  CSSProperties,
+  DragEvent as ReactDragEvent,
+  PointerEvent as ReactPointerEvent,
+} from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
 import { MessageCircle } from 'lucide-react';
@@ -417,6 +421,33 @@ export function EditorPage() {
         layer.type === 'text',
     )
     .map((layer) => layer.fontFamily);
+
+  useEffect(() => {
+    if (activeDocument) {
+      return;
+    }
+
+    function handlePaste(event: ClipboardEvent) {
+      if (isEditableEventTarget(event.target)) {
+        return;
+      }
+
+      const file = getPastedImageFile(event);
+
+      if (!file) {
+        return;
+      }
+
+      event.preventDefault();
+      void openImageAsNewDocument(file);
+    }
+
+    window.addEventListener('paste', handlePaste);
+
+    return () => {
+      window.removeEventListener('paste', handlePaste);
+    };
+  }, [activeDocument]);
 
   useEffect(() => {
     if (
@@ -1294,6 +1325,39 @@ export function EditorPage() {
     emptyProjectInputRef.current?.click();
   }
 
+  function handleEmptyStateDragOver(event: ReactDragEvent<HTMLElement>) {
+    if (!hasOpenableDragData(event.dataTransfer)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  }
+
+  function handleEmptyStateDrop(event: ReactDragEvent<HTMLElement>) {
+    const file = getOpenableFile(event.dataTransfer.files);
+
+    if (!file) {
+      return;
+    }
+
+    event.preventDefault();
+    openDroppedFile(file);
+  }
+
+  function openDroppedFile(file: File) {
+    setRecentProjectError(null);
+
+    if (isWebsterProjectFile(file)) {
+      openProjectInNewTab(file, null);
+      return;
+    }
+
+    if (isImageFile(file)) {
+      void openImageAsNewDocument(file);
+    }
+  }
+
   function getSidePanelHeight() {
     return (
       sidePanelsRef.current?.getBoundingClientRect().height ??
@@ -1757,6 +1821,8 @@ export function EditorPage() {
             <section
               className=' min-h-0 min-w-0 place-items-center bg-[#101113] p-7 flex overflow-y-auto'
               aria-label='No open documents'
+              onDragOver={handleEmptyStateDragOver}
+              onDrop={handleEmptyStateDrop}
             >
               <div className='flex-1 flex items-center justify-center'>
                 <div className='text-center'>
@@ -1769,8 +1835,9 @@ export function EditorPage() {
                     </p>
                     <p className='mt-6 max-w-[460px] text-[13px] font-semibold leading-[1.65] text-[#9aa1ab]'>
                       Welcome to the free advanced photo editor. Start editing
-                      by clicking the “Open Image” button, drag and drop a file,
-                      or paste it from the clipboard (Ctrl+V).
+                      by clicking the Open image button, dropping an image or
+                      .webster file, or pasting an image from the clipboard
+                      (Ctrl+V).
                     </p>
                   </div>
                 </div>
@@ -2281,6 +2348,57 @@ function ImageLayerCommandOverlay({
         </div>
       </div>
     </div>
+  );
+}
+
+function getOpenableFile(files: FileList) {
+  return (
+    Array.from(files).find(
+      (file) => isImageFile(file) || isWebsterProjectFile(file),
+    ) ?? null
+  );
+}
+
+function hasOpenableDragData(dataTransfer: DataTransfer) {
+  if (getOpenableFile(dataTransfer.files)) {
+    return true;
+  }
+
+  return Array.from(dataTransfer.items).some((item) => item.kind === 'file');
+}
+
+function getPastedImageFile(event: ClipboardEvent) {
+  const items = Array.from(event.clipboardData?.items ?? []);
+  const imageItem = items.find(
+    (item) => item.kind === 'file' && item.type.startsWith('image/'),
+  );
+  const imageFile = imageItem?.getAsFile();
+
+  if (imageFile) {
+    return imageFile;
+  }
+
+  return Array.from(event.clipboardData?.files ?? []).find(isImageFile) ?? null;
+}
+
+function isImageFile(file: File) {
+  return file.type.startsWith('image/');
+}
+
+function isWebsterProjectFile(file: File) {
+  return (
+    file.name.toLowerCase().endsWith('.webster') ||
+    file.type === 'application/vnd.webster.project'
+  );
+}
+
+function isEditableEventTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  return Boolean(
+    target.closest('input, textarea, select, [contenteditable="true"]'),
   );
 }
 
