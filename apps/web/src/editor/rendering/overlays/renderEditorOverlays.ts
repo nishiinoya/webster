@@ -12,14 +12,31 @@ import { AdjustmentLayer } from "../../layers/AdjustmentLayer";
 import { GroupLayer } from "../../layers/GroupLayer";
 import { ImageLayer } from "../../layers/ImageLayer";
 import { Scene } from "../../scene/Scene";
+import type { EditorCommentOverlayState } from "../../comments/CommentModel";
 import { Quad } from "../geometry/Quad";
 import { SelectionOverlayRenderer } from "../selection/SelectionOverlayRenderer";
 import { SolidColorShaderProgram } from "../shaders/SolidColorShaderProgram";
+import { renderCommentOverlays } from "./renderCommentOverlays";
+import type { CommentOverlayViewport, OverlayTextItem } from "./commentHitTesting";
 
 type OverlayRendererContext = {
   quad: Quad;
   selectionOverlayRenderer: SelectionOverlayRenderer;
   solidColorShaderProgram: SolidColorShaderProgram;
+  viewport: CommentOverlayViewport;
+  drawScreenLine: (
+    start: { x: number; y: number },
+    end: { x: number; y: number },
+    width: number
+  ) => void;
+  drawScreenRectangle: (rectangle: {
+    height: number;
+    rotation?: number;
+    width: number;
+    x: number;
+    y: number;
+  }) => void;
+  drawScreenText: (text: OverlayTextItem) => void;
   drawWorldRectangle: (rectangle: {
     height: number;
     rotation?: number;
@@ -40,7 +57,9 @@ type RenderOptions = {
   showRotationHandle: boolean;
   showSelectionOverlay: boolean;
   showSelectionOutline: boolean;
+  showCommentOverlay: boolean;
   showTransformHandles: boolean;
+  commentOverlay?: EditorCommentOverlayState | null;
 };
 
 /**
@@ -96,6 +115,16 @@ export function renderEditorOverlays(
     if (draftSelection) {
       context.selectionOverlayRenderer.render(draftSelection, camera, scene.document);
     }
+  }
+
+  if (options.showCommentOverlay) {
+    renderCommentOverlays(
+      context,
+      scene,
+      camera,
+      options.commentOverlay ?? null,
+      context.viewport
+    );
   }
 }
 

@@ -29,8 +29,11 @@ import { TexturedShaderProgram } from "./shaders/TexturedShaderProgram";
 import { Object3DShaderProgram } from "./shaders/Object3DShaderProgram";
 import { TextureManager } from "./textures/TextureManager";
 import { SelectionOverlayRenderer } from "./selection/SelectionOverlayRenderer";
+import { getBitmapGlyphPattern } from "./text/BitmapText";
 import type { BitmapTextRect } from "./text/BitmapText";
+import { buildCompiledTextGeometry } from "./text/CompiledTextGeometry";
 import { FontLoader } from "./text/FontLoader";
+import type { EditorCommentOverlayState } from "../comments/CommentModel";
 import { renderImageLayer } from "./layers/renderImageLayer";
 import { renderObject3DLayer } from "./layers/renderObject3DLayer";
 import { renderShapeLayer } from "./layers/renderShapeLayer";
@@ -48,6 +51,7 @@ import {
   drawWorldRectangle
 } from "./primitives/layerPrimitives";
 import { drawWorldLine, renderEditorOverlays } from "./overlays/renderEditorOverlays";
+import type { OverlayTextItem } from "./overlays/commentHitTesting";
 import {
   getEffectiveLayerFilters,
   getTopmostAdjustmentBlurIndex,
@@ -55,7 +59,7 @@ import {
 } from "./filters/layerFilters";
 import type { EffectiveLayerFilters } from "./filters/layerFilters";
 import { getAdjustmentLayerBlurRegion, getFullscreenBlurRegion } from "./blur/blurMath";
-import { getDropShadowPasses } from "./renderingHelpers";
+import { getDropShadowPasses, isFiniteFloatArray } from "./renderingHelpers";
 import { buildStrokePathGeometry } from "./strokes/strokeGeometry";
 import type { CachedStrokePathGeometry } from "./strokes/strokeGeometry";
 import {
@@ -79,8 +83,10 @@ export type RendererShaderSources = {
 };
 
 export type RenderOptions = {
+  commentOverlay?: EditorCommentOverlayState | null;
   documentBackground: "checkerboard" | "transparent" | "white";
   showCanvasBorder: boolean;
+  showCommentOverlay: boolean;
   showImageWarpControls: boolean;
   showSelectionOverlay: boolean;
   showSelectionOutline: boolean;
@@ -110,6 +116,7 @@ type RenderTarget = {
 export const editorRenderOptions: RenderOptions = {
   documentBackground: "checkerboard",
   showCanvasBorder: true,
+  showCommentOverlay: true,
   showImageWarpControls: true,
   showSelectionOverlay: true,
   showSelectionOutline: true,
@@ -121,6 +128,7 @@ export const editorRenderOptions: RenderOptions = {
 export const imageExportRenderOptions: RenderOptions = {
   documentBackground: "transparent",
   showCanvasBorder: false,
+  showCommentOverlay: false,
   showImageWarpControls: false,
   showSelectionOverlay: false,
   showSelectionOutline: false,
@@ -201,7 +209,11 @@ export class Renderer {
       loadShaderSource("/glsl/postprocess.vert.glsl"),
       loadShaderSource("/glsl/textured.frag.glsl"),
       loadShaderSource("/glsl/textured.vert.glsl"),
-      FontLoader.create()
+      FontLoader.create().then(async (loader) => {
+        await loader.ensureFont("Basic", false, false);
+
+        return loader;
+      })
     ]);
 
     return new Renderer(
@@ -427,6 +439,13 @@ export class Renderer {
         quad: this.quad,
         selectionOverlayRenderer: this.selectionOverlayRenderer,
         solidColorShaderProgram: this.solidColorShaderProgram,
+        viewport: {
+          height: this.cssHeight,
+          width: this.cssWidth
+        },
+        drawScreenLine: this.drawScreenLine.bind(this),
+        drawScreenRectangle: this.drawScreenRectangle.bind(this),
+        drawScreenText: this.drawScreenText.bind(this),
         drawWorldRectangle: this.drawRectangle.bind(this),
         drawWorldLine: this.drawLine.bind(this)
       },
@@ -921,6 +940,200 @@ export class Renderer {
 
   private drawLine(start: { x: number; y: number }, end: { x: number; y: number }, width: number) {
     drawWorldLine(this.drawRectangle.bind(this), start, end, width);
+  }
+
+  private drawScreenText(text: OverlayTextItem) {
+    if (!text.text) {
+      return;
+    }
+
+    const font = this.fontLoader.requestFont("Basic", Boolean(text.bold), false);
+
+    if (font && this.drawCompiledScreenText(text, font)) {
+      return;
+    }
+
+    this.drawBitmapScreenText(text);
+  }
+
+  private drawCompiledScreenText(
+    text: OverlayTextItem,
+    resolvedFont: NonNullable<ReturnType<FontLoader["requestFont"]>>
+  ) {
+    const layer = new TextLayer({
+      align: text.align ?? "left",
+      bold: text.bold ?? false,
+      color: text.color,
+      fontFamily: "Basic",
+      fontSize: text.fontSize,
+      height: text.rect.height,
+      id: "comment-overlay-text",
+      name: "Comment overlay text",
+      opacity: 1,
+      text: text.text,
+      width: text.rect.width,
+      x: text.rect.x,
+      y: this.cssHeight - text.rect.y - text.rect.height
+    });
+    const geometry = buildCompiledTextGeometry(
+      layer,
+      resolvedFont.font,
+      layer.text.length,
+      {
+        synthesizeBold: resolvedFont.synthesizeBold,
+        synthesizeItalic: resolvedFont.synthesizeItalic
+      }
+    );
+
+    if (geometry.indices.length === 0) {
+      return true;
+    }
+
+    if (geometry.indices instanceof Uint32Array && !this.supportsUint32Indices) {
+      return false;
+    }
+
+    if (!isFiniteFloatArray(geometry.vertices) || !isFiniteFloatArray(geometry.texCoords)) {
+      return false;
+    }
+
+    const normalizedVertices = new Float32Array(geometry.vertices.length);
+
+    for (let index = 0; index < geometry.vertices.length; index += 2) {
+      normalizedVertices[index] = geometry.vertices[index] / layer.width;
+      normalizedVertices[index + 1] = geometry.vertices[index + 1] / layer.height;
+    }
+
+    this.solidColorShaderProgram.use();
+    this.solidColorShaderProgram.setProjection(this.getScreenProjectionMatrix());
+    this.solidColorShaderProgram.setModel(getModelMatrix(layer));
+    this.solidColorShaderProgram.setFilters(defaultLayerFilters);
+    this.solidColorShaderProgram.setAdjustmentFilters([]);
+    this.solidColorShaderProgram.setMaskEnabled(false);
+    this.solidColorShaderProgram.setLayerTexture(null);
+    this.solidColorShaderProgram.setImportedTexture(false);
+    this.solidColorShaderProgram.setColor(text.color);
+
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.textGeometryPositionBuffer);
+    this.gl.bufferData(this.gl.ARRAY_BUFFER, normalizedVertices, this.gl.DYNAMIC_DRAW);
+    this.gl.enableVertexAttribArray(this.solidColorShaderProgram.positionAttributeLocation);
+    this.gl.vertexAttribPointer(
+      this.solidColorShaderProgram.positionAttributeLocation,
+      2,
+      this.gl.FLOAT,
+      false,
+      0,
+      0
+    );
+
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.textGeometryTexCoordBuffer);
+    this.gl.bufferData(this.gl.ARRAY_BUFFER, geometry.texCoords, this.gl.DYNAMIC_DRAW);
+    this.gl.enableVertexAttribArray(this.solidColorShaderProgram.texCoordAttributeLocation);
+    this.gl.vertexAttribPointer(
+      this.solidColorShaderProgram.texCoordAttributeLocation,
+      2,
+      this.gl.FLOAT,
+      false,
+      0,
+      0
+    );
+
+    this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.textGeometryIndexBuffer);
+    this.gl.bufferData(this.gl.ELEMENT_ARRAY_BUFFER, geometry.indices, this.gl.DYNAMIC_DRAW);
+    this.gl.drawElements(
+      this.gl.TRIANGLES,
+      geometry.indices.length,
+      geometry.indices instanceof Uint32Array ? this.gl.UNSIGNED_INT : this.gl.UNSIGNED_SHORT,
+      0
+    );
+
+    return true;
+  }
+
+  private drawBitmapScreenText(text: OverlayTextItem) {
+    const cellSize = Math.max(1.4, text.fontSize / 7);
+    const glyphWidth = cellSize * 5;
+    const glyphHeight = cellSize * 7;
+    const advance = cellSize * 6;
+    const textWidth =
+      text.text.length > 0 ? glyphWidth + Math.max(0, text.text.length - 1) * advance : 0;
+    const startX =
+      text.align === "center"
+        ? text.rect.x + (text.rect.width - textWidth) / 2
+        : text.align === "right"
+          ? text.rect.x + text.rect.width - textWidth
+          : text.rect.x;
+    const startY = text.rect.y + Math.max(0, (text.rect.height - glyphHeight) / 2);
+    const pixelWidth = text.bold ? cellSize * 1.18 : cellSize;
+
+    this.solidColorShaderProgram.use();
+    this.solidColorShaderProgram.setProjection(this.getScreenProjectionMatrix());
+    this.solidColorShaderProgram.setFilters(defaultLayerFilters);
+    this.solidColorShaderProgram.setAdjustmentFilters([]);
+    this.solidColorShaderProgram.setMaskEnabled(false);
+    this.solidColorShaderProgram.setLayerTexture(null);
+    this.solidColorShaderProgram.setImportedTexture(false);
+    this.solidColorShaderProgram.setColor(text.color);
+
+    for (let charIndex = 0; charIndex < text.text.length; charIndex += 1) {
+      const pattern = getBitmapGlyphPattern(text.text[charIndex]);
+      const charX = startX + charIndex * advance;
+
+      for (let row = 0; row < pattern.length; row += 1) {
+        for (let column = 0; column < pattern[row].length; column += 1) {
+          if (pattern[row][column] !== "1") {
+            continue;
+          }
+
+          this.drawScreenRectangle({
+            height: cellSize,
+            width: pixelWidth,
+            x: charX + column * cellSize,
+            y: startY + row * cellSize
+          });
+        }
+      }
+    }
+  }
+
+  private drawScreenRectangle(rectangle: {
+    height: number;
+    rotation?: number;
+    width: number;
+    x: number;
+    y: number;
+  }) {
+    this.drawRectangle({
+      ...rectangle,
+      y: this.cssHeight - rectangle.y - rectangle.height
+    });
+  }
+
+  private drawScreenLine(
+    start: { x: number; y: number },
+    end: { x: number; y: number },
+    width: number
+  ) {
+    drawWorldLine(
+      this.drawRectangle.bind(this),
+      { x: start.x, y: this.cssHeight - start.y },
+      { x: end.x, y: this.cssHeight - end.y },
+      width
+    );
+  }
+
+  private getScreenProjectionMatrix() {
+    return new Float32Array([
+      2 / Math.max(1, this.cssWidth),
+      0,
+      0,
+      0,
+      2 / Math.max(1, this.cssHeight),
+      0,
+      -1,
+      -1,
+      1
+    ]);
   }
 
   private drawLayerContent(

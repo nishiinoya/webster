@@ -161,8 +161,12 @@ function splitLines(text: string) {
   return text.split("\n");
 }
 
-function getGlyphPattern(char: string) {
+export function getBitmapGlyphPattern(char: string) {
   return glyphs[char.toUpperCase()] ?? fallbackGlyph;
+}
+
+function getGlyphPattern(char: string) {
+  return getBitmapGlyphPattern(char);
 }
 
 function getLineWidth(length: number, glyphWidth: number, advance: number) {

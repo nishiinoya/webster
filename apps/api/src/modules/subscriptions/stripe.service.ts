@@ -119,14 +119,14 @@ export class StripeService implements OnModuleInit {
         {
           priceId: 'monthly',
           interval: 'month',
-          amount: this.monthlyAmountCents / 100,
+          amount: this.monthlyAmountCents,
           currency: this.currency,
           productName: this.productName,
         },
         {
           priceId: 'yearly',
           interval: 'year',
-          amount: this.yearlyAmountCents / 100,
+          amount: this.yearlyAmountCents,
           currency: this.currency,
           productName: this.productName,
         },
