@@ -15,6 +15,7 @@ import { AssetsService } from './assets.service';
 import { UploadAssetsMetadataDto } from './dto/upload-assets.dto';
 import { CurrentUser } from '../../common/auth/current-user.decorator';
 import { AuthUser } from '../../common/types/auth-user';
+import { Public } from '../../common/auth/public.decorator';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 
@@ -60,6 +61,32 @@ export class AssetsController {
     );
 
     return { assets };
+  }
+
+  @Public()
+  @Get('public/*')
+  async getPublicViewerAsset(
+    @Param('projectId') projectId: string,
+    @Param('0') wildcardPath: string,
+    @Res() res: Response,
+  ) {
+    if (!wildcardPath || wildcardPath.includes('..')) {
+      throw new BadRequestException('Invalid asset path');
+    }
+
+    const assetPath = wildcardPath.replace(/\\/g, '/');
+    const { body, mimeType, size } = await this.assetsService.streamPublicViewerAsset(
+      projectId,
+      assetPath,
+    );
+
+    res.setHeader('Content-Type', mimeType);
+    if (size > 0) {
+      res.setHeader('Content-Length', size);
+    }
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+
+    body.pipe(res);
   }
 
   @Get('*')

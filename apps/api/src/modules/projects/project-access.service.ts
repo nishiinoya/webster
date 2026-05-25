@@ -48,29 +48,7 @@ export class ProjectAccessService {
     projectId: string,
     userId: string,
   ): Promise<EffectiveRole> {
-    const existingRole = await this.resolveRole(projectId, userId);
-
-    if (existingRole) {
-      return existingRole;
-    }
-
-    const linkAccess = await this.prisma.projectLinkAccess.findFirst({
-      where: { projectId, project: { isDeleted: false } },
-      select: { mode: true, permission: true },
-    });
-
-    if (linkAccess?.mode !== 'anyone_with_link') {
-      return null;
-    }
-
-    await this.upsertUserAccess(
-      projectId,
-      userId,
-      linkAccess.permission,
-      userId,
-    );
-
-    return linkAccess.permission as EffectiveRole;
+    return this.resolveRole(projectId, userId);
   }
 
   async requireRole(
@@ -114,6 +92,38 @@ export class ProjectAccessService {
         where: { id: existing.id },
         data: {
           permission: highestPermission(existing.permission, permission),
+          revokedAt: null,
+          expiresAt: null,
+        },
+      });
+    }
+
+    return this.prisma.projectAccess.create({
+      data: {
+        projectId,
+        sharedWithUserId: userId,
+        permission,
+        createdBy,
+      },
+    });
+  }
+
+  async setUserAccess(
+    projectId: string,
+    userId: string,
+    permission: 'viewer' | 'commenter' | 'editor',
+    createdBy: string,
+  ) {
+    const existing = await this.prisma.projectAccess.findFirst({
+      where: { projectId, sharedWithUserId: userId },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    if (existing) {
+      return this.prisma.projectAccess.update({
+        where: { id: existing.id },
+        data: {
+          permission,
           revokedAt: null,
           expiresAt: null,
         },

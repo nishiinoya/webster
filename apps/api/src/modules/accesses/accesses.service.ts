@@ -35,7 +35,15 @@ export class AccessesService {
   async listAccesses(projectId: string, currentUser: AuthUser) {
     await this.requireOwner(projectId, currentUser.id);
 
-    const [accesses, pendingInvites, linkAccess] = await Promise.all([
+    const [project, accesses, removedAccesses, pendingInvites, linkAccess] = await Promise.all([
+      this.prisma.project.findFirst({
+        where: { id: projectId, isDeleted: false },
+        include: {
+          owner: {
+            select: { id: true, email: true, displayName: true },
+          },
+        },
+      }),
       this.prisma.projectAccess.findMany({
         where: {
           projectId,
@@ -52,6 +60,19 @@ export class AccessesService {
         },
         orderBy: { createdAt: 'asc' },
       }),
+      this.prisma.projectAccess.findMany({
+        where: {
+          projectId,
+          revokedAt: { not: null },
+          sharedWithUserId: { not: null },
+        },
+        include: {
+          sharedWithUser: {
+            select: { id: true, email: true, displayName: true },
+          },
+        },
+        orderBy: { updatedAt: 'desc' },
+      }),
       this.prisma.projectInvite.findMany({
         where: { projectId, status: 'pending' },
         include: {
@@ -66,13 +87,29 @@ export class AccessesService {
       }),
     ]);
 
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
+
     return {
-      accesses: accesses.map((access) => ({
+      owner: project.owner,
+      accesses: accesses
+        .filter((access) => access.sharedWithUser?.id !== project.owner.id)
+        .map((access) => ({
+          id: access.id,
+          permission: access.permission,
+          expiresAt: access.expiresAt?.toISOString() ?? null,
+          createdAt: access.createdAt.toISOString(),
+          updatedAt: access.updatedAt.toISOString(),
+          sharedWithUser: access.sharedWithUser,
+        })),
+      removedAccesses: removedAccesses.map((access) => ({
         id: access.id,
         permission: access.permission,
         expiresAt: access.expiresAt?.toISOString() ?? null,
         createdAt: access.createdAt.toISOString(),
         updatedAt: access.updatedAt.toISOString(),
+        revokedAt: access.revokedAt?.toISOString() ?? null,
         sharedWithUser: access.sharedWithUser,
       })),
       pendingInvites: pendingInvites.map((invite) => ({
@@ -88,11 +125,15 @@ export class AccessesService {
         ? {
             mode: linkAccess.mode,
             permission: linkAccess.permission,
+            hasInviteLink: Boolean(linkAccess.tokenHash),
+            inviteLink: null,
             updatedAt: linkAccess.updatedAt.toISOString(),
           }
         : {
             mode: 'restricted' as const,
             permission: 'viewer' as const,
+            hasInviteLink: false,
+            inviteLink: null,
             updatedAt: null,
           },
     };
@@ -116,62 +157,49 @@ export class AccessesService {
     }
 
     const normalizedEmail = normalizeEmail(dto.email);
-    const token = createInviteToken();
-    const tokenHash = hashInviteToken(token);
     const expiresAt = dto.expiresAt ? new Date(dto.expiresAt) : null;
     const targetUser = await this.prisma.user.findUnique({
       where: { email: normalizedEmail },
       select: { id: true, email: true, displayName: true },
     });
 
-    const isNewCollaborator = targetUser
-      ? !(await this.prisma.projectAccess.findFirst({
-          where: { projectId, sharedWithUserId: targetUser.id, revokedAt: null },
-          select: { id: true },
-        }))
-      : !(await this.prisma.projectInvite.findFirst({
-          where: { projectId, invitedEmail: normalizedEmail, status: 'pending' },
-          select: { id: true },
-        }));
-    if (isNewCollaborator) {
-      await this.entitlements?.assertCanShareProject(projectId, currentUser.id);
-    }
-
     if (targetUser) {
-      const access = await this.projectAccessService!.upsertUserAccess(
-        projectId,
-        targetUser.id,
-        dto.permission,
-        currentUser.id,
-      );
+      if (targetUser.id === currentUser.id) {
+        throw new BadRequestException('You already own this project.');
+      }
 
-      await this.prisma.projectInvite.create({
-        data: {
-          projectId,
-          invitedEmail: normalizedEmail,
-          invitedByUserId: currentUser.id,
-          permission: dto.permission,
-          tokenHash,
-          status: 'accepted',
-          expiresAt,
-          acceptedByUserId: targetUser.id,
-          acceptedAt: new Date(),
-        },
+      const activeAccess = await this.prisma.projectAccess.findFirst({
+        where: { projectId, sharedWithUserId: targetUser.id, revokedAt: null },
+        select: { id: true },
       });
 
-      return {
-        access: {
-          id: access.id,
-          permission: access.permission,
-          expiresAt: access.expiresAt?.toISOString() ?? null,
-          createdAt: access.createdAt.toISOString(),
-          updatedAt: access.updatedAt.toISOString(),
-          sharedWithUser: targetUser,
+      if (activeAccess) {
+        throw new BadRequestException('This person already has access.');
+      }
+    }
+
+    const existingPendingInvite = await this.prisma.projectInvite.findFirst({
+      where: { projectId, invitedEmail: normalizedEmail, status: 'pending' },
+      include: {
+        invitedByUser: {
+          select: { id: true, email: true, displayName: true },
         },
-        invite: null,
+      },
+    });
+
+    if (existingPendingInvite) {
+      return {
+        access: null,
+        invite: serializeInvite(existingPendingInvite),
         inviteLink: null,
+        message: 'This person already has a pending invite.',
       };
     }
+
+    await this.entitlements?.assertCanShareProject(projectId, currentUser.id);
+
+    const token = createInviteToken();
+    const tokenHash = hashInviteToken(token);
 
     const invite = await this.prisma.projectInvite.create({
       data: {
@@ -191,15 +219,7 @@ export class AccessesService {
 
     return {
       access: null,
-      invite: {
-        id: invite.id,
-        invitedEmail: invite.invitedEmail,
-        invitedByUser: invite.invitedByUser,
-        permission: invite.permission,
-        expiresAt: invite.expiresAt?.toISOString() ?? null,
-        createdAt: invite.createdAt.toISOString(),
-        status: invite.status,
-      },
+      invite: serializeInvite(invite),
       inviteLink: buildInviteLink(appBaseUrl, token),
     };
   }
@@ -214,10 +234,17 @@ export class AccessesService {
 
     const existing = await this.prisma.projectAccess.findFirst({
       where: { id: accessId, projectId, revokedAt: null },
+      include: {
+        project: { select: { ownerId: true } },
+      },
     });
 
     if (!existing) {
       throw new NotFoundException('Access record not found');
+    }
+
+    if (existing.sharedWithUserId === existing.project.ownerId) {
+      throw new BadRequestException('Project owner role cannot be changed here.');
     }
 
     const access = await this.prisma.projectAccess.update({
@@ -254,16 +281,57 @@ export class AccessesService {
 
     const existing = await this.prisma.projectAccess.findFirst({
       where: { id: accessId, projectId, revokedAt: null },
+      include: {
+        project: { select: { ownerId: true } },
+      },
     });
 
     if (!existing) {
       throw new NotFoundException('Access record not found');
     }
 
+    if (existing.sharedWithUserId === existing.project.ownerId) {
+      throw new BadRequestException('Project owner access cannot be revoked here.');
+    }
+
     await this.prisma.projectAccess.update({
       where: { id: accessId },
       data: { revokedAt: new Date() },
     });
+  }
+
+  async updateInvite(
+    projectId: string,
+    inviteId: string,
+    dto: UpdateAccessDto,
+    currentUser: AuthUser,
+  ) {
+    await this.requireOwner(projectId, currentUser.id);
+
+    const invite = await this.prisma.projectInvite.findFirst({
+      where: { id: inviteId, projectId, status: 'pending' },
+    });
+
+    if (!invite) {
+      throw new NotFoundException('Invite not found');
+    }
+
+    const updated = await this.prisma.projectInvite.update({
+      where: { id: inviteId },
+      data: {
+        ...(dto.permission !== undefined && { permission: dto.permission }),
+        ...(dto.expiresAt !== undefined && {
+          expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
+        }),
+      },
+      include: {
+        invitedByUser: {
+          select: { id: true, email: true, displayName: true },
+        },
+      },
+    });
+
+    return serializeInvite(updated);
   }
 
   async revokeInvite(
@@ -301,8 +369,7 @@ export class AccessesService {
 
     let token: string | null = null;
     const shouldGenerateToken =
-      dto.mode === 'anyone_with_link' &&
-      (!existing?.tokenHash || existing.mode !== 'anyone_with_link');
+      dto.mode === 'anyone_with_link' && !existing?.tokenHash;
 
     const tokenHash = shouldGenerateToken
       ? hashInviteToken((token = createInviteToken()))
@@ -329,9 +396,44 @@ export class AccessesService {
       linkAccess: {
         mode: linkAccess.mode,
         permission: linkAccess.permission,
+        hasInviteLink: Boolean(linkAccess.tokenHash),
+        inviteLink: token ? buildInviteLink(appBaseUrl, token) : null,
         updatedAt: linkAccess.updatedAt.toISOString(),
       },
       inviteLink: token ? buildInviteLink(appBaseUrl, token) : null,
+    };
+  }
+
+  async resetLinkAccess(
+    projectId: string,
+    currentUser: AuthUser,
+    appBaseUrl?: string,
+  ) {
+    await this.requireOwner(projectId, currentUser.id);
+
+    const existing = await this.prisma.projectLinkAccess.findUnique({
+      where: { projectId },
+    });
+
+    if (!existing || existing.mode !== 'anyone_with_link') {
+      throw new BadRequestException('Enable anyone-with-link before resetting the link.');
+    }
+
+    const token = createInviteToken();
+    const linkAccess = await this.prisma.projectLinkAccess.update({
+      where: { projectId },
+      data: { tokenHash: hashInviteToken(token) },
+    });
+
+    return {
+      linkAccess: {
+        mode: linkAccess.mode,
+        permission: linkAccess.permission,
+        hasInviteLink: true,
+        inviteLink: buildInviteLink(appBaseUrl, token),
+        updatedAt: linkAccess.updatedAt.toISOString(),
+      },
+      inviteLink: buildInviteLink(appBaseUrl, token),
     };
   }
 
@@ -384,7 +486,7 @@ export class AccessesService {
         throw new ForbiddenException('This invite is for a different email address');
       }
 
-      await this.projectAccessService!.upsertUserAccess(
+      await this.projectAccessService!.setUserAccess(
         invite.projectId,
         currentUser.id,
         invite.permission,
@@ -409,7 +511,7 @@ export class AccessesService {
 
     const linkAccess = await this.prisma.projectLinkAccess.findUnique({
       where: { tokenHash },
-      include: { project: { select: { id: true, projectName: true, isDeleted: true } } },
+      include: { project: { select: { id: true, projectName: true, ownerId: true, isDeleted: true } } },
     });
 
     if (
@@ -420,7 +522,39 @@ export class AccessesService {
       throw new NotFoundException('Invite not found');
     }
 
-    await this.projectAccessService!.upsertUserAccess(
+    if (linkAccess.project.ownerId === currentUser.id) {
+      return {
+        alreadyHasAccess: true,
+        projectId: linkAccess.projectId,
+        projectName: linkAccess.project.projectName,
+        role: 'owner',
+      };
+    }
+
+    const existingAccess = await this.prisma.projectAccess.findFirst({
+      where: {
+        projectId: linkAccess.projectId,
+        sharedWithUserId: currentUser.id,
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    if (existingAccess?.revokedAt) {
+      throw new ForbiddenException(
+        'You were removed from this project. Ask the owner to invite you again.',
+      );
+    }
+
+    if (existingAccess) {
+      return {
+        alreadyHasAccess: true,
+        projectId: linkAccess.projectId,
+        projectName: linkAccess.project.projectName,
+        role: existingAccess.permission,
+      };
+    }
+
+    const access = await this.projectAccessService!.setUserAccess(
       linkAccess.projectId,
       currentUser.id,
       linkAccess.permission,
@@ -428,11 +562,32 @@ export class AccessesService {
     );
 
     return {
+      alreadyHasAccess: false,
       projectId: linkAccess.projectId,
       projectName: linkAccess.project.projectName,
-      role: linkAccess.permission,
+      role: access.permission,
     };
   }
+}
+
+function serializeInvite(invite: {
+  id: string;
+  invitedEmail: string | null;
+  invitedByUser: { id: string; email: string; displayName: string | null };
+  permission: Permission;
+  expiresAt: Date | null;
+  createdAt: Date;
+  status: string;
+}) {
+  return {
+    id: invite.id,
+    invitedEmail: invite.invitedEmail,
+    invitedByUser: invite.invitedByUser,
+    permission: invite.permission,
+    expiresAt: invite.expiresAt?.toISOString() ?? null,
+    createdAt: invite.createdAt.toISOString(),
+    status: invite.status,
+  };
 }
 
 function normalizeEmail(email: string) {

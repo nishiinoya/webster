@@ -61,6 +61,34 @@ export class AccessesController {
     );
   }
 
+  @Patch('invites/:inviteId')
+  updateInvite(
+    @Param('id') projectId: string,
+    @Param('inviteId') inviteId: string,
+    @Body() dto: UpdateAccessDto,
+    @CurrentUser() currentUser: AuthUser,
+  ) {
+    return this.accessesService.updateInvite(
+      projectId,
+      inviteId,
+      dto,
+      currentUser,
+    );
+  }
+
+  @Post('link-access/reset')
+  resetLinkAccess(
+    @Param('id') projectId: string,
+    @CurrentUser() currentUser: AuthUser,
+    @Req() req: Request,
+  ) {
+    return this.accessesService.resetLinkAccess(
+      projectId,
+      currentUser,
+      getAppBaseUrl(req),
+    );
+  }
+
   @Patch(':accessId')
   updateAccess(
     @Param('id') projectId: string,

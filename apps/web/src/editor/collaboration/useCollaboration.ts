@@ -49,6 +49,7 @@ import {
   isUpgradeRequiredError,
   listProjectSnapshots,
   loadSharedProject,
+  loadPublicViewerProject,
   restoreProjectSnapshot,
   saveSharedProject,
   uploadLocalWebsterProject,
@@ -133,7 +134,20 @@ export function useCollaboration({
   const currentUserIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    getCurrentUser().then((u) => { currentUserIdRef.current = u.id; }).catch(() => {});
+    getAccessToken()
+      .then((token) => {
+        if (!token) {
+          return null;
+        }
+
+        return getCurrentUser();
+      })
+      .then((user) => {
+        currentUserIdRef.current = user?.id ?? null;
+      })
+      .catch(() => {
+        currentUserIdRef.current = null;
+      });
   }, []);
   const clientRef = useRef<CollaborationClient | null>(null);
   const handledRequestIdRef = useRef<number | null>(null);
@@ -715,10 +729,15 @@ export function useCollaboration({
       knownAssetReferencesRef.current.clear();
       knownAssetBlobsRef.current.clear();
 
-      const payload = await loadSharedProject(projectId);
+      const accessToken = await getAccessToken();
+      const payload = accessToken
+        ? await loadSharedProject(projectId)
+        : await loadPublicViewerProject(projectId);
 
       await applySharedProjectState(payload);
-      connectToSharedProject(payload);
+      if (accessToken) {
+        connectToSharedProject(payload);
+      }
     },
     [applySharedProjectState, connectToSharedProject, invalidateRemotePreview]
   );

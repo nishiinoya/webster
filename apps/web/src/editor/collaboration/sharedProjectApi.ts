@@ -20,9 +20,9 @@ type CreateSnapshotInput = {
 
 const defaultApiBaseUrl = "/api";
 
-let _getToken: (() => Promise<string>) | null = null;
+let _getToken: (() => Promise<string | null>) | null = null;
 
-export function setAccessTokenGetter(fn: () => Promise<string>) {
+export function setAccessTokenGetter(fn: () => Promise<string | null>) {
   _getToken = fn;
 }
 
@@ -69,6 +69,22 @@ export async function uploadLocalWebsterProject(file: Blob, filename: string) {
 export async function loadSharedProject(projectId: string) {
   return fetchJson<SharedProjectLoadResponse>(
     `/shared-projects/${encodeURIComponent(projectId)}`
+  );
+}
+
+export async function loadPublicViewerProject(projectId: string) {
+  return fetchJson<SharedProjectLoadResponse>(
+    `/shared-projects/${encodeURIComponent(projectId)}/public`,
+    undefined,
+    { auth: false }
+  );
+}
+
+export async function loadPublicViewerInvite(token: string) {
+  return fetchJson<SharedProjectLoadResponse>(
+    `/shared-projects/public-invite/${encodeURIComponent(token)}`,
+    undefined,
+    { auth: false }
   );
 }
 
@@ -335,6 +351,7 @@ export type ProjectAccessEntry = {
   expiresAt: string | null;
   createdAt?: string;
   updatedAt?: string;
+  revokedAt?: string | null;
   sharedWithUser: { id: string; email: string; displayName: string | null } | null;
 };
 
@@ -349,6 +366,8 @@ export type ProjectPendingInviteEntry = {
 };
 
 export type ProjectLinkAccess = {
+  hasInviteLink?: boolean;
+  inviteLink?: string | null;
   mode: "restricted" | "anyone_with_link";
   permission: ProjectAccessPermission;
   updatedAt: string | null;
@@ -356,8 +375,10 @@ export type ProjectLinkAccess = {
 
 export async function listProjectAccesses(projectId: string) {
   return fetchJson<{
+    owner: { id: string; email: string; displayName: string | null };
     accesses: ProjectAccessEntry[];
     pendingInvites: ProjectPendingInviteEntry[];
+    removedAccesses: ProjectAccessEntry[];
     linkAccess: ProjectLinkAccess;
   }>(
     `/projects/${encodeURIComponent(projectId)}/accesses`
@@ -402,6 +423,36 @@ export async function revokeProjectInvite(projectId: string, inviteId: string) {
   }
 }
 
+export async function updateProjectAccess(
+  projectId: string,
+  accessId: string,
+  input: { expiresAt?: string | null; permission?: ProjectAccessPermission }
+) {
+  return fetchJson<ProjectAccessEntry>(
+    `/projects/${encodeURIComponent(projectId)}/accesses/${encodeURIComponent(accessId)}`,
+    {
+      body: JSON.stringify(input),
+      headers: { "Content-Type": "application/json" },
+      method: "PATCH"
+    }
+  );
+}
+
+export async function updateProjectInvite(
+  projectId: string,
+  inviteId: string,
+  input: { expiresAt?: string | null; permission?: ProjectAccessPermission }
+) {
+  return fetchJson<ProjectPendingInviteEntry>(
+    `/projects/${encodeURIComponent(projectId)}/accesses/invites/${encodeURIComponent(inviteId)}`,
+    {
+      body: JSON.stringify(input),
+      headers: { "Content-Type": "application/json" },
+      method: "PATCH"
+    }
+  );
+}
+
 export async function updateProjectLinkAccess(
   projectId: string,
   input: { mode: ProjectLinkAccess["mode"]; permission: ProjectAccessPermission }
@@ -413,6 +464,13 @@ export async function updateProjectLinkAccess(
       headers: { "Content-Type": "application/json" },
       method: "PATCH"
     }
+  );
+}
+
+export async function resetProjectLinkAccess(projectId: string) {
+  return fetchJson<{ linkAccess: ProjectLinkAccess; inviteLink: string | null }>(
+    `/projects/${encodeURIComponent(projectId)}/accesses/link-access/reset`,
+    { method: "POST" }
   );
 }
 
@@ -540,7 +598,11 @@ async function authedFetch(url: string, init?: RequestInit): Promise<Response> {
   const headers: Record<string, string> = {};
 
   if (_getToken) {
-    headers["Authorization"] = "Bearer " + (await _getToken());
+    const token = await _getToken();
+
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
   }
 
   return fetch(url, {
@@ -549,11 +611,19 @@ async function authedFetch(url: string, init?: RequestInit): Promise<Response> {
   });
 }
 
-async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+async function fetchJson<T>(
+  path: string,
+  init?: RequestInit,
+  options: { auth?: boolean } = {}
+): Promise<T> {
   const headers: Record<string, string> = {};
 
-  if (_getToken) {
-    headers["Authorization"] = "Bearer " + (await _getToken());
+  if (options.auth !== false && _getToken) {
+    const token = await _getToken();
+
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
   }
 
   const mergedInit: RequestInit = {

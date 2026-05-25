@@ -14,7 +14,8 @@ export class Camera2D {
   private viewportWidth = 1;
   private viewportHeight = 1;
   private bounds: CameraBounds | null = null;
-  private readonly edgePadding = 196;
+  private readonly maxEdgePadding = 196;
+  private readonly edgePaddingViewportRatio = 0.25;
 
   resize(width: number, height: number) {
     this.viewportWidth = Math.max(1, width);
@@ -111,8 +112,27 @@ export class Camera2D {
     const bottom = this.bounds.y;
     const top = this.bounds.y + this.bounds.height;
 
-    this.x = clampCameraCenter(this.x, left, right, viewWidth, this.edgePadding / this.zoom);
-    this.y = clampCameraCenter(this.y, bottom, top, viewHeight, this.edgePadding / this.zoom);
+    this.x = clampCameraCenter(
+      this.x,
+      left,
+      right,
+      viewWidth,
+      this.getEdgePadding(this.viewportWidth)
+    );
+    this.y = clampCameraCenter(
+      this.y,
+      bottom,
+      top,
+      viewHeight,
+      this.getEdgePadding(this.viewportHeight)
+    );
+  }
+
+  private getEdgePadding(viewportSize: number) {
+    return Math.min(
+      this.maxEdgePadding,
+      viewportSize * this.edgePaddingViewportRatio
+    ) / this.zoom;
   }
 
   dispose() {

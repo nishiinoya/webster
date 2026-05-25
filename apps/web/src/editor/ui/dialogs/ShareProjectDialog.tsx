@@ -3,8 +3,11 @@ import {
   grantProjectAccess,
   isUpgradeRequiredError,
   listProjectAccesses,
+  resetProjectLinkAccess,
   revokeProjectAccess,
   revokeProjectInvite,
+  updateProjectAccess,
+  updateProjectInvite,
   updateProjectLinkAccess,
   type ProjectAccessEntry,
   type ProjectAccessPermission,
@@ -24,7 +27,9 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
   const [linkPermission, setLinkPermission] = useState<ProjectAccessPermission>("viewer");
   const [linkMode, setLinkMode] = useState<ProjectLinkAccess["mode"]>("restricted");
   const [accesses, setAccesses] = useState<ProjectAccessEntry[]>([]);
+  const [removedAccesses, setRemovedAccesses] = useState<ProjectAccessEntry[]>([]);
   const [pendingInvites, setPendingInvites] = useState<ProjectPendingInviteEntry[]>([]);
+  const [owner, setOwner] = useState<{ id: string; email: string; displayName: string | null } | null>(null);
   const [isInviting, setIsInviting] = useState(false);
   const [isUpdatingLink, setIsUpdatingLink] = useState(false);
   const [isLoadingAccesses, setIsLoadingAccesses] = useState(true);
@@ -32,8 +37,11 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
   const [dialogErrorRequiresUpgrade, setDialogErrorRequiresUpgrade] = useState(false);
   const [dialogSuccess, setDialogSuccess] = useState<string | null>(null);
   const [freshInviteLink, setFreshInviteLink] = useState<string | null>(null);
-  const [copied, setCopied] = useState<"project" | "invite" | null>(null);
+  const [publicInviteLink, setPublicInviteLink] = useState<string | null>(null);
+  const [publicInviteExists, setPublicInviteExists] = useState(false);
+  const [copied, setCopied] = useState<"project" | "invite" | "public" | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [updatingRoleId, setUpdatingRoleId] = useState<string | null>(null);
   const subscription = useSubscription();
   const collaboratorCount = accesses.length + pendingInvites.length;
   const shareLimit = subscription.limits.maxSharesPerProject;
@@ -52,9 +60,13 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
       .then((response) => {
         if (!cancelled) {
           setAccesses(response.accesses);
+          setRemovedAccesses(response.removedAccesses);
           setPendingInvites(response.pendingInvites);
+          setOwner(response.owner);
           setLinkMode(response.linkAccess.mode);
           setLinkPermission(response.linkAccess.permission);
+          setPublicInviteExists(Boolean(response.linkAccess.hasInviteLink));
+          setPublicInviteLink(response.linkAccess.inviteLink ?? null);
         }
       })
       .catch((error) => {
@@ -73,7 +85,7 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
     };
   }, [projectId]);
 
-  async function copyToClipboard(text: string, target: "project" | "invite") {
+  async function copyToClipboard(text: string, target: "project" | "invite" | "public") {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(target);
@@ -98,6 +110,10 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
     try {
       await revokeProjectAccess(projectId, entry.id);
       setAccesses((current) => current.filter((item) => item.id !== entry.id));
+      setRemovedAccesses((current) => upsertById(current, {
+        ...entry,
+        revokedAt: new Date().toISOString()
+      }));
     } catch (error) {
       setDialogError(error instanceof Error ? error.message : "Unable to revoke access.");
     } finally {
@@ -146,13 +162,13 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
 
       if (result.access) {
         setAccesses((current) => upsertById(current, result.access!));
-        setDialogSuccess(`${trimmed} already has ${result.access.permission} access.`);
+        setDialogSuccess("This person already has access.");
       }
 
       if (result.invite) {
         setPendingInvites((current) => upsertById(current, result.invite!));
         setFreshInviteLink(result.inviteLink);
-        setDialogSuccess(`Invite created for ${trimmed}.`);
+        setDialogSuccess(result.inviteLink ? `Invite created for ${trimmed}.` : "This person already has a pending invite.");
       }
 
       setEmail("");
@@ -179,16 +195,91 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
 
       setLinkMode(result.linkAccess.mode);
       setLinkPermission(result.linkAccess.permission);
-      setFreshInviteLink(result.inviteLink);
+      setPublicInviteExists(Boolean(result.linkAccess.hasInviteLink));
+      setPublicInviteLink(result.inviteLink ?? publicInviteLink);
       setDialogSuccess(
         result.linkAccess.mode === "anyone_with_link"
-          ? "Anyone with the project link can now open with the selected role."
+          ? "Anyone-with-link invite settings saved."
           : "Link access is restricted to invited people."
       );
     } catch (error) {
       setDialogError(error instanceof Error ? error.message : "Unable to update link access.");
     } finally {
       setIsUpdatingLink(false);
+    }
+  }
+
+  async function resetPublicLink() {
+    setIsUpdatingLink(true);
+    setDialogError(null);
+    setDialogSuccess(null);
+
+    try {
+      const result = await resetProjectLinkAccess(projectId);
+      setLinkMode(result.linkAccess.mode);
+      setLinkPermission(result.linkAccess.permission);
+      setPublicInviteExists(Boolean(result.linkAccess.hasInviteLink));
+      setPublicInviteLink(result.inviteLink);
+      setDialogSuccess("Anyone-with-link invite was reset. Old public invite links no longer work.");
+    } catch (error) {
+      setDialogError(error instanceof Error ? error.message : "Unable to reset link.");
+    } finally {
+      setIsUpdatingLink(false);
+    }
+  }
+
+  async function createCopyablePublicLink() {
+    if (publicInviteExists) {
+      await resetPublicLink();
+      return;
+    }
+
+    await saveLinkAccess();
+  }
+
+  async function changeMemberRole(entry: ProjectAccessEntry, nextPermission: ProjectAccessPermission) {
+    const previous = accesses;
+    setUpdatingRoleId(entry.id);
+    setDialogError(null);
+    setAccesses((current) =>
+      current.map((item) =>
+        item.id === entry.id ? { ...item, permission: nextPermission } : item
+      )
+    );
+
+    try {
+      const updated = await updateProjectAccess(projectId, entry.id, {
+        permission: nextPermission
+      });
+      setAccesses((current) => upsertById(current, updated));
+    } catch (error) {
+      setAccesses(previous);
+      setDialogError(error instanceof Error ? error.message : "Unable to update role.");
+    } finally {
+      setUpdatingRoleId(null);
+    }
+  }
+
+  async function changeInviteRole(entry: ProjectPendingInviteEntry, nextPermission: ProjectAccessPermission) {
+    const previous = pendingInvites;
+    setUpdatingRoleId(entry.id);
+    setDialogError(null);
+    setPendingInvites((current) =>
+      current.map((item) =>
+        item.id === entry.id ? { ...item, permission: nextPermission } : item
+      )
+    );
+
+    try {
+      const updated = await updateProjectInvite(projectId, entry.id, {
+        permission: nextPermission
+      });
+      setPendingInvites((current) => upsertById(current, updated));
+    } catch (error) {
+      setPendingInvites(previous);
+      setDialogError(error instanceof Error ? error.message : "Unable to update invite role.");
+    } finally {
+      setUpdatingRoleId(null);
     }
   }
 
@@ -234,33 +325,16 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
               onClick={() => copyToClipboard(projectLink, "project")}
               type="button"
             >
-              {copied === "project" ? "Copied" : "Copy"}
+              {copied === "project" ? "Copied" : "Copy project link"}
             </button>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {SOCIAL_TARGETS.map((target) => (
-              <button
-                key={target.name}
-                className={dialogSmallButtonClass}
-                onClick={() => openShare(target.buildUrl(projectLink, SHARE_TEXT))}
-                type="button"
-                title={`Share on ${target.name}`}
-                aria-label={`Share on ${target.name}`}
-              >
-                {target.name}
-              </button>
-            ))}
-          </div>
-          {linkMode === "restricted" ? (
-            <p className={helperTextClass}>
-              Tip: set link access to &ldquo;Anyone with link&rdquo; below so people you share with
-              on social networks can open the project.
-            </p>
-          ) : null}
         </section>
 
         <section className={dialogSectionClass} aria-label="Invite people">
-          <h3 className={dialogSectionTitleClass}>Invite people</h3>
+          <div>
+            <h3 className={dialogSectionTitleClass}>Email invite</h3>
+            <p className={helperTextClass}>Use this to invite one specific person.</p>
+          </div>
           {showShareLimit ? (
             <p className={helperTextClass}>
               Free plan —{" "}
@@ -304,14 +378,14 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
                 <option value="editor">Editor</option>
               </select>
               <button className={dialogButtonClass} disabled={isInviting} type="submit">
-                {isInviting ? "Inviting..." : "Invite"}
+                {isInviting ? "Creating..." : "Create invite"}
               </button>
             </div>
           </form>
           {freshInviteLink ? (
             <div className="grid gap-2 rounded-md border border-[#31584f] bg-[#13231f] p-2">
               <p className="m-0 text-[12px] font-bold text-[#a9e2d2]">
-                Invite link created. Copy it now; it will not be shown again.
+                Email invite link created. Copy it now; it will not be shown again.
               </p>
               <div className="flex items-center gap-2">
                 <input
@@ -333,7 +407,12 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
         </section>
 
         <section className={dialogSectionClass} aria-label="Link access">
-          <h3 className={dialogSectionTitleClass}>Link access</h3>
+          <div>
+            <h3 className={dialogSectionTitleClass}>Anyone-with-link invite</h3>
+            <p className={helperTextClass}>
+              Anyone with this invite link can join with the selected role, except people you removed.
+            </p>
+          </div>
           <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto]">
             <select
               className={dialogInputClass}
@@ -357,16 +436,52 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
             <button
               className={dialogButtonClass}
               disabled={isUpdatingLink}
-              onClick={saveLinkAccess}
+              onClick={
+                linkMode === "anyone_with_link" && !publicInviteLink
+                  ? createCopyablePublicLink
+                  : saveLinkAccess
+              }
               type="button"
             >
-              {isUpdatingLink ? "Saving..." : "Save"}
+              {isUpdatingLink
+                ? "Saving..."
+                : linkMode === "anyone_with_link" && !publicInviteLink
+                  ? publicInviteExists
+                    ? "Create copyable link"
+                    : "Create anyone-with-link invite"
+                  : "Save settings"}
             </button>
           </div>
+          {linkMode === "anyone_with_link" && publicInviteExists && !publicInviteLink ? (
+            <p className={helperTextClass}>
+              An anyone-with-link invite exists, but old tokens are hidden after creation.
+              Create a copyable link to replace it.
+            </p>
+          ) : null}
+          {linkMode === "anyone_with_link" ? (
+            <div className="flex flex-wrap gap-2">
+              <button
+                className={dialogButtonClass}
+                disabled={!publicInviteLink}
+                onClick={() => publicInviteLink && copyToClipboard(publicInviteLink, "public")}
+                type="button"
+              >
+                {copied === "public" ? "Copied" : "Copy anyone-with-link invite"}
+              </button>
+              <button
+                className={dialogButtonClass}
+                disabled={isUpdatingLink}
+                onClick={resetPublicLink}
+                type="button"
+              >
+                Reset link
+              </button>
+            </div>
+          ) : null}
           <p className={helperTextClass}>
             {linkMode === "restricted"
               ? "Only invited people can open this project."
-              : "Opening the project link grants the selected role."}
+              : "Changing this role affects only future new users. Existing members keep their current role."}
           </p>
         </section>
 
@@ -374,19 +489,36 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
           <h3 className={dialogSectionTitleClass}>People with access</h3>
           {isLoadingAccesses ? (
             <p className={helperTextClass}>Loading...</p>
-          ) : accesses.length === 0 ? (
-            <p className={helperTextClass}>No one else has access yet.</p>
           ) : (
             <ul className="m-0 grid list-none gap-1.5 p-0">
+              {owner ? (
+                <li className={accessRowClass}>
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-bold text-[#eef1f4]">
+                    {owner.displayName || owner.email}
+                  </span>
+                  <RoleBadge role="owner" />
+                </li>
+              ) : null}
               {accesses.map((entry) => (
                 <li
-                  className="flex items-center justify-between gap-3 rounded-md border border-[#30353d] bg-[#202329] px-3 py-2"
+                  className={accessRowClass}
                   key={entry.id}
                 >
                   <span className="min-w-0 flex-1 truncate text-[13px] font-bold text-[#eef1f4]">
                     {entry.sharedWithUser?.displayName || entry.sharedWithUser?.email || "Unknown user"}
                   </span>
-                  <RoleBadge role={entry.permission} />
+                  <select
+                    className={dialogCompactSelectClass}
+                    disabled={updatingRoleId === entry.id}
+                    onChange={(event) =>
+                      void changeMemberRole(entry, event.target.value as ProjectAccessPermission)
+                    }
+                    value={entry.permission}
+                  >
+                    <option value="viewer">Viewer</option>
+                    <option value="commenter">Commenter</option>
+                    <option value="editor">Editor</option>
+                  </select>
                   <button
                     className={dialogSmallButtonClass}
                     disabled={revokingId === entry.id}
@@ -417,7 +549,21 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
                   <span className="min-w-0 flex-1 truncate text-[13px] font-bold text-[#eef1f4]">
                     {entry.invitedEmail ?? "Anyone with invite link"}
                   </span>
-                  <RoleBadge role={entry.permission} />
+                  <span className="text-[11px] font-extrabold uppercase text-[#8b929b]">
+                    pending
+                  </span>
+                  <select
+                    className={dialogCompactSelectClass}
+                    disabled={updatingRoleId === entry.id}
+                    onChange={(event) =>
+                      void changeInviteRole(entry, event.target.value as ProjectAccessPermission)
+                    }
+                    value={entry.permission}
+                  >
+                    <option value="viewer">Viewer</option>
+                    <option value="commenter">Commenter</option>
+                    <option value="editor">Editor</option>
+                  </select>
                   <button
                     className={dialogSmallButtonClass}
                     disabled={revokingId === entry.id}
@@ -425,6 +571,38 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
                     type="button"
                   >
                     {revokingId === entry.id ? "Revoking..." : "Revoke"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className={dialogSectionClass} aria-label="Removed people">
+          <h3 className={dialogSectionTitleClass}>Removed people</h3>
+          {isLoadingAccesses ? (
+            <p className={helperTextClass}>Loading...</p>
+          ) : removedAccesses.length === 0 ? (
+            <p className={helperTextClass}>No removed people.</p>
+          ) : (
+            <ul className="m-0 grid list-none gap-1.5 p-0">
+              {removedAccesses.map((entry) => (
+                <li className={accessRowClass} key={entry.id}>
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-bold text-[#eef1f4]">
+                    {entry.sharedWithUser?.displayName || entry.sharedWithUser?.email || "Unknown user"}
+                  </span>
+                  <span className="text-[11px] font-extrabold uppercase text-[#8b929b]">
+                    removed
+                  </span>
+                  <button
+                    className={dialogSmallButtonClass}
+                    onClick={() => {
+                      setEmail(entry.sharedWithUser?.email ?? "");
+                      setPermission(entry.permission);
+                    }}
+                    type="button"
+                  >
+                    Invite again
                   </button>
                 </li>
               ))}
@@ -453,7 +631,7 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
   );
 }
 
-function RoleBadge({ role }: { role: ProjectAccessPermission }) {
+function RoleBadge({ role }: { role: ProjectAccessPermission | "owner" }) {
   return (
     <span className="rounded-md border border-[#3b424b] bg-[#171a1f] px-2 py-1 text-[11px] font-extrabold uppercase text-[#cfd4da]">
       {role}
@@ -519,7 +697,10 @@ function upsertById<T extends { id: string }>(items: T[], nextItem: T) {
 }
 
 const dialogSectionClass =
-  "grid content-start gap-2 rounded-lg border border-[#2d3137] bg-[#17191d] p-3";
+  "grid content-start gap-2 rounded-lg border border-[#2d3137] bg-[#1b1e23] p-3";
+
+const accessRowClass =
+  "flex items-center justify-between gap-3 rounded-md border border-[#30353d] bg-[#202329] px-3 py-2";
 
 const dialogSectionTitleClass =
   "m-0 text-xs font-extrabold uppercase tracking-normal text-[#cfd4da]";
@@ -530,7 +711,10 @@ const dialogButtonClass =
   "rounded-lg border border-[#333941] bg-[#202329] px-3 py-2 font-bold text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731] disabled:opacity-60";
 
 const dialogInputClass =
-  "w-full rounded-md border border-[#30353d] bg-[#101113] px-2.5 py-[9px] text-[#eef1f4]";
+  "w-full rounded-md border border-[#30353d] bg-[#202329] px-2.5 py-[9px] text-[#eef1f4]";
+
+const dialogCompactSelectClass =
+  "rounded-md border border-[#30353d] bg-[#202329] px-2 py-1.5 text-[12px] font-bold text-[#eef1f4]";
 
 const dialogSmallButtonClass =
   "rounded-md border border-[#333941] bg-[#171a1f] px-2.5 py-1 text-[11px] font-bold text-[#dce1e6] hover:border-[#d88080] hover:bg-[#372020] focus-visible:border-[#d88080] focus-visible:bg-[#372020] disabled:opacity-60";

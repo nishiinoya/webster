@@ -16,6 +16,7 @@ import { Response } from 'express';
 import { SharedProjectsService } from './shared-projects.service';
 import { CurrentUser } from '../../common/auth/current-user.decorator';
 import { AuthUser } from '../../common/types/auth-user';
+import { Public } from '../../common/auth/public.decorator';
 import type {
   SharedProjectAssetReference,
   SharedProjectLoadResponse,
@@ -56,6 +57,26 @@ export class SharedProjectsController {
       file.buffer,
       file.originalname,
     );
+  }
+
+  /**
+   * GET /api/shared-projects/:projectId/public
+   * Anonymous viewer access for projects whose anyone-with-link role is Viewer.
+   */
+  @Public()
+  @Get(':projectId/public')
+  async loadPublicViewerProject(
+    @Param('projectId') projectId: string,
+  ): Promise<SharedProjectStatePayload> {
+    return this.sharedProjectsService.loadPublicViewerProject(projectId);
+  }
+
+  @Public()
+  @Get('public-invite/:token')
+  async loadPublicViewerInvite(
+    @Param('token') token: string,
+  ): Promise<SharedProjectStatePayload> {
+    return this.sharedProjectsService.loadPublicViewerInvite(token);
   }
 
   /**

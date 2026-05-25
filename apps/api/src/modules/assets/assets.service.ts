@@ -145,6 +145,29 @@ export class AssetsService {
     };
   }
 
+  async streamPublicViewerAsset(
+    projectId: string,
+    assetPath: string,
+  ): Promise<{ body: Readable; mimeType: string; size: number }> {
+    const publicProject = await this.prisma.project.findFirst({
+      where: {
+        id: projectId,
+        isDeleted: false,
+        linkAccess: {
+          mode: 'anyone_with_link',
+          tokenHash: { not: null },
+        },
+      },
+      select: { id: true },
+    });
+
+    if (!publicProject) {
+      throw new NotFoundException('Asset not found');
+    }
+
+    return this.streamStoredAsset(projectId, assetPath);
+  }
+
   /** BUG 6 fix: copied from SnapshotsService — enforces minimum role for projectId/userId. */
   private async requireRole(
     projectId: string,
@@ -165,5 +188,32 @@ export class AssetsService {
     if ((rank[role] ?? 0) < minRank) {
       throw new ForbiddenException('Insufficient permissions');
     }
+  }
+
+  private async streamStoredAsset(
+    projectId: string,
+    assetPath: string,
+  ): Promise<{ body: Readable; mimeType: string; size: number }> {
+    const storageKey = `projects/${projectId}/assets/${assetPath}`;
+
+    const asset = await this.prisma.projectAsset.findFirst({
+      where: { projectId, storageKey },
+      select: { mimeType: true },
+    });
+
+    if (!asset) {
+      throw new NotFoundException('Asset not found');
+    }
+
+    if (!this.storage) {
+      throw new NotFoundException('Storage service unavailable');
+    }
+
+    const { body, size } = await this.storage.getObject(storageKey);
+    return {
+      body,
+      mimeType: asset.mimeType ?? 'application/octet-stream',
+      size,
+    };
   }
 }

@@ -62,6 +62,7 @@ import {
   createProjectComment,
   deleteProjectComment,
   getCurrentUser,
+  getAccessToken,
   listProjectComments,
   reopenProjectComment,
   resolveProjectComment,
@@ -393,13 +394,24 @@ export function CanvasView({
   useEffect(() => {
     let cancelled = false;
 
-    getCurrentUser()
+    getAccessToken()
+      .then((token) => {
+        if (!token) {
+          return null;
+        }
+
+        return getCurrentUser();
+      })
       .then((user) => {
         if (!cancelled) {
-          setCurrentUserId(user.id);
+          setCurrentUserId(user?.id ?? null);
         }
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!cancelled) {
+          setCurrentUserId(null);
+        }
+      });
 
     return () => {
       cancelled = true;

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useAuth0 } from "@auth0/auth0-react";
 import {
   acceptPendingProjectInvite,
   deleteProject,
@@ -20,6 +21,7 @@ type HomeProjectsProps = {
 type Tab = "recent" | "owned" | "shared" | "invites";
 
 export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
+  const { isAuthenticated, isLoading: isAuthLoading, loginWithPopup } = useAuth0();
   const [tab, setTab] = useState<Tab>("recent");
   const [recent, setRecent] = useState<RecentSharedProject[]>([]);
   const [owned, setOwned] = useState<ProjectSummary[]>([]);
@@ -55,7 +57,26 @@ export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
   }, []);
 
   useEffect(() => {
+    if (tab === "invites" && pendingInvites.length === 0) {
+      setTab("recent");
+    }
+  }, [pendingInvites.length, tab]);
+
+  useEffect(() => {
     let cancelled = false;
+
+    if (isAuthLoading) {
+      return;
+    }
+
+    if (!isAuthenticated) {
+      setIsLoading(false);
+      setError(null);
+      setOwned([]);
+      setSharedWithMe([]);
+      setPendingInvites([]);
+      return;
+    }
 
     loadCloudProjects();
 
@@ -85,7 +106,7 @@ export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isAuthenticated, isAuthLoading]);
 
   async function acceptInvite(invite: ProjectInviteSummary) {
     setAcceptingInviteId(invite.id);
@@ -130,8 +151,27 @@ export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
 
   return (
     <div className="grid w-[min(680px,100%)] gap-3 text-left">
-      <PlanBanner subscription={subscription} ownedCount={owned.length} />
+      {isAuthenticated ? (
+        <PlanBanner subscription={subscription} ownedCount={owned.length} />
+      ) : null}
 
+      {!isAuthLoading && !isAuthenticated ? (
+        <div className="grid gap-3 rounded-lg border border-[#30353d] bg-[#17191d] p-3">
+          <p className="m-0 text-[13px] font-bold text-[#8b929b]">
+            Sign in to view cloud projects
+          </p>
+          <button
+            className="w-fit rounded-lg border border-[#4aa391] bg-[#203731] px-3 py-2 text-[12px] font-extrabold text-[#eef1f4] hover:border-[#6fd6c1]"
+            onClick={() => void loginWithPopup()}
+            type="button"
+          >
+            Sign in
+          </button>
+        </div>
+      ) : null}
+
+      {isAuthenticated ? (
+      <>
       <div className="flex flex-wrap items-center gap-2">
         <ProjectTab active={tab === "recent"} onClick={() => setTab("recent")}>
           Recent
@@ -142,9 +182,11 @@ export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
         <ProjectTab active={tab === "shared"} onClick={() => setTab("shared")}>
           Shared with me
         </ProjectTab>
-        <ProjectTab active={tab === "invites"} onClick={() => setTab("invites")}>
-          Invites
-        </ProjectTab>
+        {pendingInvites.length > 0 ? (
+          <ProjectTab active={tab === "invites"} onClick={() => setTab("invites")}>
+            Invitations ({pendingInvites.length})
+          </ProjectTab>
+        ) : null}
       </div>
 
       {isLoading ? (
@@ -214,8 +256,10 @@ export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
           ))}
         </div>
       ) : (
-        <EmptyNote>No pending invites.</EmptyNote>
+        <EmptyNote>No pending invitations.</EmptyNote>
       )}
+      </>
+      ) : null}
     </div>
   );
 }

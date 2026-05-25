@@ -2,6 +2,7 @@
 
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
+import { useAuth0 } from '@auth0/auth0-react';
 import { MessageCircle } from 'lucide-react';
 import type {
   DocumentCommand,
@@ -213,6 +214,7 @@ const initialSharedProjectState: SharedProjectUiState = {
 };
 
 export function EditorPage() {
+  const { isAuthenticated, isLoading: isAuthLoading, loginWithPopup } = useAuth0();
   const subscription = useSubscription();
   const emptyImageInputRef = useRef<HTMLInputElement | null>(null);
   const emptyProjectInputRef = useRef<HTMLInputElement | null>(null);
@@ -250,6 +252,12 @@ export function EditorPage() {
   const [isNewDocumentDialogOpen, setIsNewDocumentDialogOpen] = useState(false);
   const [isShareProjectDialogOpen, setIsShareProjectDialogOpen] = useState(false);
   const [isUploadSharePromptOpen, setIsUploadSharePromptOpen] = useState(false);
+  const [authPrompt, setAuthPrompt] = useState<
+    | { type: 'invite'; token: string }
+    | { projectId: string; projectName?: string; type: 'open-cloud' }
+    | { type: 'share-local' }
+    | null
+  >(null);
   const [openShareDialogAfterCloudUpload, setOpenShareDialogAfterCloudUpload] =
     useState(false);
   const [isObject3DImportDialogOpen, setIsObject3DImportDialogOpen] =
@@ -486,11 +494,17 @@ export function EditorPage() {
     // project. Runs exactly once so user actions don't get clobbered.
     if (didApplyUrlProjectIdRef.current) return;
     if (typeof window === 'undefined') return;
+    if (isAuthLoading) return;
     didApplyUrlProjectIdRef.current = true;
 
     const url = new URL(window.location.href);
     const inviteToken = url.searchParams.get('invite');
     if (inviteToken) {
+      if (!isAuthLoading && !isAuthenticated) {
+        setAuthPrompt({ token: inviteToken, type: 'invite' });
+        return;
+      }
+
       void acceptProjectInvite(inviteToken)
         .then((result) => {
           const nextUrl = new URL(window.location.href);
@@ -531,7 +545,7 @@ export function EditorPage() {
       projectId: urlProjectId,
       type: 'open-shared',
     });
-  }, [sharedProjectState.mode, sharedProjectState.projectId]);
+  }, [isAuthenticated, isAuthLoading, sharedProjectState.mode, sharedProjectState.projectId]);
 
   useEffect(() => {
     let didCancel = false;
@@ -861,7 +875,17 @@ export function EditorPage() {
       sharedProjectState.mode === 'shared' &&
       sharedProjectState.projectId
     ) {
+      if (!isAuthenticated) {
+        setAuthPrompt({ type: 'share-local' });
+        return;
+      }
+
       setIsShareProjectDialogOpen(true);
+      return;
+    }
+
+    if (!isAuthenticated) {
+      setAuthPrompt({ type: 'share-local' });
       return;
     }
 
@@ -869,6 +893,20 @@ export function EditorPage() {
   }
 
   function uploadLocalProjectAndContinueSharing() {
+    if (!activeDocument) {
+      return;
+    }
+
+    if (!isAuthenticated) {
+      setIsUploadSharePromptOpen(false);
+      setAuthPrompt({ type: 'share-local' });
+      return;
+    }
+
+    startLocalProjectUploadShare();
+  }
+
+  function startLocalProjectUploadShare() {
     if (!activeDocument) {
       return;
     }
@@ -888,6 +926,10 @@ export function EditorPage() {
       return;
     }
 
+    startOpenSharedProject(trimmed, title);
+  }
+
+  function startOpenSharedProject(projectId: string, title?: string) {
     // Reflect the click in the URL immediately, before we even start loading.
     // The mode→shared mirror effect only fires after the load completes, so if
     // the REST/WS round trip is slow (or hangs), we'd otherwise leave the user
@@ -895,8 +937,8 @@ export function EditorPage() {
     // project even if the original load never finished.
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
-      if (url.searchParams.get('projectId') !== trimmed) {
-        url.searchParams.set('projectId', trimmed);
+      if (url.searchParams.get('projectId') !== projectId) {
+        url.searchParams.set('projectId', projectId);
         window.history.replaceState(null, '', url.toString());
       }
     }
@@ -907,7 +949,7 @@ export function EditorPage() {
       id: `document-${documentCounterRef.current}`,
       isActive: true,
       source: 'shared',
-      title: title?.trim() || `Shared ${trimmed}`,
+      title: title?.trim() || `Shared ${projectId}`,
       width: 800,
     };
 
@@ -921,7 +963,7 @@ export function EditorPage() {
 
     setCollaborationRequest({
       id: Date.now(),
-      projectId: trimmed,
+      projectId,
       type: 'open-shared',
     });
   }
@@ -934,6 +976,77 @@ export function EditorPage() {
     }
 
     openSharedProjectById(projectId);
+  }
+
+  async function signInForCloudAction() {
+    const pendingAction = authPrompt;
+
+    if (!pendingAction) {
+      return;
+    }
+
+    try {
+      await loginWithPopup();
+      setAuthPrompt(null);
+
+      if (pendingAction.type === 'share-local') {
+        if (sharedProjectState.mode === 'shared' && sharedProjectState.projectId) {
+          setIsShareProjectDialogOpen(true);
+          return;
+        }
+
+        startLocalProjectUploadShare();
+        return;
+      }
+
+      if (pendingAction.type === 'open-cloud') {
+        startOpenSharedProject(
+          pendingAction.projectId,
+          pendingAction.projectName,
+        );
+        return;
+      }
+
+      void acceptProjectInvite(pendingAction.token)
+        .then((result) => {
+          if (typeof window !== 'undefined') {
+            const nextUrl = new URL(window.location.href);
+            nextUrl.searchParams.delete('invite');
+            nextUrl.searchParams.set('projectId', result.projectId);
+            window.history.replaceState(null, '', nextUrl.toString());
+          }
+          startOpenSharedProject(result.projectId, result.projectName);
+        })
+        .catch((error) => {
+          setRecentProjectError(
+            error instanceof Error ? error.message : 'Unable to accept invite.',
+          );
+        });
+    } catch {
+      // The user closed the popup or Auth0 declined the attempt; keep the prompt open.
+    }
+  }
+
+  function cancelCloudAuthPrompt() {
+    const pendingAction = authPrompt;
+
+    setAuthPrompt(null);
+
+    if (!pendingAction || typeof window === 'undefined') {
+      return;
+    }
+
+    const nextUrl = new URL(window.location.href);
+
+    if (pendingAction.type === 'open-cloud') {
+      nextUrl.searchParams.delete('projectId');
+    } else if (pendingAction.type === 'invite') {
+      nextUrl.searchParams.delete('invite');
+    }
+
+    if (nextUrl.href !== window.location.href) {
+      window.history.replaceState(null, '', nextUrl.toString());
+    }
   }
 
   function downloadSharedProject() {
@@ -2026,6 +2139,44 @@ export function EditorPage() {
                 type='button'
               >
                 Upload & continue
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {authPrompt ? (
+        <div
+          aria-modal='true'
+          className='fixed inset-0 z-40 grid place-items-center bg-[#050607]/72 p-6 backdrop-blur-md'
+          role='dialog'
+        >
+          <div className='grid w-[min(420px,100%)] gap-4 rounded-lg border border-[#383e46] bg-[#17191d] p-5 shadow-[0_24px_48px_rgba(0,0,0,0.42)]'>
+            <div>
+              <h2 className='m-0 text-lg font-bold text-[#f2f4f7]'>
+                Sign in required
+              </h2>
+              <p className='m-0 mt-2 text-[13px] font-bold leading-5 text-[#a7b0b9]'>
+                {authPrompt.type === 'share-local'
+                  ? 'Sign in to upload and share this project.'
+                  : authPrompt.type === 'invite'
+                    ? 'Sign in to accept this invite.'
+                    : 'Sign in to open this cloud project.'}
+              </p>
+            </div>
+            <div className='flex justify-end gap-2'>
+              <button
+                className='rounded-lg border border-[#333941] bg-[#202329] px-3 py-2 font-bold text-[#eef1f4] hover:border-[#4c535c] hover:bg-[#252930]'
+                onClick={cancelCloudAuthPrompt}
+                type='button'
+              >
+                {authPrompt.type === 'share-local' ? 'Cancel' : 'Continue local'}
+              </button>
+              <button
+                className='rounded-lg border border-[#4aa391] bg-[#203731] px-3 py-2 font-bold text-[#eef1f4] hover:bg-[#25453e]'
+                onClick={() => void signInForCloudAction()}
+                type='button'
+              >
+                Sign in
               </button>
             </div>
           </div>

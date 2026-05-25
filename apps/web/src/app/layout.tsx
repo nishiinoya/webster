@@ -1,6 +1,5 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { Auth0Provider, useAuth0 } from "@auth0/auth0-react";
 import { setAccessTokenGetter } from "@/editor/collaboration/sharedProjectApi";
@@ -9,68 +8,6 @@ import { Geist } from "next/font/google";
 import { cn } from "@/lib/utils";
 
 const geist = Geist({subsets:['latin'],variable:'--font-sans'});
-
-const AUTH_SKIP_PATHS = ["/login", "/callback"];
-
-function VerifyEmailScreen() {
-  const { logout } = useAuth0();
-
-  return (
-    <main className="grid h-screen min-h-0 place-items-center bg-[#101113] text-[13px] text-[#e7e9ec]">
-      <div className="grid justify-items-center gap-[18px] text-center max-w-sm px-4">
-        <h1 className="m-0 text-[22px] font-bold text-[#f2f4f7]">Verify your email</h1>
-        <p className="m-0 text-[#8b929b]">
-          Check your inbox and click the verification link, then refresh this page.
-        </p>
-        <button
-          className="rounded-lg border border-[#3a3f47] bg-transparent px-4 py-2.5 font-extrabold text-[#8b929b] hover:text-[#e7e9ec]"
-          onClick={() => void logout({ logoutParams: { returnTo: `${typeof window !== "undefined" ? window.location.origin : ""}/login` } })}
-          type="button"
-        >
-          Sign out
-        </button>
-      </div>
-    </main>
-  );
-}
-
-function RequireAuth({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading, user } = useAuth0();
-  const pathname = usePathname();
-  const router = useRouter();
-
-  useEffect(() => {
-    if (!isLoading && !isAuthenticated && !AUTH_SKIP_PATHS.includes(pathname)) {
-      // Stash the URL we wanted (path + query) so /login can restore it after
-      // Auth0 redirects back to /callback. Without this, ?projectId=... is lost.
-      if (typeof window !== "undefined") {
-        const target = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-        if (target && target !== "/") {
-          try {
-            window.sessionStorage.setItem("auth0:returnTo", target);
-          } catch {
-            // sessionStorage may be unavailable; fail open
-          }
-        }
-      }
-      router.replace("/login");
-    }
-  }, [isLoading, isAuthenticated, pathname, router]);
-
-  if (AUTH_SKIP_PATHS.includes(pathname)) {
-    return <>{children}</>;
-  }
-
-  if (isLoading || !isAuthenticated) {
-    return null;
-  }
-
-  if (user?.email_verified === false) {
-    return <VerifyEmailScreen />;
-  }
-
-  return <>{children}</>;
-}
 
 function AuthBridge() {
   const { getAccessTokenSilently, loginWithRedirect } = useAuth0();
@@ -94,7 +31,11 @@ function AuthBridge() {
         // other than the tenant owner (who is auto-consented) hits
         // `consent_required`/`login_required` on their first API call. Send them
         // through one interactive consent, then back to where they were.
-        if (code === "consent_required" || code === "login_required") {
+        if (code === "login_required") {
+          return null;
+        }
+
+        if (code === "consent_required") {
           if (!consentRedirectStarted) {
             consentRedirectStarted = true;
 
@@ -153,7 +94,7 @@ export default function RootLayout({
           useRefreshTokensFallback={true}
         >
           <AuthBridge />
-          <RequireAuth>{children}</RequireAuth>
+          {children}
         </Auth0Provider>
       </body>
     </html>

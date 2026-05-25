@@ -15,6 +15,7 @@ import { ProjectAccessService } from '../projects/project-access.service';
 import { RoomService } from '../collaboration/room.service';
 import { EntitlementsService } from '../entitlements/entitlements.service';
 import { AuthUser } from '../../common/types/auth-user';
+import { createHash } from 'crypto';
 import type {
   SharedProjectLoadResponse,
   SharedProjectStatePayload,
@@ -201,6 +202,69 @@ export class SharedProjectsService {
     };
   }
 
+  async loadPublicViewerProject(
+    projectId: string,
+  ): Promise<SharedProjectStatePayload> {
+    const project = await this.prisma.project.findFirst({
+      where: {
+        id: projectId,
+        isDeleted: false,
+        linkAccess: {
+          mode: 'anyone_with_link',
+          tokenHash: { not: null },
+        },
+      },
+    });
+
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
+
+    const assets = await this.getProjectAssetReferences(
+      projectId,
+      'public-viewer',
+    );
+
+    return {
+      projectId,
+      projectName: project.projectName,
+      snapshot: (project.metadata ?? {}) as WebsterProjectManifest,
+      currentVersion: project.currentVersion,
+      role: 'viewer',
+      assets,
+      snapshots: [],
+      users: [],
+    };
+  }
+
+  async loadPublicViewerInvite(token: string): Promise<SharedProjectStatePayload> {
+    const trimmed = token.trim();
+
+    if (!trimmed) {
+      throw new NotFoundException('Invite not found');
+    }
+
+    const linkAccess = await this.prisma.projectLinkAccess.findUnique({
+      where: { tokenHash: createHash('sha256').update(trimmed).digest('hex') },
+      select: {
+        mode: true,
+        permission: true,
+        projectId: true,
+        project: { select: { isDeleted: true } },
+      },
+    });
+
+    if (
+      !linkAccess ||
+      linkAccess.mode !== 'anyone_with_link' ||
+      linkAccess.project.isDeleted
+    ) {
+      throw new NotFoundException('Invite not found');
+    }
+
+    return this.loadPublicViewerProject(linkAccess.projectId);
+  }
+
   /** POST /api/shared-projects/:projectId/save */
   async saveProject(
     projectId: string,
@@ -349,7 +413,10 @@ export class SharedProjectsService {
     return { buffer, projectName: project.projectName };
   }
 
-  private async getProjectAssetReferences(projectId: string): Promise<SharedProjectAssetReference[]> {
+  private async getProjectAssetReferences(
+    projectId: string,
+    access: 'authenticated' | 'public-viewer' = 'authenticated',
+  ): Promise<SharedProjectAssetReference[]> {
     const dbAssets = await this.prisma.projectAsset.findMany({
       where: { projectId },
       orderBy: { createdAt: 'asc' },
@@ -365,7 +432,10 @@ export class SharedProjectsService {
       return {
         assetId: asset.id,
         assetPath,
-        downloadUrl: `/shared-projects/${encodeURIComponent(projectId)}/assets/${encodedPath}`,
+        downloadUrl:
+          access === 'public-viewer'
+            ? `/shared-projects/${encodeURIComponent(projectId)}/assets/public/${encodedPath}`
+            : `/shared-projects/${encodeURIComponent(projectId)}/assets/${encodedPath}`,
         mimeType: asset.mimeType ?? undefined,
       };
     });
