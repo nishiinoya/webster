@@ -7,7 +7,8 @@
 #     at build time), so the frontend ships pre-built and Auth0-wired.
 #   - No stripe-cli: production uses a real webhook endpoint configured in the
 #     Stripe dashboard (point it at https://<your-api-domain>/api/subscriptions/webhook
-#     and put its signing secret in STRIPE_WEBHOOK_SECRET).
+#     and put its signing secret in STRIPE_WEBHOOK_SECRET). Plan prices come from
+#     the inline STRIPE_*_AMOUNT_CENTS vars below — no dashboard Product/Price.
 #   - Postgres and MinIO are NOT exposed to the host. The API reaches them on
 #     the internal network; assets/avatars are streamed through the API.
 #   - All credentials come from .env.production (never commit it).
@@ -88,8 +89,12 @@ services:
       S3_FORCE_PATH_STYLE: "true"
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
-      STRIPE_PRICE_PRO_MONTHLY: ${STRIPE_PRICE_PRO_MONTHLY}
-      STRIPE_PRICE_PRO_YEARLY: ${STRIPE_PRICE_PRO_YEARLY}
+      # Inline plan definition — no Stripe Product/Price needs to exist; the API
+      # passes price_data at checkout. These drive the displayed/charged amounts.
+      STRIPE_PRODUCT_NAME: ${STRIPE_PRODUCT_NAME:-Webster Pro}
+      STRIPE_CURRENCY: ${STRIPE_CURRENCY:-usd}
+      STRIPE_MONTHLY_AMOUNT_CENTS: ${STRIPE_MONTHLY_AMOUNT_CENTS:-999}
+      STRIPE_YEARLY_AMOUNT_CENTS: ${STRIPE_YEARLY_AMOUNT_CENTS:-9900}
     command: sh -c "npx prisma migrate deploy && node dist/apps/api/src/main.js"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:4000/api/health || exit 1"]

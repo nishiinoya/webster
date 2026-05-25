@@ -237,6 +237,26 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
               {copied === "project" ? "Copied" : "Copy"}
             </button>
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {SOCIAL_TARGETS.map((target) => (
+              <button
+                key={target.name}
+                className={dialogSmallButtonClass}
+                onClick={() => openShare(target.buildUrl(projectLink, SHARE_TEXT))}
+                type="button"
+                title={`Share on ${target.name}`}
+                aria-label={`Share on ${target.name}`}
+              >
+                {target.name}
+              </button>
+            ))}
+          </div>
+          {linkMode === "restricted" ? (
+            <p className={helperTextClass}>
+              Tip: set link access to &ldquo;Anyone with link&rdquo; below so people you share with
+              on social networks can open the project.
+            </p>
+          ) : null}
         </section>
 
         <section className={dialogSectionClass} aria-label="Invite people">
@@ -439,6 +459,53 @@ function RoleBadge({ role }: { role: ProjectAccessPermission }) {
       {role}
     </span>
   );
+}
+
+const SHARE_TEXT = "Check out my project on Webster";
+
+const SOCIAL_TARGETS: ReadonlyArray<{
+  name: string;
+  buildUrl: (url: string, text: string) => string;
+}> = [
+  {
+    name: "X",
+    buildUrl: (url, text) =>
+      `https://twitter.com/intent/tweet?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`
+  },
+  {
+    name: "Facebook",
+    buildUrl: (url) => `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`
+  },
+  {
+    name: "LinkedIn",
+    buildUrl: (url) => `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(url)}`
+  },
+  {
+    name: "WhatsApp",
+    buildUrl: (url, text) => `https://wa.me/?text=${encodeURIComponent(`${text} ${url}`)}`
+  },
+  {
+    name: "Telegram",
+    buildUrl: (url, text) =>
+      `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`
+  },
+  {
+    name: "Reddit",
+    buildUrl: (url, text) =>
+      `https://www.reddit.com/submit?url=${encodeURIComponent(url)}&title=${encodeURIComponent(text)}`
+  },
+  {
+    name: "Email",
+    buildUrl: (url, text) =>
+      `mailto:?subject=${encodeURIComponent(text)}&body=${encodeURIComponent(`${text}: ${url}`)}`
+  }
+];
+
+function openShare(url: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.open(url, "_blank", "noopener,noreferrer,width=640,height=640");
 }
 
 function upsertById<T extends { id: string }>(items: T[], nextItem: T) {

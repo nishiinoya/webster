@@ -12,8 +12,30 @@ const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 const AUTH_SKIP_PATHS = ["/login", "/callback"];
 
+function VerifyEmailScreen() {
+  const { logout } = useAuth0();
+
+  return (
+    <main className="grid h-screen min-h-0 place-items-center bg-[#101113] text-[13px] text-[#e7e9ec]">
+      <div className="grid justify-items-center gap-[18px] text-center max-w-sm px-4">
+        <h1 className="m-0 text-[22px] font-bold text-[#f2f4f7]">Verify your email</h1>
+        <p className="m-0 text-[#8b929b]">
+          Check your inbox and click the verification link, then refresh this page.
+        </p>
+        <button
+          className="rounded-lg border border-[#3a3f47] bg-transparent px-4 py-2.5 font-extrabold text-[#8b929b] hover:text-[#e7e9ec]"
+          onClick={() => void logout({ logoutParams: { returnTo: `${typeof window !== "undefined" ? window.location.origin : ""}/login` } })}
+          type="button"
+        >
+          Sign out
+        </button>
+      </div>
+    </main>
+  );
+}
+
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading } = useAuth0();
+  const { isAuthenticated, isLoading, user } = useAuth0();
   const pathname = usePathname();
   const router = useRouter();
 
@@ -41,6 +63,10 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 
   if (isLoading || !isAuthenticated) {
     return null;
+  }
+
+  if (user?.email_verified === false) {
+    return <VerifyEmailScreen />;
   }
 
   return <>{children}</>;

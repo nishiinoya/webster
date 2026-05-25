@@ -50,14 +50,6 @@ class EnvironmentVariables {
   @IsOptional()
   STRIPE_WEBHOOK_SECRET: string;
 
-  @IsString()
-  @IsOptional()
-  STRIPE_PRICE_PRO_MONTHLY: string;
-
-  @IsString()
-  @IsOptional()
-  STRIPE_PRICE_PRO_YEARLY: string;
-
   @IsNumber()
   @IsOptional()
   FREE_MAX_PROJECTS: number = 3;
