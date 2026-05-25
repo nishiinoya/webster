@@ -2000,7 +2000,7 @@ export function EditorPage() {
       {isUploadSharePromptOpen ? (
         <div
           aria-modal='true'
-          className='fixed inset-0 z-40 grid place-items-center bg-black/60 p-6'
+          className='fixed inset-0 z-40 grid place-items-center bg-[#050607]/72 p-6 backdrop-blur-md'
           role='dialog'
         >
           <div className='grid w-[min(420px,100%)] gap-4 rounded-lg border border-[#383e46] bg-[#17191d] p-5 shadow-[0_24px_48px_rgba(0,0,0,0.42)]'>
@@ -2077,7 +2077,7 @@ function ProgressOverlay({
     <div
       aria-live='polite'
       aria-modal='true'
-      className='fixed inset-0 z-50 grid place-items-center bg-black/55 p-6'
+      className='fixed inset-0 z-50 grid place-items-center bg-[#050607]/72 p-6 backdrop-blur-md'
       role='dialog'
     >
       <div className='grid w-[min(420px,100%)] gap-4 rounded-xl border border-[#3a414a] bg-[rgba(23,25,29,0.98)] px-5 py-5 shadow-[0_24px_48px_rgba(0,0,0,0.48)]'>
@@ -2112,7 +2112,7 @@ function ImageLayerCommandOverlay({
     <div
       aria-live='polite'
       aria-modal='true'
-      className='fixed inset-0 z-50 grid place-items-center bg-black/55 p-6'
+      className='fixed inset-0 z-50 grid place-items-center bg-[#050607]/72 p-6 backdrop-blur-md'
       role='dialog'
     >
       <div className='grid w-[min(360px,100%)] justify-items-center gap-3 rounded-xl border border-[#3a414a] bg-[rgba(23,25,29,0.98)] px-5 py-5 text-center shadow-[0_24px_48px_rgba(0,0,0,0.48)]'>

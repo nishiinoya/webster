@@ -41,7 +41,7 @@ export function ResizeCanvasDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-30 grid place-items-center bg-black/60 p-6" role="presentation">
+    <div className="fixed inset-0 z-30 grid place-items-center bg-[#050607]/72 p-6 backdrop-blur-md" role="presentation">
       <form
         aria-modal="true"
         className="grid w-[min(460px,100%)] gap-3.5 rounded-lg border border-[#383e46] bg-[#17191d] p-[18px] shadow-[0_24px_48px_rgba(0,0,0,0.42)]"

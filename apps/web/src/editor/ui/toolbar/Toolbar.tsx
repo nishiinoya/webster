@@ -1,5 +1,6 @@
 import type { MouseEvent as ReactMouseEvent, SyntheticEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   canPickProjectFileHandle,
   pickProjectFileWithHandle,
@@ -1383,11 +1384,11 @@ export function Toolbar({
           type='file'
         />
       </nav>
-      {isShortcutDialogOpen ? (
+      {isShortcutDialogOpen && typeof document !== 'undefined' ? createPortal(
         <div
           aria-label='Keyboard shortcuts'
           aria-modal='true'
-          className='fixed inset-0 z-50 grid place-items-center bg-black/55 px-5 py-8'
+          className='fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-[#050607]/72 px-5 py-8 backdrop-blur-md'
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
               setIsShortcutDialogOpen(false);
@@ -1395,7 +1396,7 @@ export function Toolbar({
           }}
           role='dialog'
         >
-          <div className='grid w-[min(760px,100%)] max-h-[min(720px,calc(100vh-48px))] gap-5 overflow-auto rounded-lg border border-[#3a414a] bg-[#17191d] p-5 shadow-[0_28px_72px_rgba(0,0,0,0.58)]'>
+          <div className='grid w-[min(760px,100%)] max-h-[calc(100vh-64px)] gap-5 overflow-y-auto rounded-lg border border-[#3a414a] bg-[#17191d] p-5 shadow-[0_28px_72px_rgba(0,0,0,0.58)]'>
             <div className='flex items-center justify-between gap-4'>
               <h2 className='m-0 text-[20px] font-extrabold text-[#f2f4f7]'>
                 Keyboard shortcuts
@@ -1434,7 +1435,8 @@ export function Toolbar({
               ))}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       ) : null}
       <div
         className='flex items-center justify-end gap-2 text-[13px] text-[#c9cdd2] max-[980px]:hidden'

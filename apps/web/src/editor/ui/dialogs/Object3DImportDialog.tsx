@@ -83,7 +83,7 @@ export function Object3DImportDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-40 grid place-items-center bg-black/60 p-6" role="presentation">
+    <div className="fixed inset-0 z-40 grid place-items-center bg-[#050607]/72 p-6 backdrop-blur-md" role="presentation">
       <div
         aria-modal="true"
         className="grid max-h-[min(780px,calc(100vh-48px))] w-[min(760px,100%)] gap-4 overflow-auto rounded-lg border border-[#383e46] bg-[#17191d] p-[18px] shadow-[0_24px_48px_rgba(0,0,0,0.42)]"
