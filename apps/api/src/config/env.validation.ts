@@ -24,6 +24,14 @@ class EnvironmentVariables {
 
   @IsString()
   @IsOptional()
+  AUTH0_MANAGEMENT_CLIENT_ID: string;
+
+  @IsString()
+  @IsOptional()
+  AUTH0_MANAGEMENT_CLIENT_SECRET: string;
+
+  @IsString()
+  @IsOptional()
   S3_ENDPOINT: string;
 
   @IsString()

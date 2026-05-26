@@ -218,7 +218,13 @@ const initialSharedProjectState: SharedProjectUiState = {
 };
 
 export function EditorPage() {
-  const { isAuthenticated, isLoading: isAuthLoading, loginWithPopup } = useAuth0();
+  const {
+    getIdTokenClaims,
+    isAuthenticated,
+    isLoading: isAuthLoading,
+    loginWithPopup,
+    user,
+  } = useAuth0();
   const subscription = useSubscription();
   const emptyImageInputRef = useRef<HTMLInputElement | null>(null);
   const emptyProjectInputRef = useRef<HTMLInputElement | null>(null);
@@ -262,6 +268,8 @@ export function EditorPage() {
     | { type: 'share-local' }
     | null
   >(null);
+  const isEmailVerifiedForCloud =
+    isAuthenticated && user?.email_verified !== false;
   const [openShareDialogAfterCloudUpload, setOpenShareDialogAfterCloudUpload] =
     useState(false);
   const [isObject3DImportDialogOpen, setIsObject3DImportDialogOpen] =
@@ -386,11 +394,27 @@ export function EditorPage() {
   });
 
   const layoutStyle: EditorLayoutVars = {
-    '--tools-panel-width': `${toolsPanelWidth}px`,
+    '--tools-panel-width': `${Math.max(68, toolsPanelWidth)}px`,
     '--right-panel-width': `${rightPanelWidth}px`,
     '--layers-panel-height': `${layersPanelHeight}px`,
     '--properties-panel-height': `${propertiesPanelHeight}px`,
   };
+
+  useEffect(() => {
+    const collapseToolsForNarrowViewport = () => {
+      if (window.innerWidth <= 980) {
+        setToolsPanelWidth(68);
+      }
+    };
+
+    collapseToolsForNarrowViewport();
+    window.addEventListener('resize', collapseToolsForNarrowViewport);
+
+    return () => {
+      window.removeEventListener('resize', collapseToolsForNarrowViewport);
+    };
+  }, []);
+
   const selectedLayers = layers.filter((layer) => layer.isSelected);
   const selectedLayer = selectedLayers.length === 1 ? selectedLayers[0] : null;
   const selectedLayerIds = new Set(selectedLayers.map((layer) => layer.id));
@@ -536,6 +560,15 @@ export function EditorPage() {
         return;
       }
 
+      if (!isEmailVerifiedForCloud) {
+        setRecentProjectError(
+          'Confirm your email before using cloud projects or accepting invites.',
+        );
+        url.searchParams.delete('invite');
+        window.history.replaceState(null, '', url.toString());
+        return;
+      }
+
       void acceptProjectInvite(inviteToken)
         .then((result) => {
           const nextUrl = new URL(window.location.href);
@@ -554,6 +587,12 @@ export function EditorPage() {
 
     const urlProjectId = url.searchParams.get('projectId');
     if (!urlProjectId) return;
+    if (!isEmailVerifiedForCloud) {
+      setRecentProjectError('Confirm your email before opening cloud projects.');
+      url.searchParams.delete('projectId');
+      window.history.replaceState(null, '', url.toString());
+      return;
+    }
     if (sharedProjectState.mode === 'shared' && sharedProjectState.projectId === urlProjectId) {
       return;
     }
@@ -576,7 +615,13 @@ export function EditorPage() {
       projectId: urlProjectId,
       type: 'open-shared',
     });
-  }, [isAuthenticated, isAuthLoading, sharedProjectState.mode, sharedProjectState.projectId]);
+  }, [
+    isAuthenticated,
+    isAuthLoading,
+    isEmailVerifiedForCloud,
+    sharedProjectState.mode,
+    sharedProjectState.projectId,
+  ]);
 
   useEffect(() => {
     let didCancel = false;
@@ -895,6 +940,19 @@ export function EditorPage() {
     });
   }
 
+  function requireVerifiedCloudAccess(message: string) {
+    if (!isAuthenticated) {
+      return false;
+    }
+
+    if (isEmailVerifiedForCloud) {
+      return true;
+    }
+
+    window.alert(message);
+    return false;
+  }
+
   function shareCurrentProject() {
     if (!activeDocument) {
       window.alert('Open or create a project before sharing it.');
@@ -911,12 +969,20 @@ export function EditorPage() {
         return;
       }
 
+      if (!requireVerifiedCloudAccess('Confirm your email before managing cloud sharing.')) {
+        return;
+      }
+
       setIsShareProjectDialogOpen(true);
       return;
     }
 
     if (!isAuthenticated) {
       setAuthPrompt({ type: 'share-local' });
+      return;
+    }
+
+    if (!requireVerifiedCloudAccess('Confirm your email before uploading projects to cloud.')) {
       return;
     }
 
@@ -931,6 +997,11 @@ export function EditorPage() {
     if (!isAuthenticated) {
       setIsUploadSharePromptOpen(false);
       setAuthPrompt({ type: 'share-local' });
+      return;
+    }
+
+    if (!requireVerifiedCloudAccess('Confirm your email before uploading projects to cloud.')) {
+      setIsUploadSharePromptOpen(false);
       return;
     }
 
@@ -954,6 +1025,15 @@ export function EditorPage() {
   function openSharedProjectById(projectId: string, title?: string) {
     const trimmed = projectId.trim();
     if (!trimmed) {
+      return;
+    }
+
+    if (!isAuthenticated) {
+      setAuthPrompt({ projectId: trimmed, projectName: title, type: 'open-cloud' });
+      return;
+    }
+
+    if (!requireVerifiedCloudAccess('Confirm your email before opening cloud projects.')) {
       return;
     }
 
@@ -1019,6 +1099,12 @@ export function EditorPage() {
     try {
       await loginWithPopup();
       setAuthPrompt(null);
+
+      const claims = await getIdTokenClaims().catch(() => null);
+      if (claims?.email_verified === false) {
+        window.alert('Confirm your email before using cloud projects.');
+        return;
+      }
 
       if (pendingAction.type === 'share-local') {
         if (sharedProjectState.mode === 'shared' && sharedProjectState.projectId) {
@@ -1492,7 +1578,7 @@ export function EditorPage() {
   }
 
   return (
-    <main className='grid h-screen min-h-0 grid-rows-[64px_1fr] overflow-hidden bg-[#101113] text-[13px] text-[#e7e9ec] min-[1400px]:text-[14px] max-[760px]:h-[100svh] max-[760px]:grid-rows-[118px_1fr]'>
+    <main className='grid h-screen min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[#101113] text-[13px] text-[#e7e9ec] min-[1400px]:text-[14px] max-[760px]:h-[100svh]'>
       <Toolbar
         canDownloadSharedProject={
           sharedProjectState.capabilities.canDownloadWebster
@@ -1641,7 +1727,7 @@ export function EditorPage() {
           'grid min-h-0 transition-[grid-template-columns] duration-[220ms] ease-in-out',
           activeDocument ? 'has-document' : 'has-no-document',
           activeDocument
-            ? 'grid-cols-[var(--tools-panel-width)_6px_minmax(360px,1fr)_6px_var(--right-panel-width)] max-[980px]:grid-cols-[minmax(150px,var(--tools-panel-width))_6px_minmax(300px,1fr)_6px_minmax(280px,var(--right-panel-width))] max-[760px]:grid-cols-[68px_6px_minmax(0,1fr)] max-[760px]:grid-rows-[minmax(0,1fr)_220px]'
+            ? 'grid-cols-[var(--tools-panel-width)_6px_minmax(360px,1fr)_6px_var(--right-panel-width)] max-[980px]:grid-cols-[68px_6px_minmax(300px,1fr)_6px_minmax(280px,var(--right-panel-width))] max-[760px]:grid-cols-[68px_6px_minmax(0,1fr)] max-[760px]:grid-rows-[minmax(0,1fr)_220px]'
             : 'grid-cols-[0_0_minmax(360px,1fr)_0_0] max-[980px]:grid-cols-[0_0_minmax(300px,1fr)_0_0] max-[760px]:grid-cols-[0_0_minmax(0,1fr)_0_0]',
         )}
         style={layoutStyle}
@@ -1666,7 +1752,7 @@ export function EditorPage() {
         <div
           className={cn(
             'grid min-h-0 min-w-0 transition-[grid-template-rows] duration-[220ms] ease-in-out',
-            activeDocument ? 'grid-rows-[42px_1fr]' : 'grid-rows-[0_1fr]',
+            activeDocument ? 'grid-rows-[42px_minmax(0,1fr)]' : 'grid-rows-[0_minmax(0,1fr)]',
           )}
         >
           <TabsBar

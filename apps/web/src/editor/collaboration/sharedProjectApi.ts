@@ -205,6 +205,12 @@ export async function getCurrentUser() {
   return fetchJson<UserProfile>("/users/me");
 }
 
+export async function resendEmailVerification() {
+  return fetchJson<{ ok: true }>("/users/me/resend-verification", {
+    method: "POST"
+  });
+}
+
 export async function updateCurrentUser(updates: { displayName?: string }) {
   return fetchJson<UserProfile>("/users/me", {
     body: JSON.stringify(updates),

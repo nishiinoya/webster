@@ -1,4 +1,4 @@
-import type { MouseEvent as ReactMouseEvent, SyntheticEvent } from 'react';
+import type { MouseEvent as ReactMouseEvent, ReactNode, SyntheticEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -19,7 +19,12 @@ import Image from 'next/image';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/Avatar';
 import Link from 'next/link';
 import { useAuth0 } from '@auth0/auth0-react';
-import { getCurrentUser, toAbsoluteAvatarUrl } from '../../collaboration/sharedProjectApi';
+import { Circle, Cloud, Ruler, Users } from 'lucide-react';
+import {
+  getCurrentUser,
+  resendEmailVerification,
+  toAbsoluteAvatarUrl,
+} from '../../collaboration/sharedProjectApi';
 
 type ToolbarProps = {
   canEditDocument: boolean;
@@ -327,8 +332,23 @@ export function Toolbar({
     }
   }
 
-  const { user, isAuthenticated, loginWithRedirect, logout } = useAuth0();
+  const {
+    getAccessTokenSilently,
+    getIdTokenClaims,
+    user,
+    isAuthenticated,
+    loginWithRedirect,
+    logout,
+  } = useAuth0();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isEmailConfirmationDismissed, setIsEmailConfirmationDismissed] =
+    useState(false);
+  const [emailConfirmationMessage, setEmailConfirmationMessage] =
+    useState<string | null>(null);
+  const [isCheckingEmailConfirmation, setIsCheckingEmailConfirmation] =
+    useState(false);
+  const [isResendingEmailConfirmation, setIsResendingEmailConfirmation] =
+    useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -340,6 +360,13 @@ export function Toolbar({
     document.addEventListener('pointerdown', closeUserMenu);
     return () => document.removeEventListener('pointerdown', closeUserMenu);
   }, []);
+
+  useEffect(() => {
+    if (user?.email_verified === false) {
+      setIsEmailConfirmationDismissed(false);
+      setEmailConfirmationMessage(null);
+    }
+  }, [user?.email_verified]);
   const [profile, setProfile] = useState<{
     displayName: string | null;
     avatarUrl: string | null;
@@ -373,10 +400,55 @@ export function Toolbar({
   const avatarSrc =
     toAbsoluteAvatarUrl(profile?.avatarUrl) || user?.picture || null;
   const avatarFallback = getAvatarInitials(displayName);
+  const shouldShowEmailConfirmation =
+    isAuthenticated &&
+    user?.email_verified === false &&
+    !isEmailConfirmationDismissed;
+
+  async function refreshEmailVerificationStatus() {
+    setIsCheckingEmailConfirmation(true);
+    setEmailConfirmationMessage(null);
+
+    try {
+      await getAccessTokenSilently({ cacheMode: 'off' });
+      const claims = await getIdTokenClaims();
+
+      if (claims?.email_verified === true) {
+        window.location.reload();
+        return;
+      }
+
+      setEmailConfirmationMessage(
+        'Still waiting on Auth0. If you just clicked the email link, give it a moment and check again.',
+      );
+    } catch (error) {
+      setEmailConfirmationMessage(
+        error instanceof Error ? error.message : 'Unable to refresh email status.',
+      );
+    } finally {
+      setIsCheckingEmailConfirmation(false);
+    }
+  }
+
+  async function resendVerificationEmail() {
+    setIsResendingEmailConfirmation(true);
+    setEmailConfirmationMessage(null);
+
+    try {
+      await resendEmailVerification();
+      setEmailConfirmationMessage('Verification email sent. Check your inbox.');
+    } catch (error) {
+      setEmailConfirmationMessage(
+        error instanceof Error ? error.message : 'Unable to resend verification email.',
+      );
+    } finally {
+      setIsResendingEmailConfirmation(false);
+    }
+  }
 
   return (
     <header
-      className='grid grid-cols-[minmax(180px,auto)_minmax(0,1fr)_auto] items-center gap-4.5 border-b border-[#2a2d31] bg-[#17191d] px-4 py-2.5 max-[980px]:grid-cols-[minmax(160px,auto)_minmax(0,1fr)] max-[760px]:min-h-29.5 max-[760px]:grid-cols-1'
+      className='flex min-h-15 items-center gap-3 border-b border-[#2a2d31] bg-[#17191d] px-4 py-2 max-[760px]:gap-2 max-[760px]:px-2'
       aria-label='Top toolbar'
       ref={toolbarRef}
     >
@@ -389,26 +461,26 @@ export function Toolbar({
         >
           W
         </a>
-        <div className='min-w-0'>
-          <a
-            href='/'
-            className='m-0 mb-0.5 block w-fit text-[11px] font-bold uppercase tracking-normal text-[#8b929b] hover:text-[#dff3ea]'
-          >
-            Webster
-          </a>
-          <div className='flex min-w-0 flex-wrap items-center gap-1.5'>
-            <h1 className='m-0 max-w-[260px] truncate text-[17px] font-bold tracking-normal text-[#f2f4f7]'>
+        <div className='grid min-w-0 gap-0.5'>
+          <div className='flex min-w-0 items-center gap-1.5'>
+            <a
+              href='/'
+              className='m-0 block w-fit shrink-0 text-[11px] font-bold uppercase tracking-normal text-[#8b929b] hover:text-[#dff3ea]'
+            >
+              Webster
+            </a>
+          </div>
+          <div className='flex min-w-0 items-center gap-1.5'>
+            <h1 className='m-0 max-w-[170px] truncate text-[17px] font-bold tracking-normal text-[#f2f4f7]'>
               {documentTitle}
             </h1>
             <span className={titleBadgeClass}>{projectStorageLabel}</span>
-            {projectRole ? (
-              <span className={titleBadgeClass}>{capitalizeRole(projectRole)}</span>
-            ) : null}
+            {projectRole ? <span className={titleBadgeClass}>{capitalizeRole(projectRole)}</span> : null}
           </div>
         </div>
       </div>
       <nav
-        className='flex items-center justify-start gap-2 max-[980px]:overflow-x-auto max-[760px]:overflow-x-auto'
+        className='flex min-w-0 flex-1 items-center justify-start gap-2 overflow-visible border-l border-[#2b3037] pl-3'
         aria-label='Editor menus'
       >
         <details
@@ -962,9 +1034,44 @@ export function Toolbar({
             </button>
           </div>
         </details>
+        {hasContextualToolOptions(selectedTool) ? (
+          <details
+            className='toolbar-menu relative hidden max-[1500px]:block'
+            onToggle={closeSiblingMenus}
+          >
+            <summary className={toolbarButtonClass}>Tool options</summary>
+            <div className={toolbarOptionsMenuClass} role='menu'>
+              <ToolbarToolOptions
+                canEditDocument={canEditDocument}
+                magicSelectionTolerance={magicSelectionTolerance}
+                maskBrushOptions={maskBrushOptions}
+                onMagicSelectionToleranceChange={onMagicSelectionToleranceChange}
+                onMaskBrushOptionsChange={onMaskBrushOptionsChange}
+                onSelectShape={onSelectShape}
+                onSelectTool={onSelectTool}
+                onSelectionModeChange={onSelectionModeChange}
+                onStrokeColorChange={onStrokeColorChange}
+                onStrokeModeChange={onStrokeModeChange}
+                onStrokeStyleChange={onStrokeStyleChange}
+                onStrokeTargetChange={onStrokeTargetChange}
+                onStrokeWidthChange={onStrokeWidthChange}
+                selectedSelectionMode={selectedSelectionMode}
+                selectedShape={selectedShape}
+                selectedStrokeColor={selectedStrokeColor}
+                selectedStrokeMode={selectedStrokeMode}
+                selectedStrokeStyle={selectedStrokeStyle}
+                selectedStrokeTargetLayerId={selectedStrokeTargetLayerId}
+                selectedStrokeTargetMode={selectedStrokeTargetMode}
+                selectedStrokeWidth={selectedStrokeWidth}
+                selectedTool={selectedTool}
+                strokeLayers={strokeLayers}
+              />
+            </div>
+          </details>
+        ) : null}
         {selectedTool === 'Mask Brush' ? (
           <div
-            className='flex items-center gap-2 pl-1.5'
+            className='flex items-center gap-2 pl-1.5 max-[1500px]:hidden'
             aria-label='Mask brush options'
           >
             <label className='flex items-center gap-1.25 text-xs font-bold text-[#c9cdd2]'>
@@ -1014,7 +1121,7 @@ export function Toolbar({
         ) : null}
         {selectedTool === 'Draw' ? (
           <div
-            className='flex items-center gap-2 pl-1.5'
+            className='flex items-center gap-2 pl-1.5 max-[1500px]:hidden'
             aria-label='Draw options'
           >
             <label className='flex items-center gap-1.25 text-xs font-bold text-[#c9cdd2]'>
@@ -1100,7 +1207,7 @@ export function Toolbar({
         ) : null}
         {isSelectionToolSelected(selectedTool) ? (
           <div
-            className='flex items-center gap-2 pl-1.5'
+            className='flex items-center gap-2 pl-1.5 max-[1500px]:hidden'
             aria-label='Selection options'
           >
             <label className='flex items-center gap-1.25 text-xs font-bold text-[#c9cdd2]'>
@@ -1137,7 +1244,7 @@ export function Toolbar({
         ) : null}
         {selectedTool === 'Shape' ? (
           <div
-            className='flex items-center gap-0.5 pl-1.5 pr-1'
+            className='flex items-center gap-0.5 pl-1.5 pr-1 max-[1500px]:hidden'
             aria-label='Shape options'
           >
             <span className='text-xs font-bold text-[#8b929b] mr-1'>Type:</span>
@@ -1438,60 +1545,118 @@ export function Toolbar({
         </div>,
         document.body,
       ) : null}
+      {shouldShowEmailConfirmation && typeof document !== 'undefined' ? createPortal(
+        <div
+          aria-label='Confirm email'
+          aria-modal='true'
+          className='fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-[#050607]/72 px-5 py-8 backdrop-blur-md'
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setIsEmailConfirmationDismissed(true);
+            }
+          }}
+          role='dialog'
+        >
+          <div className='grid w-[min(420px,100%)] gap-4 rounded-lg border border-[#3a414a] bg-[#17191d] p-5 shadow-[0_28px_72px_rgba(0,0,0,0.58)]'>
+            <div className='grid gap-2'>
+              <h2 className='m-0 text-[20px] font-extrabold text-[#f2f4f7]'>
+                Confirm your email
+              </h2>
+              <p className='m-0 text-[13px] font-bold leading-5 text-[#a7b0b9]'>
+                Check your inbox for the Auth0 verification email. Webster cloud
+                projects, sharing, and comments unlock after your email is
+                confirmed.
+              </p>
+              {user.email ? (
+                <p className='m-0 rounded-md border border-[#33373d] bg-[#202329] px-3 py-2 text-[13px] font-bold text-[#dce1e6]'>
+                  {user.email}
+                </p>
+              ) : null}
+              {emailConfirmationMessage ? (
+                <p className='m-0 text-[13px] font-bold leading-5 text-[#f0c98d]'>
+                  {emailConfirmationMessage}
+                </p>
+              ) : null}
+            </div>
+            <div className='flex justify-end gap-2'>
+              <button
+                className='rounded-lg border border-[#333941] bg-[#202329] px-3 py-2 font-bold text-[#eef1f4] hover:border-[#4c535c] hover:bg-[#252930]'
+                onClick={() => setIsEmailConfirmationDismissed(true)}
+                type='button'
+              >
+                Continue local
+              </button>
+              <button
+                className='rounded-lg border border-[#333941] bg-[#202329] px-3 py-2 font-bold text-[#eef1f4] hover:border-[#4c535c] hover:bg-[#252930] disabled:cursor-wait disabled:opacity-70'
+                disabled={isResendingEmailConfirmation}
+                onClick={() => void resendVerificationEmail()}
+                type='button'
+              >
+                {isResendingEmailConfirmation ? 'Sending...' : 'Resend'}
+              </button>
+              <button
+                className='rounded-lg border border-[#4aa391] bg-[#203731] px-3 py-2 font-bold text-[#eef1f4] hover:bg-[#25453e] disabled:cursor-wait disabled:opacity-70'
+                disabled={isCheckingEmailConfirmation}
+                onClick={() => void refreshEmailVerificationStatus()}
+                type='button'
+              >
+                {isCheckingEmailConfirmation ? 'Checking...' : 'I confirmed it'}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      ) : null}
       <div
-        className='flex items-center justify-end gap-2 text-[13px] text-[#c9cdd2] max-[980px]:hidden'
+        className='ml-auto flex min-w-0 shrink-0 items-center justify-end gap-2 overflow-visible text-[13px] text-[#c9cdd2] max-[760px]:hidden'
         aria-label='Current editor status'
       >
-        {canvasSize || isSharedMode ? (
-          <span className={statusPillClass}>
-            {isSharedMode
-              ? getCollaborationStatusLabel(
-                  collaborationStatus,
-                  pendingCommitCount,
-                )
-              : 'Local'}
-          </span>
-        ) : null}
+        <CompactStatusPill
+          icon={<Cloud className='h-3.5 w-3.5' aria-hidden='true' />}
+          label={
+            isSharedMode
+              ? getCollaborationStatusLabel(collaborationStatus, pendingCommitCount)
+              : 'Local'
+          }
+          className='max-[1320px]:hidden'
+        />
         {isSharedMode ? (
-          <span className={statusPillClass}>
-            {projectRole ?? 'shared'} - {onlineUserCount || 1} online
-          </span>
+          <CompactStatusPill
+            icon={<Users className='h-3.5 w-3.5' aria-hidden='true' />}
+            label={`${onlineUserCount || 1}`}
+            title={`${projectRole ?? 'shared'} - ${onlineUserCount || 1} online`}
+            className='max-[1180px]:hidden'
+          />
+        ) : null}
+        {canvasSize ? (
+          <CompactStatusPill
+            icon={<Ruler className='h-3.5 w-3.5' aria-hidden='true' />}
+            label={formatCanvasSize(canvasSize)}
+            onClick={onOpenCanvasResize}
+            className='max-[1450px]:hidden'
+          />
+        ) : null}
+        {canvasSize ? (
+          <CompactStatusPill
+            icon={<Circle className='h-3 w-3 fill-current' aria-hidden='true' />}
+            label={`${zoomPercentage}%`}
+            className='max-[1100px]:hidden'
+          />
         ) : null}
         {saveStatus !== 'idle' ? (
           <span className={statusPillClass}>
             {getSaveStatusLabel(saveStatus)}
           </span>
         ) : null}
-        {isImageLayerSummary(selectedLayer) ? (
-          <span className={statusPillClass}>
-            Image {selectedLayer.imagePixelWidth} x{' '}
-            {selectedLayer.imagePixelHeight} px
-          </span>
-        ) : null}
-        {canvasSize ? (
-          <button
-            className={statusButtonClass}
-            onClick={onOpenCanvasResize}
-            type='button'
-          >
-            {formatCanvasSize(canvasSize)}
-          </button>
-        ) : null}
-        {canvasSize ? (
-          <>
-            <span className={statusPillClass}>{selectedTool}</span>
-            <span className={statusPillClass}>{zoomPercentage}%</span>
-          </>
-        ) : null}
-
         {isAuthenticated ? (
-          <div className='relative pl-2.5' ref={userMenuRef}>
+          <div className='relative pl-1' ref={userMenuRef}>
             <button
               type='button'
               className='flex items-center gap-2'
+              aria-label={`Account menu for ${displayName}`}
+              title={displayName}
               onClick={() => setIsUserMenuOpen((o) => !o)}
             >
-              <span className='text-[13px] text-[#c9cdd2]'>{displayName}</span>
               <Avatar>
                 {avatarSrc ? (
                   <AvatarImage src={avatarSrc} alt={displayName} className='grayscale' />
@@ -1649,6 +1814,311 @@ function MenuSeparator() {
   return <div className='my-1 h-px bg-[#2b3037]' role='separator' />;
 }
 
+function CompactStatusPill({
+  className,
+  icon,
+  label,
+  onClick,
+  title,
+}: {
+  className?: string;
+  icon: ReactNode;
+  label: string;
+  onClick?: () => void;
+  title?: string;
+}) {
+  const content = (
+    <>
+      <span className='text-[#7bdac8]'>{icon}</span>
+      <span className='truncate'>{label}</span>
+    </>
+  );
+  const classes = cn(compactStatusPillClass, className);
+
+  if (onClick) {
+    return (
+      <button className={classes} onClick={onClick} title={title ?? label} type='button'>
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <span className={classes} title={title ?? label}>
+      {content}
+    </span>
+  );
+}
+
+function ToolbarToolOptions({
+  canEditDocument,
+  magicSelectionTolerance,
+  maskBrushOptions,
+  onMagicSelectionToleranceChange,
+  onMaskBrushOptionsChange,
+  onSelectShape,
+  onSelectTool,
+  onSelectionModeChange,
+  onStrokeColorChange,
+  onStrokeModeChange,
+  onStrokeStyleChange,
+  onStrokeTargetChange,
+  onStrokeWidthChange,
+  selectedSelectionMode,
+  selectedShape,
+  selectedStrokeColor,
+  selectedStrokeMode,
+  selectedStrokeStyle,
+  selectedStrokeTargetLayerId,
+  selectedStrokeTargetMode,
+  selectedStrokeWidth,
+  selectedTool,
+  strokeLayers,
+}: Pick<
+  ToolbarProps,
+  | 'canEditDocument'
+  | 'magicSelectionTolerance'
+  | 'maskBrushOptions'
+  | 'onMagicSelectionToleranceChange'
+  | 'onMaskBrushOptionsChange'
+  | 'onSelectShape'
+  | 'onSelectTool'
+  | 'onSelectionModeChange'
+  | 'onStrokeColorChange'
+  | 'onStrokeModeChange'
+  | 'onStrokeStyleChange'
+  | 'onStrokeTargetChange'
+  | 'onStrokeWidthChange'
+  | 'selectedSelectionMode'
+  | 'selectedShape'
+  | 'selectedStrokeColor'
+  | 'selectedStrokeMode'
+  | 'selectedStrokeStyle'
+  | 'selectedStrokeTargetLayerId'
+  | 'selectedStrokeTargetMode'
+  | 'selectedStrokeWidth'
+  | 'selectedTool'
+  | 'strokeLayers'
+>) {
+  if (selectedTool === 'Mask Brush') {
+    return (
+      <div className='grid gap-3' aria-label='Mask brush options'>
+        <label className={toolbarOptionsLabelClass}>
+          Size
+          <input
+            className={maskBrushInputClass}
+            min='1'
+            max='256'
+            onChange={(event) =>
+              onMaskBrushOptionsChange({ size: Number(event.target.value) })
+            }
+            type='number'
+            value={maskBrushOptions.size}
+          />
+        </label>
+        <label className={toolbarOptionsLabelClass}>
+          Opacity
+          <input
+            className={maskBrushInputClass}
+            min='1'
+            max='100'
+            onChange={(event) =>
+              onMaskBrushOptionsChange({
+                opacity: Number(event.target.value) / 100,
+              })
+            }
+            type='number'
+            value={Math.round(maskBrushOptions.opacity * 100)}
+          />
+        </label>
+        <label className={toolbarOptionsLabelClass}>
+          Mode
+          <select
+            className={cn(maskBrushInputClass, 'w-30.5')}
+            onChange={(event) =>
+              onMaskBrushOptionsChange({
+                mode: event.target.value === 'hide' ? 'hide' : 'reveal',
+              })
+            }
+            value={maskBrushOptions.mode}
+          >
+            <option value='reveal'>Reveal white</option>
+            <option value='hide'>Hide black</option>
+          </select>
+        </label>
+      </div>
+    );
+  }
+
+  if (selectedTool === 'Draw') {
+    return (
+      <div className='grid gap-3' aria-label='Draw options'>
+        <label className={toolbarOptionsLabelClass}>
+          Target
+          <select
+            className={cn(maskBrushInputClass, 'w-39')}
+            onChange={(event) =>
+              onStrokeTargetChange(parseStrokeTarget(event.target.value))
+            }
+            value={formatStrokeTargetValue(
+              selectedStrokeTargetMode,
+              selectedStrokeTargetLayerId,
+            )}
+          >
+            <option value='new'>New layer</option>
+            <option value='selected'>Selected stroke layer</option>
+            {strokeLayers.map((layer) => (
+              <option key={layer.id} value={`layer:${layer.id}`}>
+                {layer.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className={toolbarOptionsLabelClass}>
+          Type
+          <select
+            className={cn(maskBrushInputClass, 'w-29.5')}
+            onChange={(event) =>
+              onStrokeStyleChange(toStrokeStyle(event.target.value))
+            }
+            value={selectedStrokeStyle}
+          >
+            <option value='pencil'>Pencil</option>
+            <option value='pen'>Pen</option>
+            <option value='brush'>Brush</option>
+            <option value='marker'>Marker</option>
+            <option value='highlighter'>Highlighter</option>
+          </select>
+        </label>
+        <label className={toolbarOptionsLabelClass}>
+          Color
+          <input
+            aria-label='Draw color'
+            className='h-8.5 w-12 rounded-md border border-[#33373d] bg-[#101113] p-1'
+            onChange={(event) =>
+              onStrokeColorChange(
+                hexToColor(event.target.value, selectedStrokeColor[3]),
+              )
+            }
+            type='color'
+            value={colorToHex(selectedStrokeColor)}
+          />
+        </label>
+        <label className={toolbarOptionsLabelClass}>
+          Size
+          <input
+            className={maskBrushInputClass}
+            min='1'
+            max='256'
+            onChange={(event) => onStrokeWidthChange(Number(event.target.value))}
+            type='number'
+            value={selectedStrokeWidth}
+          />
+        </label>
+        <button
+          className={cn(
+            toolbarButtonClass,
+            selectedStrokeMode === 'erase' && 'border-[#4aa391] bg-[#203731]',
+          )}
+          onClick={() =>
+            onStrokeModeChange(selectedStrokeMode === 'erase' ? 'draw' : 'erase')
+          }
+          type='button'
+        >
+          {selectedStrokeMode === 'erase' ? 'Draw' : 'Eraser'}
+        </button>
+      </div>
+    );
+  }
+
+  if (isSelectionToolSelected(selectedTool)) {
+    return (
+      <div className='grid gap-3' aria-label='Selection options'>
+        <label className={toolbarOptionsLabelClass}>
+          Mode
+          <select
+            className={cn(maskBrushInputClass, 'w-29.5')}
+            onChange={(event) =>
+              onSelectionModeChange(toSelectionMode(event.target.value))
+            }
+            value={selectedSelectionMode}
+          >
+            <option value='replace'>Replace</option>
+            <option value='add'>Add</option>
+            <option value='subtract'>Subtract</option>
+            <option value='intersect'>Intersect</option>
+          </select>
+        </label>
+        {selectedTool === 'Magic Select' ? (
+          <label className={toolbarOptionsLabelClass}>
+            Similarity
+            <input
+              className={maskBrushInputClass}
+              min='0'
+              max='100'
+              onChange={(event) =>
+                onMagicSelectionToleranceChange(Number(event.target.value))
+              }
+              type='number'
+              value={magicSelectionTolerance}
+            />
+          </label>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (selectedTool === 'Shape') {
+    const shapeOptions: Array<{ kind: ShapeKind; label: string }> = [
+      { kind: 'rectangle', label: 'Rectangle' },
+      { kind: 'circle', label: 'Circle' },
+      { kind: 'line', label: 'Line' },
+      { kind: 'triangle', label: 'Triangle' },
+      { kind: 'diamond', label: 'Diamond' },
+      { kind: 'arrow', label: 'Arrow' },
+      { kind: 'custom', label: 'Custom' },
+    ];
+
+    return (
+      <div className='grid gap-2' aria-label='Shape options'>
+        <span className='text-xs font-bold text-[#8b929b]'>Type</span>
+        <div className='flex flex-wrap gap-1'>
+          {shapeOptions.map((shape) => (
+            <button
+              className={cn(
+                'rounded-md border px-2.5 py-1.5 text-xs font-bold transition-colors',
+                selectedShape === shape.kind
+                  ? 'border-[#4aa391] bg-[#25453e] text-[#dff7f1]'
+                  : 'border-[#2a2d31] bg-transparent text-[#d9dde3] hover:bg-[#252930]',
+              )}
+              disabled={!canEditDocument}
+              key={shape.kind}
+              onClick={() => {
+                onSelectTool('Shape');
+                onSelectShape(shape.kind);
+              }}
+              type='button'
+            >
+              {shape.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+function hasContextualToolOptions(tool: string) {
+  return (
+    tool === 'Mask Brush' ||
+    tool === 'Draw' ||
+    tool === 'Shape' ||
+    isSelectionToolSelected(tool)
+  );
+}
+
 function formatCanvasSize(size: { height: number; width: number }) {
   return `${Math.round(size.width)} x ${Math.round(size.height)} px`;
 }
@@ -1673,7 +2143,10 @@ const toolbarButtonClass =
   'block cursor-default list-none rounded-lg border border-transparent bg-transparent px-2.5 py-2 text-[13px] text-[#d9dde3] hover:border-[#4c535c] hover:bg-[#252930] focus-visible:border-[#4c535c] focus-visible:bg-[#252930] [&::-webkit-details-marker]:hidden [.toolbar-menu[open]_&]:border-[#4c535c] [.toolbar-menu[open]_&]:bg-[#252930]';
 
 const toolbarMenuClass =
-  'absolute left-0 top-[calc(100%+6px)] z-10 grid w-[280px] rounded-lg border border-[#33373d] bg-[#17191d] p-1.5 shadow-[0_18px_34px_rgba(0,0,0,0.35)]';
+  'absolute left-0 top-[calc(100%+14px)] z-50 grid w-[280px] rounded-lg border border-[#33373d] bg-[#17191d] p-1.5 shadow-[0_18px_34px_rgba(0,0,0,0.35)]';
+
+const toolbarOptionsMenuClass =
+  'absolute left-0 top-[calc(100%+14px)] z-50 grid w-[300px] rounded-lg border border-[#33373d] bg-[#17191d] p-3 shadow-[0_18px_34px_rgba(0,0,0,0.35)]';
 
 const toolbarMenuItemClass =
   'flex w-full items-center justify-between gap-3 rounded-lg border border-transparent bg-transparent px-2.5 py-2 text-left text-[13px] text-[#eef1f4] hover:border-[#4c535c] hover:bg-[#252930] focus-visible:border-[#4c535c] focus-visible:bg-[#252930] disabled:cursor-not-allowed disabled:text-[#6f7680] disabled:hover:border-transparent disabled:hover:bg-transparent';
@@ -1684,8 +2157,14 @@ const toolbarMenuHintClass =
 const maskBrushInputClass =
   'w-[74px] rounded-md border border-[#33373d] bg-[#101113] px-[7px] py-1.5 text-[#eef1f4] font-[inherit]';
 
+const toolbarOptionsLabelClass =
+  'flex items-center justify-between gap-3 text-xs font-bold text-[#c9cdd2]';
+
 const statusPillClass =
   'rounded-lg border border-[#33373d] bg-[#22252a] px-2.5 py-[7px]';
+
+const compactStatusPillClass =
+  'flex h-6 max-w-36 shrink-0 items-center gap-1.5 rounded-md border border-[#33373d] bg-[#202329] px-2 text-[10px] font-extrabold uppercase tracking-normal text-[#cfd5dc]';
 
 const titleBadgeClass =
   'rounded-md border border-[#33373d] bg-[#22252a] px-2 py-0.5 text-[10px] font-extrabold uppercase text-[#aeb6bf]';

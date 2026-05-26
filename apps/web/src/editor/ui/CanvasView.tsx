@@ -237,6 +237,7 @@ export function CanvasView({
   const handledClipboardCommandRequestIdRef = useRef<number | null>(null);
   const handledTemplateInsertRequestIdRef = useRef<number | null>(null);
   const handledTemplateSaveRequestIdRef = useRef<number | null>(null);
+  const collaborationProjectIdRef = useRef<string | null>(null);
   const [fps, setFps] = useState(0);
   const [comments, setComments] = useState<ProjectComment[]>([]);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
@@ -304,6 +305,11 @@ export function CanvasView({
   });
   const canModerateComments =
     collaborationState.role === 'owner' || collaborationState.role === 'editor';
+
+  useEffect(() => {
+    collaborationProjectIdRef.current =
+      collaborationState.mode === 'shared' ? collaborationState.projectId : null;
+  }, [collaborationState.mode, collaborationState.projectId]);
 
   useEffect(() => {
     collaborationActionHandlerRef.current = (action) => {
@@ -585,7 +591,7 @@ export function CanvasView({
     type: string,
     payload: ProjectCommentEventPayload,
   ) {
-    if (payload.projectId !== collaborationState.projectId) {
+    if (payload.projectId !== collaborationProjectIdRef.current) {
       return;
     }
 
@@ -1558,7 +1564,7 @@ export function CanvasView({
 
   return (
     <section
-      className='relative min-h-0 min-w-0 overflow-hidden bg-[#101113] bg-[length:32px_32px]'
+      className='relative h-full min-h-0 min-w-0 overflow-hidden bg-[#101113] bg-[length:32px_32px]'
       aria-label='Main canvas'
     >
       <div
@@ -1569,8 +1575,8 @@ export function CanvasView({
         className='absolute bottom-0 left-0 top-0 z-[1] w-7 border-r border-[#2a2d31] bg-[#17191d] hidden'
         aria-hidden='true'
       />
-      <div className='relative grid min-h-full p-0'>
-        <div className='relative min-h-0 min-w-0'>
+      <div className='relative grid h-full min-h-0 p-0'>
+        <div className='relative h-full min-h-0 min-w-0'>
           <div className='absolute inset-0 grid overflow-hidden bg-transparent'>
             <canvas
               ref={canvasRef}

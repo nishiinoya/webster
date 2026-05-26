@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   Param,
   Patch,
   Post,
@@ -44,6 +45,12 @@ export class UsersController {
   @Delete('me/avatar')
   removeAvatar(@CurrentUser() user: AuthUser) {
     return this.usersService.removeAvatar(user);
+  }
+
+  @Public()
+  @Post('me/resend-verification')
+  resendVerificationEmail(@Headers('authorization') authorization?: string) {
+    return this.usersService.resendVerificationEmail(authorization);
   }
 
   // Public so it can be used directly in <img src>. Avatars are low-sensitivity

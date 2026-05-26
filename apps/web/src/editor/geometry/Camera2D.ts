@@ -13,14 +13,24 @@ export class Camera2D {
   projectionMatrix: Float32Array = new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]);
   private viewportWidth = 1;
   private viewportHeight = 1;
+  private hasViewportSize = false;
   private bounds: CameraBounds | null = null;
   private readonly maxEdgePadding = 196;
   private readonly edgePaddingViewportRatio = 0.25;
 
   resize(width: number, height: number) {
+    const previousWidth = this.viewportWidth;
+    const previousHeight = this.viewportHeight;
     this.viewportWidth = Math.max(1, width);
     this.viewportHeight = Math.max(1, height);
-    this.clampToBounds();
+
+    if (this.hasViewportSize) {
+      this.x += (this.viewportWidth - previousWidth) / (2 * this.zoom);
+      this.y -= (this.viewportHeight - previousHeight) / (2 * this.zoom);
+    } else {
+      this.hasViewportSize = true;
+    }
+
     this.updateProjectionMatrix();
   }
 

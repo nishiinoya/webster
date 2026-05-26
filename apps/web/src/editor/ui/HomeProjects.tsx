@@ -21,7 +21,7 @@ type HomeProjectsProps = {
 type Tab = "recent" | "owned" | "shared" | "invites";
 
 export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
-  const { isAuthenticated, isLoading: isAuthLoading, loginWithPopup } = useAuth0();
+  const { isAuthenticated, isLoading: isAuthLoading, loginWithPopup, user } = useAuth0();
   const [tab, setTab] = useState<Tab>("recent");
   const [recent, setRecent] = useState<RecentSharedProject[]>([]);
   const [owned, setOwned] = useState<ProjectSummary[]>([]);
@@ -33,6 +33,8 @@ export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
   const [acceptingInviteId, setAcceptingInviteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const subscription = useSubscription();
+  const isEmailVerifiedForCloud =
+    isAuthenticated && user?.email_verified !== false;
 
   const projectsById = useMemo(() => {
     const map = new Map<string, ProjectSummary>();
@@ -69,7 +71,7 @@ export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
       return;
     }
 
-    if (!isAuthenticated) {
+    if (!isAuthenticated || !isEmailVerifiedForCloud) {
       setIsLoading(false);
       setError(null);
       setOwned([]);
@@ -106,9 +108,14 @@ export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, isAuthLoading]);
+  }, [isAuthenticated, isAuthLoading, isEmailVerifiedForCloud]);
 
   async function acceptInvite(invite: ProjectInviteSummary) {
+    if (!isEmailVerifiedForCloud) {
+      setError("Confirm your email before accepting cloud invites.");
+      return;
+    }
+
     setAcceptingInviteId(invite.id);
     setError(null);
     setErrorRequiresUpgrade(false);
@@ -127,6 +134,11 @@ export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
   }
 
   async function deleteOwnedProject(project: ProjectSummary) {
+    if (!isEmailVerifiedForCloud) {
+      setError("Confirm your email before managing cloud projects.");
+      return;
+    }
+
     if (
       !window.confirm(
         `Delete "${project.projectName}"? This removes it for everyone it's shared with.`
@@ -151,7 +163,7 @@ export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
 
   return (
     <div className="grid w-[min(680px,100%)] gap-3 text-left">
-      {isAuthenticated ? (
+      {isEmailVerifiedForCloud ? (
         <PlanBanner subscription={subscription} ownedCount={owned.length} />
       ) : null}
 
@@ -170,7 +182,15 @@ export function HomeProjects({ onOpenProject }: HomeProjectsProps) {
         </div>
       ) : null}
 
-      {isAuthenticated ? (
+      {isAuthenticated && !isEmailVerifiedForCloud ? (
+        <div className="grid gap-2 rounded-lg border border-[#4f3f2b] bg-[#221d16] p-3">
+          <p className="m-0 text-[13px] font-bold text-[#f0c98d]">
+            Confirm your email to use cloud projects. Local projects still work.
+          </p>
+        </div>
+      ) : null}
+
+      {isEmailVerifiedForCloud ? (
       <>
       <div className="flex flex-wrap items-center gap-2">
         <ProjectTab active={tab === "recent"} onClick={() => setTab("recent")}>
