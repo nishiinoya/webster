@@ -22,7 +22,6 @@ import { useAuth0 } from '@auth0/auth0-react';
 import { Circle, Cloud, Ruler, Users } from 'lucide-react';
 import {
   getCurrentUser,
-  resendEmailVerification,
   toAbsoluteAvatarUrl,
 } from '../../collaboration/sharedProjectApi';
 
@@ -347,8 +346,6 @@ export function Toolbar({
     useState<string | null>(null);
   const [isCheckingEmailConfirmation, setIsCheckingEmailConfirmation] =
     useState(false);
-  const [isResendingEmailConfirmation, setIsResendingEmailConfirmation] =
-    useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -427,22 +424,6 @@ export function Toolbar({
       );
     } finally {
       setIsCheckingEmailConfirmation(false);
-    }
-  }
-
-  async function resendVerificationEmail() {
-    setIsResendingEmailConfirmation(true);
-    setEmailConfirmationMessage(null);
-
-    try {
-      await resendEmailVerification();
-      setEmailConfirmationMessage('Verification email sent. Check your inbox.');
-    } catch (error) {
-      setEmailConfirmationMessage(
-        error instanceof Error ? error.message : 'Unable to resend verification email.',
-      );
-    } finally {
-      setIsResendingEmailConfirmation(false);
     }
   }
 
@@ -1585,14 +1566,6 @@ export function Toolbar({
                 type='button'
               >
                 Continue local
-              </button>
-              <button
-                className='rounded-lg border border-[#333941] bg-[#202329] px-3 py-2 font-bold text-[#eef1f4] hover:border-[#4c535c] hover:bg-[#252930] disabled:cursor-wait disabled:opacity-70'
-                disabled={isResendingEmailConfirmation}
-                onClick={() => void resendVerificationEmail()}
-                type='button'
-              >
-                {isResendingEmailConfirmation ? 'Sending...' : 'Resend'}
               </button>
               <button
                 className='rounded-lg border border-[#4aa391] bg-[#203731] px-3 py-2 font-bold text-[#eef1f4] hover:bg-[#25453e] disabled:cursor-wait disabled:opacity-70'
