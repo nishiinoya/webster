@@ -51,6 +51,18 @@ export class StripeService implements OnModuleInit {
       apiVersion: '2025-02-24.acacia',
     });
     this.logger.log('Stripe client initialized (inline price_data mode)');
+
+    // Webhook-secret fingerprint — logs presence/length/last-4 (never the full
+    // value) so a signing-secret mismatch can be diagnosed from container logs.
+    if (!this.webhookSecret) {
+      this.logger.warn(
+        'STRIPE_WEBHOOK_SECRET is EMPTY — every webhook will fail signature verification',
+      );
+    } else {
+      this.logger.log(
+        `Webhook secret loaded: len=${this.webhookSecret.length} ...${this.webhookSecret.slice(-4)}`,
+      );
+    }
   }
 
   get client(): Stripe {
