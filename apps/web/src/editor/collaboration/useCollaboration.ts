@@ -17,7 +17,8 @@ import type {
   EditorApp,
   LayerCropPreviewPayload,
   LayerFilterPreviewPayload,
-  LayerTransformPreviewPayload
+  LayerTransformPreviewPayload,
+  Object3DPreviewPayload
 } from "../app/EditorApp";
 import type { SharedEditorAction } from "../app/history/SharedEditorAction";
 import type { DrawPreviewPayload } from "../tools/drawing/DrawingTool";
@@ -199,6 +200,11 @@ export function useCollaboration({
     pointer: CollaborationPreviewPointer | null;
     tool: string;
   } | null>(null);
+  const object3DPreviewFrameRef = useRef<number | null>(null);
+  const pendingObject3DPreviewLayerIdsRef = useRef<Set<string>>(new Set());
+  const object3DCommitDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const object3DCommitFlushingRef = useRef(false);
+  const pendingObject3DCommitActionRef = useRef<SharedEditorAction | null>(null);
   const remotePreviewRestoreTimerRef = useRef<number | null>(null);
   const remotePreviewEpochRef = useRef(0);
   const activeRemotePreviewRef = useRef<{
@@ -225,6 +231,12 @@ export function useCollaboration({
     return () => {
       if (remotePreviewRestoreTimerRef.current !== null) {
         window.clearTimeout(remotePreviewRestoreTimerRef.current);
+      }
+      if (object3DPreviewFrameRef.current !== null) {
+        window.cancelAnimationFrame(object3DPreviewFrameRef.current);
+      }
+      if (object3DCommitDebounceRef.current !== null) {
+        clearTimeout(object3DCommitDebounceRef.current);
       }
       clientRef.current?.disconnect();
     };
@@ -556,6 +568,14 @@ export function useCollaboration({
 
           if (isLayerFilterPreviewPayload(operation.payload)) {
             if (editorApp.applyRemoteLayerFilterPreview(operation.payload)) {
+              markRemotePreviewActive(operation, 3000);
+              onLayersChange(editorApp.getLayerSummaries());
+            }
+            return;
+          }
+
+          if (isObject3DPreviewPayload(operation.payload)) {
+            if (editorApp.applyRemoteObject3DPreview(operation.payload)) {
               markRemotePreviewActive(operation, 3000);
               onLayersChange(editorApp.getLayerSummaries());
             }
@@ -996,6 +1016,21 @@ export function useCollaboration({
         return;
       }
 
+      if (isObject3DPreviewLayerUpdateAction(action) && !object3DCommitFlushingRef.current) {
+        if (object3DCommitDebounceRef.current) {
+          clearTimeout(object3DCommitDebounceRef.current);
+        }
+        pendingObject3DCommitActionRef.current = action;
+        object3DCommitDebounceRef.current = setTimeout(() => {
+          object3DCommitDebounceRef.current = null;
+          pendingObject3DCommitActionRef.current = null;
+          object3DCommitFlushingRef.current = true;
+          handleLocalEditorAction(action);
+          object3DCommitFlushingRef.current = false;
+        }, 180);
+        return;
+      }
+
       // Capture the projectId at enqueue time. We re-check the live state
       // when the chained task actually runs in case the user switched away.
       const projectId = currentState.projectId;
@@ -1086,6 +1121,18 @@ export function useCollaboration({
       gestureFlushingRef.current = true;
       handleLocalEditorAction(action);
       gestureFlushingRef.current = false;
+    }
+
+    if (pendingObject3DCommitActionRef.current) {
+      const action = pendingObject3DCommitActionRef.current;
+      if (object3DCommitDebounceRef.current) {
+        clearTimeout(object3DCommitDebounceRef.current);
+        object3DCommitDebounceRef.current = null;
+      }
+      pendingObject3DCommitActionRef.current = null;
+      object3DCommitFlushingRef.current = true;
+      handleLocalEditorAction(action);
+      object3DCommitFlushingRef.current = false;
     }
 
     if (deferredRemoteOpsRef.current.length === 0) {
@@ -1206,6 +1253,69 @@ export function useCollaboration({
           tool: realtimePayload.tool
         })
       );
+    },
+    [clientId, editorAppRef]
+  );
+
+  const sendObject3DPreview = useCallback(
+    (layerIds: string[]) => {
+      const currentState = latestStateRef.current;
+
+      if (
+        layerIds.length === 0 ||
+        isApplyingRemoteRef.current ||
+        currentState.mode !== "shared" ||
+        !currentState.projectId ||
+        !currentState.capabilities.canEdit ||
+        !clientRef.current?.isConnected
+      ) {
+        return;
+      }
+
+      for (const layerId of layerIds) {
+        pendingObject3DPreviewLayerIdsRef.current.add(layerId);
+      }
+
+      if (object3DPreviewFrameRef.current !== null) {
+        return;
+      }
+
+      object3DPreviewFrameRef.current = window.requestAnimationFrame(() => {
+        object3DPreviewFrameRef.current = null;
+        const editorApp = editorAppRef.current;
+        const frameState = latestStateRef.current;
+        const pendingLayerIds = [...pendingObject3DPreviewLayerIdsRef.current];
+
+        pendingObject3DPreviewLayerIdsRef.current.clear();
+
+        if (
+          !editorApp ||
+          pendingLayerIds.length === 0 ||
+          isApplyingRemoteRef.current ||
+          frameState.mode !== "shared" ||
+          !frameState.projectId ||
+          !frameState.capabilities.canEdit ||
+          !clientRef.current?.isConnected
+        ) {
+          return;
+        }
+
+        const realtimePayload = editorApp.getObject3DPreviewPayload(pendingLayerIds);
+
+        if (!realtimePayload) {
+          return;
+        }
+
+        clientRef.current.sendPreview(
+          createRealtimePreviewOperation({
+            clientId,
+            payload: realtimePayload as unknown as Record<string, unknown>,
+            projectId: frameState.projectId,
+            projectVersion: frameState.currentVersion ?? 0,
+            tool: realtimePayload.tool
+          })
+        );
+      });
     },
     [clientId, editorAppRef]
   );
@@ -1392,6 +1502,7 @@ export function useCollaboration({
     handleLocalEditorAction,
     saveCurrentSharedProject,
     sendLayerFilterPreview,
+    sendObject3DPreview,
     sendPresenceCursor,
     sendPreviewFromCurrentScene,
     state
@@ -1475,6 +1586,21 @@ function isLayerFilterPreviewPayload(value: unknown): value is LayerFilterPrevie
     payload.tool === "Filters" &&
     Array.isArray(payload.layers) &&
     payload.layers.every(isLayerFilterPreviewLayer)
+  );
+}
+
+function isObject3DPreviewPayload(value: unknown): value is Object3DPreviewPayload {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const payload = value as Partial<Object3DPreviewPayload>;
+
+  return (
+    payload.source === "object3d-preview" &&
+    payload.tool === "Object3D" &&
+    Array.isArray(payload.layers) &&
+    payload.layers.every(isObject3DPreviewLayer)
   );
 }
 
@@ -1586,6 +1712,34 @@ function isLayerFilterPreviewLayer(
   return typeof layer.id === "string" && isPreviewLayerFilters(layer.filters);
 }
 
+function isObject3DPreviewLayer(
+  value: unknown
+): value is Object3DPreviewPayload["layers"][number] {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const layer = value as Partial<Object3DPreviewPayload["layers"][number]>;
+
+  return (
+    typeof layer.id === "string" &&
+    isFinitePreviewNumber(layer.ambient) &&
+    isFinitePreviewNumber(layer.lightIntensity) &&
+    isFinitePreviewNumber(layer.lightX) &&
+    isFinitePreviewNumber(layer.lightY) &&
+    isFinitePreviewNumber(layer.lightZ) &&
+    isPreviewColor(layer.materialColor) &&
+    (layer.materialTexture === undefined || isPreviewLayerTexture(layer.materialTexture)) &&
+    isFinitePreviewNumber(layer.objectZoom) &&
+    isFinitePreviewNumber(layer.rotationX) &&
+    isFinitePreviewNumber(layer.rotationY) &&
+    isFinitePreviewNumber(layer.rotationZ) &&
+    isFinitePreviewNumber(layer.shadowDistance) &&
+    isFinitePreviewNumber(layer.shadowOpacity) &&
+    isFinitePreviewNumber(layer.shadowSoftness)
+  );
+}
+
 function isLayerCropPreviewLayer(
   value: unknown
 ): value is LayerCropPreviewPayload["layers"][number] {
@@ -1599,6 +1753,30 @@ function isLayerCropPreviewLayer(
     typeof layer.id === "string" &&
     (layer.crop === null || isPreviewCrop(layer.crop)) &&
     (layer.imageGeometry === undefined || isPreviewImageGeometry(layer.imageGeometry))
+  );
+}
+
+function isPreviewLayerTexture(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const texture = value as Record<string, unknown>;
+  const validKeys = new Set(["blend", "color", "contrast", "kind", "scale"]);
+
+  return (
+    Object.keys(texture).every((key) => validKeys.has(key)) &&
+    (texture.kind === undefined ||
+      texture.kind === "none" ||
+      texture.kind === "checkerboard" ||
+      texture.kind === "stripes" ||
+      texture.kind === "dots" ||
+      texture.kind === "grain" ||
+      texture.kind === "image") &&
+    (texture.blend === undefined || isFinitePreviewNumber(texture.blend)) &&
+    (texture.color === undefined || isPreviewColor(texture.color)) &&
+    (texture.contrast === undefined || isFinitePreviewNumber(texture.contrast)) &&
+    (texture.scale === undefined || isFinitePreviewNumber(texture.scale))
   );
 }
 
@@ -1701,6 +1879,45 @@ function isMaskBrushOptions(value: unknown): value is MaskBrushPreviewPayload["b
     typeof brush.size === "number"
   );
 }
+
+function isObject3DPreviewLayerUpdateAction(action: SharedEditorAction) {
+  if (action.kind !== "command" || action.scope !== "layer") {
+    return false;
+  }
+
+  const payload = action.payload;
+
+  if (!payload || typeof payload !== "object") {
+    return false;
+  }
+
+  const command = payload as { type?: unknown; updates?: unknown };
+
+  if (command.type !== "update" || !command.updates || typeof command.updates !== "object") {
+    return false;
+  }
+
+  const updateKeys = Object.keys(command.updates);
+
+  return updateKeys.length > 0 && updateKeys.every((key) => object3DPreviewUpdateKeys.has(key));
+}
+
+const object3DPreviewUpdateKeys = new Set([
+  "ambient",
+  "lightIntensity",
+  "lightX",
+  "lightY",
+  "lightZ",
+  "materialColor",
+  "materialTexture",
+  "objectZoom",
+  "rotationX",
+  "rotationY",
+  "rotationZ",
+  "shadowDistance",
+  "shadowOpacity",
+  "shadowSoftness"
+]);
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);

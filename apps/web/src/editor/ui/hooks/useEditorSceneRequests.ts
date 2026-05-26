@@ -25,6 +25,7 @@ type UseEditorSceneRequestsOptions = {
   onLayerAssetCommandRequestHandled: (requestId: number) => void;
   onLayerCommandRequestHandled: (requestId: number) => void;
   onLayerFilterPreview?: (layerIds: string[]) => void;
+  onObject3DPreview?: (layerIds: string[]) => void;
   onSceneChange: () => void;
   onSelectLayerRequestHandled: (requestId: number) => void;
   onUploadRequestHandled: (requestId: number) => void;
@@ -78,6 +79,7 @@ export function useEditorSceneRequests({
   onLayerAssetCommandRequestHandled,
   onLayerCommandRequestHandled,
   onLayerFilterPreview,
+  onObject3DPreview,
   onSceneChange,
   onSelectLayerRequestHandled,
   onUploadRequestHandled,
@@ -362,11 +364,16 @@ export function useEditorSceneRequests({
     if (isFilterOnlyLayerUpdateCommand(layerCommandRequest.command)) {
       onLayerFilterPreview?.([layerCommandRequest.command.layerId]);
     }
+
+    if (isObject3DOnlyLayerUpdateCommand(layerCommandRequest.command)) {
+      onObject3DPreview?.([layerCommandRequest.command.layerId]);
+    }
   }, [
     editorAppRef,
     layerCommandRequest,
     onLayerCommandRequestHandled,
     onLayerFilterPreview,
+    onObject3DPreview,
     onLayersChange
   ]);
 }
@@ -382,6 +389,35 @@ function isFilterOnlyLayerUpdateCommand(
 
   return updateKeys.length === 1 && updateKeys[0] === "filters";
 }
+
+function isObject3DOnlyLayerUpdateCommand(
+  command: LayerCommand
+): command is Extract<LayerCommand, { type: "update" }> {
+  if (command.type !== "update") {
+    return false;
+  }
+
+  const updateKeys = Object.keys(command.updates);
+
+  return updateKeys.length > 0 && updateKeys.every((key) => object3DPreviewUpdateKeys.has(key));
+}
+
+const object3DPreviewUpdateKeys = new Set([
+  "ambient",
+  "lightIntensity",
+  "lightX",
+  "lightY",
+  "lightZ",
+  "materialColor",
+  "materialTexture",
+  "objectZoom",
+  "rotationX",
+  "rotationY",
+  "rotationZ",
+  "shadowDistance",
+  "shadowOpacity",
+  "shadowSoftness"
+]);
 
 function wait(milliseconds: number) {
   return new Promise<void>((resolve) => {

@@ -49,6 +49,7 @@ import type {
   Layer,
   LayerContentCrop,
   LayerFilterSettings,
+  LayerTextureSettings,
   Object3DKind,
   SerializedStrokeLayer
 } from "../layers/Layer";
@@ -273,6 +274,30 @@ export type LayerFilterPreviewPayload = {
   layers: LayerFilterPreviewLayer[];
   source: "filter-preview";
   tool: "Filters";
+};
+
+export type Object3DPreviewLayer = {
+  ambient: number;
+  id: string;
+  lightIntensity: number;
+  lightX: number;
+  lightY: number;
+  lightZ: number;
+  materialColor: [number, number, number, number];
+  materialTexture?: Partial<LayerTextureSettings>;
+  objectZoom: number;
+  rotationX: number;
+  rotationY: number;
+  rotationZ: number;
+  shadowDistance: number;
+  shadowOpacity: number;
+  shadowSoftness: number;
+};
+
+export type Object3DPreviewPayload = {
+  layers: Object3DPreviewLayer[];
+  source: "object3d-preview";
+  tool: "Object3D";
 };
 
 export type LayerCropPreviewLayer = {
@@ -1689,6 +1714,28 @@ export class EditorApp {
       : null;
   }
 
+  getObject3DPreviewPayload(layerIds: string[]): Object3DPreviewPayload | null {
+    const seenLayerIds = new Set<string>();
+    const layers = layerIds.flatMap((layerId) => {
+      if (seenLayerIds.has(layerId)) {
+        return [];
+      }
+
+      seenLayerIds.add(layerId);
+      const layer = this.scene.getLayer(layerId);
+
+      return layer instanceof Object3DLayer ? [createObject3DPreviewLayer(layer)] : [];
+    });
+
+    return layers.length > 0
+      ? {
+          layers,
+          source: "object3d-preview",
+          tool: "Object3D"
+        }
+      : null;
+  }
+
   private getLayerCropPreviewPayload(): LayerCropPreviewPayload | null {
     const before = this.pendingHistoryGesture?.before.scene;
 
@@ -1798,6 +1845,38 @@ export class EditorApp {
           ...layer.filters,
           ...previewLayer.filters
         })
+      });
+      didChange = true;
+    }
+
+    return didChange;
+  }
+
+  applyRemoteObject3DPreview(payload: Object3DPreviewPayload) {
+    let didChange = false;
+
+    for (const previewLayer of payload.layers) {
+      const layer = this.scene.getLayer(previewLayer.id);
+
+      if (!(layer instanceof Object3DLayer) || layer.locked) {
+        continue;
+      }
+
+      this.scene.updateLayer(layer.id, {
+        ambient: previewLayer.ambient,
+        lightIntensity: previewLayer.lightIntensity,
+        lightX: previewLayer.lightX,
+        lightY: previewLayer.lightY,
+        lightZ: previewLayer.lightZ,
+        materialColor: previewLayer.materialColor,
+        materialTexture: previewLayer.materialTexture,
+        objectZoom: previewLayer.objectZoom,
+        rotationX: previewLayer.rotationX,
+        rotationY: previewLayer.rotationY,
+        rotationZ: previewLayer.rotationZ,
+        shadowDistance: previewLayer.shadowDistance,
+        shadowOpacity: previewLayer.shadowOpacity,
+        shadowSoftness: previewLayer.shadowSoftness
       });
       didChange = true;
     }
@@ -3340,6 +3419,26 @@ function getHistoryLayerComparable(layer: Layer) {
   }
 
   return normalizeHistoryComparable(serialized);
+}
+
+function createObject3DPreviewLayer(layer: Object3DLayer): Object3DPreviewLayer {
+  return {
+    ambient: layer.ambient,
+    id: layer.id,
+    lightIntensity: layer.lightIntensity,
+    lightX: layer.lightX,
+    lightY: layer.lightY,
+    lightZ: layer.lightZ,
+    materialColor: [...layer.materialColor] as [number, number, number, number],
+    materialTexture: { ...layer.materialTexture },
+    objectZoom: layer.objectZoom,
+    rotationX: layer.rotationX,
+    rotationY: layer.rotationY,
+    rotationZ: layer.rotationZ,
+    shadowDistance: layer.shadowDistance,
+    shadowOpacity: layer.shadowOpacity,
+    shadowSoftness: layer.shadowSoftness
+  };
 }
 
 function normalizeHistoryComparable(value: unknown): unknown {
