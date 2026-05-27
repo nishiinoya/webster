@@ -5,7 +5,6 @@ import Stripe from 'stripe';
 export type PlanInterval = 'month' | 'year';
 
 export interface PlanInfo {
-  /** Stable client key — 'monthly' / 'yearly'. NOT a Stripe price ID. */
   priceId: PlanKey;
   interval: PlanInterval;
   amount: number;
@@ -15,13 +14,6 @@ export interface PlanInfo {
 
 export type PlanKey = 'monthly' | 'yearly';
 
-/**
- * Stripe Checkout supports `price_data` inline — no pre-created Product or Price
- * is needed. We describe the plan in our own config and pass it at session
- * creation time; Stripe creates the underlying objects automatically. That
- * removes the dashboard-setup step at the cost of letting the *app* be the
- * source of truth for plan amounts (which is fine for a demo).
- */
 @Injectable()
 export class StripeService implements OnModuleInit {
   private readonly logger = new Logger(StripeService.name);
@@ -44,7 +36,7 @@ export class StripeService implements OnModuleInit {
   onModuleInit() {
     const secretKey = this.config.get<string>('stripe.secretKey') ?? '';
     if (!secretKey) {
-      this.logger.warn('STRIPE_SECRET_KEY not set — Stripe features disabled');
+      this.logger.warn('STRIPE_SECRET_KEY not set - Stripe features disabled');
       return;
     }
     this.stripe = new Stripe(secretKey, {
@@ -52,11 +44,9 @@ export class StripeService implements OnModuleInit {
     });
     this.logger.log('Stripe client initialized (inline price_data mode)');
 
-    // Webhook-secret fingerprint — logs presence/length/last-4 (never the full
-    // value) so a signing-secret mismatch can be diagnosed from container logs.
     if (!this.webhookSecret) {
       this.logger.warn(
-        'STRIPE_WEBHOOK_SECRET is EMPTY — every webhook will fail signature verification',
+        'STRIPE_WEBHOOK_SECRET is EMPTY - every webhook will fail signature verification',
       );
     } else {
       this.logger.log(
@@ -102,8 +92,6 @@ export class StripeService implements OnModuleInit {
             currency: this.currency,
             unit_amount: this.amountCentsFor(params.plan),
             recurring: { interval },
-            // Pass product_data so the line item still shows a friendly name on
-            // the hosted checkout page and the customer's invoice/receipt.
             product_data: { name: this.productName },
           },
         },
@@ -116,11 +104,6 @@ export class StripeService implements OnModuleInit {
     });
   }
 
-  /**
-   * Returns the inline plan catalogue. No network call — plans are defined in
-   * config. Returns [] only when Stripe itself isn't configured, so the
-   * frontend's "Billing isn't configured yet" path still works.
-   */
   getPlans(): { plans: PlanInfo[] } {
     if (!this.isConfigured()) {
       return { plans: [] };

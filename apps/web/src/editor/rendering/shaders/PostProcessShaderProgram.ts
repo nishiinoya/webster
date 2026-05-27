@@ -1,4 +1,3 @@
-/** Post-process shader program wrapper for blur and compositing passes. */
 import { ShaderProgram } from "./ShaderProgram";
 
 export type BlurRegion = {

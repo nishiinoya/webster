@@ -18,7 +18,6 @@ export default function ProfilePage() {
   const { user } = useAuth0();
   const [displayName, setDisplayName] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-  // A newly picked file (resized) not yet uploaded, plus a local preview URL.
   const [pendingAvatar, setPendingAvatar] = useState<Blob | null>(null);
   const [pendingAvatarPreview, setPendingAvatarPreview] = useState<string | null>(null);
   const [removeAvatarOnSave, setRemoveAvatarOnSave] = useState(false);
@@ -29,8 +28,6 @@ export default function ProfilePage() {
   const [section, setSection] = useState<'profile' | 'subscription'>('profile');
   const subscription = useSubscription();
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
-  // The display name as last loaded/saved — used to decide whether the
-  // display-name PATCH actually needs to fire on Save.
   const savedDisplayNameRef = useRef('');
 
   useEffect(() => {
@@ -39,10 +36,6 @@ export default function ProfilePage() {
     getCurrentUser()
       .then((profile) => {
         if (!cancelled) {
-          // Pre-fill the field with the Auth0 name when the backend has no
-          // display name yet, so it's never blank. savedDisplayNameRef tracks
-          // what's actually persisted, so saving the pre-filled name still fires
-          // the PATCH that persists it.
           const stored = profile.displayName ?? '';
           setDisplayName(stored || user?.name || user?.nickname || '');
           savedDisplayNameRef.current = stored;
@@ -65,7 +58,6 @@ export default function ProfilePage() {
     };
   }, []);
 
-  // Revoke the object URL when the pending preview changes / unmounts.
   useEffect(() => {
     return () => {
       if (pendingAvatarPreview) {
@@ -105,12 +97,10 @@ export default function ProfilePage() {
       const trimmedName = displayName.trim();
       let latest = null;
 
-      // Request 1 — display name PATCH, only when it actually changed.
       if (trimmedName !== savedDisplayNameRef.current) {
         latest = await updateCurrentUser({ displayName: trimmedName });
       }
 
-      // Request 2 — avatar, as its own multipart upload (or removal).
       if (pendingAvatar) {
         latest = await uploadAvatar(pendingAvatar);
       } else if (removeAvatarOnSave) {
@@ -316,10 +306,6 @@ export default function ProfilePage() {
   );
 }
 
-/**
- * Downscales an image file to a JPEG Blob (max `maxDimension` on the longest
- * side) so the uploaded avatar stays small in object storage.
- */
 function resizeImageToBlob(file: File, maxDimension: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const objectUrl = URL.createObjectURL(file);

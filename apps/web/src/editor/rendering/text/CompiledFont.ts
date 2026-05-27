@@ -1,4 +1,3 @@
-/** Types describing compiled font assets and glyph geometry. */
 export type CompiledFontManifest = {
   fonts: CompiledFontManifestEntry[];
 };

@@ -1,4 +1,3 @@
-/** Shader program for isolated 3D object layer rendering. */
 import { ShaderProgram } from "./ShaderProgram";
 import type {
   LayerFilterAdjustment,

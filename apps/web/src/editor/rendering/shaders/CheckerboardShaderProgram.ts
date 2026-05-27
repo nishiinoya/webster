@@ -1,4 +1,3 @@
-/** Checkerboard background shader program wrapper. */
 import { ShaderProgram } from "./ShaderProgram";
 
 export class CheckerboardShaderProgram extends ShaderProgram {

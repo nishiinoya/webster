@@ -18,7 +18,6 @@ export default function CallbackPage() {
           target = stashed;
         }
       } catch {
-        // ignore
       }
       router.replace(target);
     }

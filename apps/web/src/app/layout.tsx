@@ -13,8 +13,6 @@ function AuthBridge() {
   const { getAccessTokenSilently, loginWithRedirect } = useAuth0();
 
   useEffect(() => {
-    // Guard so parallel API calls (every home tab fires one) don't each kick off
-    // their own redirect when consent is missing.
     let consentRedirectStarted = false;
 
     setAccessTokenGetter(async () => {
@@ -26,11 +24,6 @@ function AuthBridge() {
             ? (err as { error?: string }).error
             : undefined;
 
-        // Silent token acquisition runs without UI, so it can't show Auth0's
-        // consent screen. On localhost Auth0 can't skip consent, so any user
-        // other than the tenant owner (who is auto-consented) hits
-        // `consent_required`/`login_required` on their first API call. Send them
-        // through one interactive consent, then back to where they were.
         if (code === "login_required") {
           return null;
         }
@@ -46,7 +39,6 @@ function AuthBridge() {
                   window.sessionStorage.setItem("auth0:returnTo", target);
                 }
               } catch {
-                // sessionStorage may be unavailable; fail open
               }
             }
 

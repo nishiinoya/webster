@@ -1,4 +1,3 @@
-/** Layer mask sizing and resampling helpers. */
 import { Layer } from "../layers/Layer";
 import { TextLayer } from "../layers/TextLayer";
 import { getTextMaskFrame } from "../rendering/text/BitmapText";

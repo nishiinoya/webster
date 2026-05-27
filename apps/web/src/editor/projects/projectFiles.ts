@@ -1,6 +1,3 @@
-/**
- * Project file picker and save helpers for `.webster` documents.
- */
 import { EditorApp } from "../app/EditorApp";
 import type { ProjectPackageOptions } from "./ProjectPackage";
 import { rememberProjectFileHandle } from "./projectFileHandleStore";
@@ -46,9 +43,6 @@ export type PickedProjectFile = {
   handle: WebsterFileHandle | null;
 };
 
-/**
- * Saves the current project to an existing file handle or prompts for a new path.
- */
 export async function saveProjectFile(
   editorApp: EditorApp,
   projectFileHandleRef: { current: WebsterFileHandle | null },
@@ -89,16 +83,10 @@ export async function saveProjectFile(
   saveProjectMetadata(projectFileHandleRef.current.name ?? "untitled.webster", true);
 }
 
-/**
- * Returns whether the browser supports the file picker API used for project saves.
- */
 export function canPickProjectFileHandle() {
   return Boolean((window as SaveFilePickerWindow).showOpenFilePicker);
 }
 
-/**
- * Prompts the user to open a project file and returns both the file and handle when available.
- */
 export async function pickProjectFileWithHandle(): Promise<PickedProjectFile | null> {
   const openPicker = (window as SaveFilePickerWindow).showOpenFilePicker;
 
@@ -130,9 +118,6 @@ export async function pickProjectFileWithHandle(): Promise<PickedProjectFile | n
   };
 }
 
-/**
- * Downloads a project blob through a temporary anchor fallback.
- */
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
@@ -143,9 +128,6 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-/**
- * Opens the browser save picker for a Webster project file.
- */
 async function getProjectFileHandle(suggestedName: string) {
   const savePicker = (window as SaveFilePickerWindow).showSaveFilePicker;
 
@@ -167,9 +149,6 @@ async function getProjectFileHandle(suggestedName: string) {
   });
 }
 
-/**
- * Ensures the current file handle has read/write permission before saving.
- */
 async function ensureWritePermission(handle: WebsterFileHandle) {
   if (!handle.queryPermission || !handle.requestPermission) {
     return true;
@@ -185,9 +164,6 @@ async function ensureWritePermission(handle: WebsterFileHandle) {
   return (await handle.requestPermission(descriptor)) === "granted";
 }
 
-/**
- * Defers work until after the current paint so export captures the latest UI state.
- */
 function runAfterPaint<T>(task: () => Promise<T>) {
   return new Promise<T>((resolve, reject) => {
     window.setTimeout(() => {
@@ -196,9 +172,6 @@ function runAfterPaint<T>(task: () => Promise<T>) {
   });
 }
 
-/**
- * Persists small save-session metadata for the editor UI.
- */
 function saveProjectMetadata(filename: string, hasWritableHandle: boolean) {
   localStorage.setItem(
     "webster.editor.projectSave",

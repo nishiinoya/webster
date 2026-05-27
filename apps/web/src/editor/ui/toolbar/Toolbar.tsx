@@ -381,7 +381,6 @@ export function Toolbar({
         }
       })
       .catch(() => {
-        // fall back to Auth0 values
       });
     return () => {
       cancelled = true;

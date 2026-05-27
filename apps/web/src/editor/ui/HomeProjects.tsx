@@ -301,7 +301,6 @@ function ProjectList<T extends ProjectSummary>({
 }) {
   const [page, setPage] = useState(0);
   const pageCount = Math.max(1, Math.ceil(projects.length / PROJECTS_PER_PAGE));
-  // Clamp in case the list shrank (e.g. after a refetch) below the current page.
   const safePage = Math.min(page, pageCount - 1);
   const start = safePage * PROJECTS_PER_PAGE;
   const visible = projects.slice(start, start + PROJECTS_PER_PAGE);
@@ -433,7 +432,6 @@ function PlanBanner({
 }) {
   const { data, isPro, limits, loading } = subscription;
 
-  // Avoid a flash before the first load resolves.
   if (loading && !data) {
     return null;
   }
@@ -441,7 +439,7 @@ function PlanBanner({
   if (isPro) {
     return (
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#2f6d61] bg-[#11201c] px-3 py-2 text-[12px] font-bold text-[#a9e2d2]">
-        <span>Pro plan — unlimited projects &amp; collaborators, 3D models unlocked.</span>
+        <span>Pro plan - unlimited projects &amp; collaborators, 3D models unlocked.</span>
         <a className={planLinkClass} href="/billing">
           Manage
         </a>

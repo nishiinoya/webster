@@ -1,4 +1,3 @@
-/** Move and transform tool implementation. */
 import { Camera2D } from "../../geometry/Camera2D";
 import { Scene } from "../../scene/Scene";
 import {

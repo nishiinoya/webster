@@ -1,4 +1,3 @@
-/** Adjustment layer model. */
 import { Layer } from "./Layer";
 import type { LayerOptions, SerializedAdjustmentLayer } from "./Layer";
 

@@ -1,5 +1,4 @@
 import { Camera2D } from "../../geometry/Camera2D";
-/** Freehand drawing tool implementation. */
 import { StrokeLayer } from "../../layers/StrokeLayer";
 import type { StrokePoint, StrokeSelectionClip, StrokeStyle } from "../../layers/StrokeLayer";
 import type { SerializedStrokeLayer } from "../../layers/Layer";

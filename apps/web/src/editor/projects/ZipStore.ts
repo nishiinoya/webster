@@ -1,4 +1,3 @@
-/** Lightweight ZIP read/write helpers used by project packaging. */
 export type ZipEntry = {
   crc?: number;
   data: Blob | Uint8Array;

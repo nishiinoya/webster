@@ -22,9 +22,6 @@ type PrimitiveRendererContext = {
   getLayerModelMatrix: (layer: Layer) => Float32Array;
 };
 
-/**
- * Draws a clipped local-space rectangle for a layer using the solid color pipeline.
- */
 export function drawLayerLocalRectangle(
   context: PrimitiveRendererContext,
   layer: Layer,
@@ -86,9 +83,6 @@ export function drawLayerLocalRectangle(
   context.gl.drawArrays(context.gl.TRIANGLES, 0, 6);
 }
 
-/**
- * Tessellates and draws a local-space polygon for a layer.
- */
 export function drawLayerLocalPolygon(
   context: PrimitiveRendererContext,
   layer: Layer,
@@ -104,9 +98,6 @@ export function drawLayerLocalPolygon(
   );
 }
 
-/**
- * Draws a thick local-space line segment for a layer.
- */
 export function drawLayerLocalLine(
   context: PrimitiveRendererContext,
   layer: Layer,
@@ -132,9 +123,6 @@ export function drawLayerLocalLine(
   drawLayerLocalTriangles(context, layer, [a, b, d, d, b, c]);
 }
 
-/**
- * Draws a circle approximation in layer-local space.
- */
 export function drawLayerLocalCircle(
   context: PrimitiveRendererContext,
   layer: Layer,
@@ -156,9 +144,6 @@ export function drawLayerLocalCircle(
   drawLayerLocalPolygon(context, layer, points);
 }
 
-/**
- * Draws an ellipse approximation in layer-local space.
- */
 export function drawLayerLocalEllipse(
   context: PrimitiveRendererContext,
   layer: Layer,
@@ -189,9 +174,6 @@ export function drawLayerLocalEllipse(
   drawLayerLocalPolygon(context, layer, points);
 }
 
-/**
- * Draws raw local-space triangle points using the solid color shader.
- */
 export function drawLayerLocalTriangles(
   context: PrimitiveRendererContext,
   layer: Layer,
@@ -217,9 +199,6 @@ export function drawLayerLocalTriangles(
   drawLayerLocalVertexData(context, layer, vertices, texCoords);
 }
 
-/**
- * Uploads arbitrary local-space vertex data for the solid color shader.
- */
 export function drawLayerLocalVertexData(
   context: PrimitiveRendererContext,
   layer: Layer,
@@ -259,9 +238,6 @@ export function drawLayerLocalVertexData(
   context.gl.drawArrays(context.gl.TRIANGLES, 0, vertices.length / 2);
 }
 
-/**
- * Uploads arbitrary local-space vertex data for the brush shader.
- */
 export function drawBrushLayerLocalVertexData(
   context: PrimitiveRendererContext,
   layer: Layer,
@@ -301,9 +277,6 @@ export function drawBrushLayerLocalVertexData(
   context.gl.drawArrays(context.gl.TRIANGLES, 0, vertices.length / 2);
 }
 
-/**
- * Configures the model matrix for a world-space rectangle draw.
- */
 export function drawWorldRectangle(
   context: Pick<PrimitiveRendererContext, "solidColorShaderProgram">,
   rectangle: {

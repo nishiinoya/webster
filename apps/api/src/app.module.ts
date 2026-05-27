@@ -12,7 +12,6 @@ import { AuthModule } from './common/auth/auth.module';
 import { JwtAuthGuard } from './common/auth/jwt-auth.guard';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
-// Module stubs — Phase 1 agents will fill these in
 import { HealthController } from './health.controller';
 import { UsersModule } from './modules/users/users.module';
 import { ProjectsModule } from './modules/projects/projects.module';
@@ -40,7 +39,6 @@ import { CollaborationModule } from './modules/collaboration/collaboration.modul
     PrismaModule,
     EntitlementsModule,
     AuthModule,
-    // Feature modules
     UsersModule,
     ProjectsModule,
     SharedProjectsModule,

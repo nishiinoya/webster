@@ -250,7 +250,6 @@ export class ProjectsService {
       },
     });
 
-    // Update storageKey to use actual id
     const updated = await this.prisma.project.update({
       where: { id: project.id },
       data: { storageKey: `projects/${project.id}/manifest.json` },

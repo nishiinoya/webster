@@ -43,9 +43,6 @@ type TextLayerRendererContext = {
   ) => [number, number, number, number];
 };
 
-/**
- * Draws a text layer using compiled glyph geometry when available, with bitmap fallback.
- */
 export function renderTextLayer(
   context: TextLayerRendererContext,
   layer: TextLayer,

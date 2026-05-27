@@ -137,9 +137,6 @@ export const imageExportRenderOptions: RenderOptions = {
   textEdit: null
 };
 
-/**
- * Coordinates the editor's WebGL render pipeline, resource ownership, and scene drawing flow.
- */
 export class Renderer {
   private readonly gl: WebGLRenderingContext;
   private readonly solidColorShaderProgram: SolidColorShaderProgram;
@@ -175,9 +172,6 @@ export class Renderer {
   private cssWidth = 1;
   private cssHeight = 1;
 
-  /**
-   * Creates a renderer, compiles shader programs, and loads shared font resources.
-   */
   static async create(
     canvas: HTMLCanvasElement,
     options: { alpha?: boolean; premultipliedAlpha?: boolean; preserveDrawingBuffer?: boolean } = {}
@@ -327,9 +321,6 @@ export class Renderer {
     );
   }
 
-  /**
-   * Resizes the backing canvas and viewport to the current CSS pixel size.
-   */
   resize() {
     const pixelRatio = window.devicePixelRatio || 1;
     const nextCssWidth = Math.max(1, this.canvas.clientWidth);
@@ -355,18 +346,12 @@ export class Renderer {
     this.gl.viewport(0, 0, nextWidth, nextHeight);
   }
 
-  /**
-   * Renders the active scene into the main canvas using the current canvas size.
-   */
   render(scene: Scene, camera: Camera2D, options: RenderOptions) {
     this.resize();
     camera.resize(this.cssWidth, this.cssHeight);
     this.renderScene(scene, camera, options);
   }
 
-  /**
-   * Renders the scene into the canvas using an explicit output size, primarily for export.
-   */
   renderToSize(scene: Scene, camera: Camera2D, options: RenderOptions, width: number, height: number) {
     this.width = Math.max(1, Math.floor(width));
     this.height = Math.max(1, Math.floor(height));
@@ -571,9 +556,6 @@ export class Renderer {
     }
   }
 
-  /**
-   * Releases all WebGL resources owned by the renderer.
-   */
   dispose() {
     this.quad.dispose();
     this.selectionOverlayRenderer.dispose();
@@ -1666,9 +1648,6 @@ export class Renderer {
     return [minX, minY, maxX - minX, maxY - minY];
   }
 
-  /**
-   * Registers a user-supplied OpenType font for runtime text rendering.
-   */
   async importFontFile(file: File) {
     return this.fontLoader.addFontFile(file);
   }
@@ -1689,9 +1668,6 @@ export class Renderer {
     );
   }
 
-  /**
-   * Preloads fonts referenced by text layers before export or offscreen rendering.
-   */
   async prepareSceneFonts(scene: Scene) {
     const tasks: Promise<unknown>[] = [];
 

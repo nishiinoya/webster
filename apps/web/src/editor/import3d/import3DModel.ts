@@ -1761,7 +1761,6 @@ async function loadAssetTextures(assets: ModelAssetFile[], flipY: boolean) {
         width: image.naturalWidth || image.width
       });
     } catch {
-      // Broken image files are reported as unassigned by omission; model geometry can still load.
     }
   }
 

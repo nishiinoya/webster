@@ -27,14 +27,6 @@ type CollaborationClientOptions = {
   webSocketUrl: string;
 };
 
-/**
- * Socket.IO wrapper for the shared-project room.
- *
- * The editor never imports socket.io-client directly. It asks this client to
- * join a project room, send preview/commit operations, and resend queued
- * commits when a reconnect succeeds. The backend dedupes commits by
- * clientOperationId.
- */
 export class CollaborationClient {
   private socket: Socket | null = null;
   private wasClosedIntentionally = false;
@@ -50,10 +42,6 @@ export class CollaborationClient {
 
     const socket = io(wsUrl, {
       auth: { token: this.options.accessToken ?? "" },
-      // Skip long-polling entirely. Polling holds a persistent HTTP connection
-      // open against the API origin; with Chrome's 6-per-origin HTTP/1.1 limit
-      // on localhost, that can starve REST fetches and make /me, /projects
-      // etc. sit "pending" forever. WebSocket uses its own connection slot.
       transports: ["websocket"],
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -67,10 +55,6 @@ export class CollaborationClient {
       this.options.onStatusChange("connected");
     });
 
-    // The server authenticates asynchronously in handleConnection (JWT verify +
-    // DB lookups). If we joined on "connect", the join could arrive before
-    // socket.data.user was set and be silently dropped. We wait for the server
-    // to confirm auth is complete via "connection:ready" before joining.
     socket.on("connection:ready", () => {
       socket.emit("project:join", {
         clientId: this.options.clientId,
@@ -95,8 +79,6 @@ export class CollaborationClient {
 
     socket.on("reconnect_attempt", () => {
       this.options.onStatusChange("reconnecting");
-      // BUG 3 fix: refresh the auth token before reconnecting so the
-      // gateway doesn't reject stale or expired tokens.
       void getAccessToken().then((token) => {
         if (token) {
           socket.auth = { token };

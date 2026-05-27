@@ -1,6 +1,5 @@
 import { Layer } from "../../layers/Layer";
 import { LayerMask } from "../../masks/LayerMask";
-/** Raster painting helpers for layer mask brush operations. */
 import type { MaskDirtyRect } from "../../masks/LayerMask";
 import type { MaskBrushOptions } from "./MaskBrushTypes";
 

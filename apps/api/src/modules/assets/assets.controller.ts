@@ -96,13 +96,11 @@ export class AssetsController {
     @CurrentUser() user: AuthUser,
     @Res() res: Response,
   ) {
-    // Reject path traversal
     if (!wildcardPath || wildcardPath.includes('..')) {
       throw new BadRequestException('Invalid asset path');
     }
 
     const assetPath = wildcardPath.replace(/\\/g, '/');
-    // BUG 6 fix: pass userId so streamAsset can enforce viewer role.
     const { body, mimeType, size } = await this.assetsService.streamAsset(
       projectId,
       assetPath,

@@ -1,4 +1,3 @@
-/** 3D object layer model with isolated material, lighting, and shadow controls. */
 import type { Imported3DModel } from "../import3d/Imported3DModel";
 import { cloneImported3DModel, serializeImported3DModel } from "../import3d/Imported3DModel";
 import { Layer, normalizeLayerTexture, serializeImportedLayerTexture } from "./Layer";

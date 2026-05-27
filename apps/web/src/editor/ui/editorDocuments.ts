@@ -1,4 +1,3 @@
-/** Shared editor document tab and new-document size types. */
 export type EditorDocumentTab = {
   height: number;
   id: string;
