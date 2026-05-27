@@ -27,9 +27,6 @@ type ImageLayerRendererContext = {
   renderColorOverride: [number, number, number, number] | null;
 };
 
-/**
- * Draws an image layer with tinting, masks, and adjustment filters applied.
- */
 export function renderImageLayer(
   context: ImageLayerRendererContext,
   layer: ImageLayer,

@@ -32,11 +32,9 @@ interface JwtPayload extends BaseJwtPayload {
   email_verified?: boolean;
 }
 
-/** Augment socket.data with our resolved user and tracked presence entries. */
 declare module 'socket.io' {
   interface SocketData {
     user: AuthUser;
-    /** clientId → projectId entries so we can clean up on disconnect */
     trackedPresence: Map<string, string>;
   }
 }
@@ -58,10 +56,8 @@ export class CollaborationGateway
 
   private readonly logger = new Logger(CollaborationGateway.name);
 
-  /** Per-project mutex: Map<projectId, tail of promise chain> */
   private readonly projectLocks = new Map<string, Promise<void>>();
 
-  /** Singleton JWKS client — reusing it keeps the key cache warm across connections. */
   private jwksClient: import('jwks-rsa').JwksClient | null = null;
 
   constructor(
@@ -99,7 +95,6 @@ export class CollaborationGateway
 
       const auth0Subject = payload.sub!;
 
-      // Fast path for known subjects — one lookup, no /userinfo, no merge tx.
       const knownUser = await this.prisma.user.findUnique({
         where: { auth0Subject },
       });
@@ -112,12 +107,10 @@ export class CollaborationGateway
         };
         socket.data.trackedPresence = new Map();
         this.logger.debug(`Socket ${socket.id} authenticated as ${knownUser.email}`);
-        // Signal the client that auth is complete and it is safe to join.
         socket.emit('connection:ready');
         return;
       }
 
-      // New subject: resolve a real email (via /userinfo if needed) and reconcile.
       let rawEmail = (payload.email ?? '').trim().toLowerCase();
       let displayName: string | null = payload.name ?? null;
       if (!rawEmail) {
@@ -136,7 +129,6 @@ export class CollaborationGateway
           ? await tx.user.findUnique({ where: { email: rawEmail } })
           : null;
 
-        // Merge pending-invite row into the real subject row.
         if (bySubject && byEmail && bySubject.id !== byEmail.id) {
           await tx.projectAccess.updateMany({
             where: { sharedWithUserId: byEmail.id },
@@ -208,7 +200,6 @@ export class CollaborationGateway
       socket.data.trackedPresence = new Map();
 
       this.logger.debug(`Socket ${socket.id} authenticated as ${dbUser.email}`);
-      // Signal the client that auth is complete and it is safe to join.
       socket.emit('connection:ready');
     } catch (err) {
       this.logger.warn(`Socket ${socket.id} auth failed: ${(err as Error).message}`);
@@ -244,9 +235,6 @@ export class CollaborationGateway
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // project:join
-  // ---------------------------------------------------------------------------
   @SubscribeMessage('project:join')
   async onProjectJoin(
     @ConnectedSocket() socket: Socket,
@@ -257,7 +245,6 @@ export class CollaborationGateway
 
     if (!user || !projectId || !clientId) return;
 
-    // Access check
     if (this.projectAccessService) {
       const role = await this.projectAccessService.resolveOrGrantLinkRole(projectId, user.id);
       if (!role) {
@@ -272,7 +259,6 @@ export class CollaborationGateway
 
     await socket.join(`project:${projectId}`);
 
-    // Load project state
     const project = await this.prisma.project.findFirst({
       where: { id: projectId, isDeleted: false },
     });
@@ -327,8 +313,6 @@ export class CollaborationGateway
       type: 'manual' as const,
     }));
 
-    // Register presence BEFORE building the state payload so the joining
-    // client's own entry is included in the users list they receive.
     const presence: SharedProjectPresence = {
       user: {
         id: user.id,
@@ -354,13 +338,9 @@ export class CollaborationGateway
 
     socket.emit('project:state', statePayload);
 
-    // Notify everyone else that a new user joined.
     socket.to(`project:${projectId}`).emit('presence:update', allUsers);
   }
 
-  // ---------------------------------------------------------------------------
-  // project:leave
-  // ---------------------------------------------------------------------------
   @SubscribeMessage('project:leave')
   async onProjectLeave(
     @ConnectedSocket() socket: Socket,
@@ -378,9 +358,6 @@ export class CollaborationGateway
       .emit('presence:update', this.presenceService.getAll(projectId));
   }
 
-  // ---------------------------------------------------------------------------
-  // operation:preview
-  // ---------------------------------------------------------------------------
   @SubscribeMessage('operation:preview')
   async onOperationPreview(
     @ConnectedSocket() socket: Socket,
@@ -391,9 +368,6 @@ export class CollaborationGateway
     socket.to(`project:${op.projectId}`).emit('operation:preview', op);
   }
 
-  // ---------------------------------------------------------------------------
-  // operation:commit
-  // ---------------------------------------------------------------------------
   @SubscribeMessage('operation:commit')
   async onOperationCommit(
     @ConnectedSocket() socket: Socket,
@@ -402,11 +376,9 @@ export class CollaborationGateway
     if (!op?.projectId) return;
     const { projectId } = op;
 
-    // Serialise commits per project
     const tail = this.projectLocks.get(projectId) ?? Promise.resolve();
     const next = tail.then(() => this.doCommit(socket, op)).catch(() => {});
     this.projectLocks.set(projectId, next);
-    // Clean up once this is the last pending commit so the map doesn't grow forever.
     void next.then(() => {
       if (this.projectLocks.get(projectId) === next) {
         this.projectLocks.delete(projectId);
@@ -436,15 +408,8 @@ export class CollaborationGateway
       return;
     }
 
-    // Auto-rebase: if another commit was applied ahead of this one in the queue
-    // (baseVersion is stale), re-apply the op on top of the current state
-    // instead of rejecting it. Operations are already serialized per-project by
-    // projectLocks, so the only cause of a mismatch is a concurrent user — and
-    // for a drawing editor where ops are independent patches, last-write-wins
-    // applied in queue order is the correct behaviour.
     if (op.baseVersion !== project.currentVersion) {
       if (!op.scenePatch?.length) {
-        // Full-scene snapshots cannot be safely rebased; ask the client to resync.
         socket.emit('project:error', {
           code: 'version_conflict',
           message: `Version conflict: server is at v${project.currentVersion}, op based on v${op.baseVersion}. Please resync.`,
@@ -482,9 +447,6 @@ export class CollaborationGateway
       },
     });
 
-    // When rebased, remote clients can't safely apply a stale patch (it was
-    // computed against an older base). Send the full scene instead so every
-    // client does a safe scene-replace regardless of their local version.
     const broadcastOp = wasRebased
       ? { ...op, phase: 'commit' as const, scene: newManifest, scenePatch: undefined }
       : { ...op, phase: 'commit' as const };
@@ -549,9 +511,6 @@ export class CollaborationGateway
     return true;
   }
 
-  // ---------------------------------------------------------------------------
-  // presence:cursor
-  // ---------------------------------------------------------------------------
   @SubscribeMessage('presence:cursor')
   onPresenceCursor(
     @ConnectedSocket() socket: Socket,
@@ -581,15 +540,11 @@ export class CollaborationGateway
 
     this.presenceService.set(projectId, clientId, presence);
 
-    // Exclude the sender — they already know where their own cursor is.
     socket
       .to(`project:${projectId}`)
       .emit('presence:update', this.presenceService.getAll(projectId));
   }
 
-  // ---------------------------------------------------------------------------
-  // JWT verification helper (wraps jwks-rsa JwksClient into a Promise)
-  // ---------------------------------------------------------------------------
   private verifyJwt(
     token: string,
     domain: string,

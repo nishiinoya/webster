@@ -35,12 +35,10 @@ export class SubscriptionsService {
     private readonly entitlements: EntitlementsService,
   ) {}
 
-  // Change 1: return the full entitlement snapshot instead of the raw Prisma row.
   async getMySubscription(userId: string): Promise<EntitlementSnapshot> {
     return this.entitlements.getSnapshot(userId);
   }
 
-  // Change 2: delegate to StripeService which owns the cache.
   async getPlans() {
     return this.stripeService.getPlans();
   }
@@ -55,11 +53,6 @@ export class SubscriptionsService {
       );
     }
 
-    // Change 3: Resolve existing Stripe customer ID for returning subscribers.
-    // We store the Stripe subscription ID (providerSubId), not the customer ID.
-    // To reuse the customer on a new checkout we retrieve the Stripe subscription
-    // and read customer from it. Any failure is non-fatal — we just proceed
-    // without a pre-filled customer.
     let customerId: string | undefined;
     const existingSub = await this.prisma.subscription.findUnique({
       where: { userId: user.id },
@@ -108,7 +101,6 @@ export class SubscriptionsService {
       throw new NotFoundException('No active subscription found for this user');
     }
 
-    // Retrieve the Stripe subscription to get the customer ID
     const stripeSub = await this.stripeService.client.subscriptions.retrieve(
       sub.providerSubId,
     );
@@ -166,9 +158,6 @@ export class SubscriptionsService {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Private handlers
-  // ---------------------------------------------------------------------------
 
   private async handleCheckoutSessionCompleted(
     session: Stripe.Checkout.Session,
@@ -189,7 +178,6 @@ export class SubscriptionsService {
       return;
     }
 
-    // Fetch the full subscription to get period end and status
     const stripeSub =
       await this.stripeService.client.subscriptions.retrieve(
         stripeSubscriptionId,
@@ -252,7 +240,6 @@ export class SubscriptionsService {
   }
 
   private async handleInvoicePaid(invoice: Stripe.Invoice): Promise<void> {
-    // Resolve userId via subscription
     const stripeSubId =
       typeof invoice.subscription === 'string'
         ? invoice.subscription

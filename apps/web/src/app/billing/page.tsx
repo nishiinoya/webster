@@ -17,7 +17,6 @@ import { useSubscription } from '@/editor/collaboration/useSubscription';
 const MAX_SUCCESS_POLLS = 5;
 
 export default function BillingPage() {
-  // useSearchParams requires a Suspense boundary in the App Router.
   return (
     <Suspense
       fallback={
@@ -44,7 +43,6 @@ function BillingContent() {
   const [busy, setBusy] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
 
-  // Load plans + payment history once on mount.
   useEffect(() => {
     let cancelled = false;
 
@@ -68,7 +66,6 @@ function BillingContent() {
         }
       })
       .catch(() => {
-        // Payment history is non-critical; leave it empty on failure.
       });
 
     return () => {
@@ -76,9 +73,6 @@ function BillingContent() {
     };
   }, []);
 
-  // After returning from Stripe Checkout with ?status=success, the webhook that
-  // flips us to Pro is async — poll a few times until isPro becomes true, then
-  // strip the query param.
   useEffect(() => {
     if (searchParams.get('status') !== 'success') {
       return;
@@ -99,7 +93,6 @@ function BillingContent() {
           return;
         }
       } catch {
-        // Ignore transient errors while the webhook settles.
       }
 
       if (!cancelled && tries < MAX_SUCCESS_POLLS) {
@@ -111,7 +104,6 @@ function BillingContent() {
 
     void tick();
 
-    // Drop the ?status param so a refresh doesn't re-trigger the banner/poll.
     router.replace('/billing');
 
     return () => {
@@ -125,7 +117,6 @@ function BillingContent() {
       const response = await listPayments();
       setPayments(response.payments);
     } catch {
-      // Non-critical.
     }
   }
 
@@ -197,7 +188,7 @@ function BillingContent() {
           </section>
         ) : (
           <div className='grid gap-6'>
-            {/* Current plan summary */}
+            { }
             <section className='rounded-xl border border-[#273230] bg-[#0f1413] p-6'>
               <h2 className='mb-4 text-lg font-bold text-[#f2f4f7]'>Current plan</h2>
               <div className='flex flex-wrap items-center gap-3'>
@@ -238,7 +229,7 @@ function BillingContent() {
               ) : null}
             </section>
 
-            {/* Upgrade options (free users only) */}
+            { }
             {!isPro ? (
               <section className='rounded-xl border border-[#273230] bg-[#0f1413] p-6'>
                 <div className='mb-4 flex flex-wrap items-center justify-between gap-3'>
@@ -307,7 +298,7 @@ function BillingContent() {
               </section>
             ) : null}
 
-            {/* Payment history */}
+            { }
             <section className='rounded-xl border border-[#273230] bg-[#0f1413] p-6'>
               <h2 className='mb-4 text-lg font-bold text-[#f2f4f7]'>Payment history</h2>
               {payments.length === 0 ? (
@@ -383,7 +374,6 @@ function formatDate(value: string) {
   return Number.isFinite(parsed) ? new Date(parsed).toLocaleDateString() : value;
 }
 
-// Plan amounts come in the currency's minor units (e.g. cents).
 function formatAmount(amount: number, currency: string) {
   try {
     return new Intl.NumberFormat(undefined, {
@@ -395,7 +385,6 @@ function formatAmount(amount: number, currency: string) {
   }
 }
 
-// Payment amounts arrive as decimal strings already in major units.
 function formatAmountString(amount: string, currency: string) {
   const numeric = Number(amount);
   if (!Number.isFinite(numeric)) {

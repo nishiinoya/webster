@@ -11,9 +11,6 @@ export type LayerMaskAction =
   | "invert"
   | "toggle-enabled";
 
-/**
- * Applies a mask operation to the provided layer and returns the same layer.
- */
 export function applyLayerMaskAction(layer: Layer, action: LayerMaskAction) {
   if (action === "delete") {
     layer.mask = null;

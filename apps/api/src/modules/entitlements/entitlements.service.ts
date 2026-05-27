@@ -6,7 +6,6 @@ import { PrismaService } from '../../database/prisma.service';
 export type PlanTier = 'free' | 'pro';
 
 export interface EntitlementLimits {
-  /** null = unlimited (Pro). */
   maxProjects: number | null;
   maxSharesPerProject: number | null;
   allow3D: boolean;
@@ -54,8 +53,6 @@ export class EntitlementsService {
       sub.status === SubscriptionStatus.active ||
       sub.status === SubscriptionStatus.trialing;
     if (!active) return false;
-    // A period end in the past means the subscription lapsed before Stripe
-    // pushed us the cancellation webhook — treat it as expired.
     if (sub.currentPeriodEnd && sub.currentPeriodEnd.getTime() < Date.now()) {
       return false;
     }
@@ -113,12 +110,6 @@ export class EntitlementsService {
     }
   }
 
-  /**
-   * Enforces the per-project collaborator cap for free owners. Counts current
-   * accepted collaborators plus outstanding invites. Call this only when adding
-   * a genuinely NEW person — re-granting an existing collaborator is an update,
-   * not a new share, so the caller should skip the check in that case.
-   */
   async assertCanShareProject(
     projectId: string,
     ownerId: string,
@@ -145,12 +136,6 @@ export class EntitlementsService {
     }
   }
 
-  /**
-   * Content-based 3D guard. The original model file never reaches the backend —
-   * 3D geometry is baked into the manifest as an `object3d` layer — so we detect
-   * 3D by scanning scene content, not by file extension (which is bypassable and
-   * never present on the wire anyway).
-   */
   async assertManifest3DAllowed(
     userId: string,
     manifest: unknown,
@@ -169,7 +154,6 @@ export class EntitlementsService {
   }
 }
 
-/** Walks a manifest's layer tree and reports whether any layer is a 3D object. */
 export function manifestUsesObject3D(manifest: unknown): boolean {
   if (!manifest || typeof manifest !== 'object') return false;
   return layersContainObject3D((manifest as { layers?: unknown }).layers);
@@ -182,7 +166,6 @@ function layersContainObject3D(layers: unknown): boolean {
     if (!layer || typeof layer !== 'object') continue;
     const rec = layer as Record<string, unknown>;
     if (rec.type === 'object3d') return true;
-    // Group layers nest their children — recurse into the common shapes.
     if (layersContainObject3D(rec.children)) return true;
     if (layersContainObject3D(rec.layers)) return true;
   }

@@ -1,4 +1,3 @@
-/** Pointer-event hook for canvas tool input and text selection drags. */
 import {
   MutableRefObject,
   PointerEvent as ReactPointerEvent,

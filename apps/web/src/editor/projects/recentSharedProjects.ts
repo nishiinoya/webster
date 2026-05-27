@@ -1,8 +1,3 @@
-/**
- * Tracks recently-OPENED shared projects in localStorage. The server only
- * records `updatedAt` (edit time), which isn't the same as "last opened", so
- * we keep open-time locally per browser.
- */
 
 const STORAGE_KEY = "webster:recent-shared-projects";
 const MAX_ENTRIES = 50;
@@ -53,7 +48,6 @@ export function recordOpenedProject(projectId: string, projectName: string) {
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   } catch {
-    // storage full / unavailable — non-fatal
   }
 }
 

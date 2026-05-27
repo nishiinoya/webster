@@ -357,7 +357,7 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
           </div>
           {showShareLimit ? (
             <p className={helperTextClass}>
-              Free plan —{" "}
+              Free plan -{" "}
               <span
                 className={
                   collaboratorCount >= (shareLimit as number)

@@ -1,4 +1,3 @@
-/** Base WebGL shader program abstraction. */
 export class ShaderProgram {
   protected readonly program: WebGLProgram;
   readonly positionAttributeLocation: number;

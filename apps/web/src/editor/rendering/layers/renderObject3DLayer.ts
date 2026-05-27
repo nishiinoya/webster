@@ -178,7 +178,6 @@ function getSubmeshTextureImage(
     return material.textureImage;
   }
 
-  // Fallback for old imported models / built-in objects where there is no usemtl.
   const canUseGlobalFallback = !materialName || layer.modelMaterials.length === 0;
 
   return canUseGlobalFallback ? layer.materialTextureImage : null;

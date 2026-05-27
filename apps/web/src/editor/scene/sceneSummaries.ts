@@ -10,9 +10,6 @@ import { ShapeLayer } from "../layers/ShapeLayer";
 import { StrokeLayer } from "../layers/StrokeLayer";
 import { TextLayer } from "../layers/TextLayer";
 
-/**
- * Builds the UI-facing summary object used by layer panels and properties views.
- */
 export function getLayerSummary(
   layer: Layer,
   selectedLayerId: string | null,

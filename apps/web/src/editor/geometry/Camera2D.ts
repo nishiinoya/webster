@@ -1,4 +1,3 @@
-/** Camera state and projection helpers for the 2D editor viewport. */
 export type CameraBounds = {
   x: number;
   y: number;
@@ -146,7 +145,6 @@ export class Camera2D {
   }
 
   dispose() {
-    // Camera owns no browser resources yet.
   }
 }
 

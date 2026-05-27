@@ -7,9 +7,6 @@ import type {
 import { Scene } from "../../scene/Scene";
 import type { Selection } from "../../selection/SelectionManager";
 
-/**
- * Applies a layer command to the scene and returns the command result.
- */
 export function applyLayerCommandToScene(scene: Scene, command: LayerCommand) {
   switch (command.type) {
     case "add-adjustment":
@@ -43,9 +40,6 @@ export function applyLayerCommandToScene(scene: Scene, command: LayerCommand) {
   }
 }
 
-/**
- * Applies a document command and lets the caller react to document-bound changes.
- */
 export function applyDocumentCommandToScene(
   scene: Scene,
   command: DocumentCommand,
@@ -60,9 +54,6 @@ export function applyDocumentCommandToScene(
   }
 }
 
-/**
- * Routes an image-layer command to the async image operation handlers.
- */
 export async function applyImageLayerCommandToScene(
   command: ImageLayerCommand,
   handlers: {
@@ -77,9 +68,6 @@ export async function applyImageLayerCommandToScene(
   return handlers.restoreOriginalImageLayer(command.layerId);
 }
 
-/**
- * Applies a selection command and returns whether it changed selection state.
- */
 export function applySelectionCommandToScene(scene: Scene, command: SelectionCommand) {
   if (typeof command !== "string") {
     if (command.type === "feather") {

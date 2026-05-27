@@ -8,8 +8,6 @@ type SubscriptionState = {
   error: string | null;
 };
 
-// Module-level cache shared by every consumer so we only hit the API once and a
-// single refresh() updates all mounted components.
 let cachedState: SubscriptionState = { data: null, loading: false, error: null };
 let inFlight: Promise<void> | null = null;
 const subscribers = new Set<(state: SubscriptionState) => void>();
@@ -22,7 +20,6 @@ function setCachedState(next: SubscriptionState) {
 }
 
 async function load(): Promise<void> {
-  // Coalesce concurrent fetches into one network request.
   if (inFlight) {
     return inFlight;
   }
@@ -70,10 +67,8 @@ export function useSubscription() {
     }
 
     subscribers.add(setState);
-    // Sync to the latest cached value in case it changed before subscribing.
     setState(cachedState);
 
-    // Fetch once on first mount (or if a previous fetch failed and left no data).
     if (!cachedState.data && !cachedState.loading) {
       void load();
     }
@@ -84,7 +79,6 @@ export function useSubscription() {
   }, [isAuthenticated, isLoading]);
 
   const { data, loading, error } = state;
-  // While loading or on error, treat the user as not Pro so gating fails safe.
   const isPro = Boolean(data?.isPro) && !loading && !error;
 
   return {

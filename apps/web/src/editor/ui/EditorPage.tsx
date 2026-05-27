@@ -491,11 +491,6 @@ export function EditorPage() {
   }, [activeDocument]);
 
   useEffect(() => {
-    // Mirror the active shared projectId into ?projectId=... so refreshing the
-    // page restores the same project. Use history.replaceState to avoid the
-    // Next.js router reloading the editor. We only WRITE the param — never
-    // delete it on local mode, because on initial mount we briefly are in
-    // local mode while the URL still carries the projectId we want to load.
     if (typeof window === 'undefined') return;
 
     if (sharedProjectState.mode !== 'shared' || !sharedProjectState.projectId) {
@@ -508,7 +503,6 @@ export function EditorPage() {
       window.history.replaceState(null, '', url.toString());
     }
 
-    // Remember this open for the home "Recently opened" catalog.
     recordOpenedProject(
       sharedProjectState.projectId,
       sharedProjectState.projectName ?? 'Untitled project',
@@ -545,8 +539,6 @@ export function EditorPage() {
   const didApplyUrlProjectIdRef = useRef(false);
 
   useEffect(() => {
-    // On first mount, if ?projectId=<id> is in the URL, auto-open that shared
-    // project. Runs exactly once so user actions don't get clobbered.
     if (didApplyUrlProjectIdRef.current) return;
     if (typeof window === 'undefined') return;
     if (isAuthLoading) return;
@@ -705,9 +697,6 @@ export function EditorPage() {
     mode: 'add' | 'replace',
     initialFiles: File[] = [],
   ) {
-    // 3D models are a Pro feature. Gate every entry point at this single
-    // chokepoint. While the subscription is still loading we treat the user as
-    // not-Pro (fail safe) rather than letting the dialog slip through.
     if (!subscription.isPro) {
       const goToBilling = window.confirm(
         '3D models are a Pro feature. Go to billing to upgrade?',
@@ -959,7 +948,6 @@ export function EditorPage() {
       return;
     }
 
-    // Already in shared mode: just reopen the dialog instead of re-uploading.
     if (
       sharedProjectState.mode === 'shared' &&
       sharedProjectState.projectId
@@ -1041,11 +1029,6 @@ export function EditorPage() {
   }
 
   function startOpenSharedProject(projectId: string, title?: string) {
-    // Reflect the click in the URL immediately, before we even start loading.
-    // The mode→shared mirror effect only fires after the load completes, so if
-    // the REST/WS round trip is slow (or hangs), we'd otherwise leave the user
-    // staring at a bare /. Doing it here makes refresh restore the right
-    // project even if the original load never finished.
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
       if (url.searchParams.get('projectId') !== projectId) {
@@ -1140,7 +1123,6 @@ export function EditorPage() {
           );
         });
     } catch {
-      // The user closed the popup or Auth0 declined the attempt; keep the prompt open.
     }
   }
 

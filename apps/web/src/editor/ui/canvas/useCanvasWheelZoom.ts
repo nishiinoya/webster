@@ -1,4 +1,3 @@
-/** Wheel-zoom hook for the editor canvas. */
 import { MutableRefObject, useEffect } from "react";
 import { EditorApp } from "../../app/EditorApp";
 

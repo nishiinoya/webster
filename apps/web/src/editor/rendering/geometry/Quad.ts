@@ -1,4 +1,3 @@
-/** Shared quad mesh used by multiple WebGL render paths. */
 import { ShaderProgram } from "../shaders/ShaderProgram";
 import { TexturedShaderProgram } from "../shaders/TexturedShaderProgram";
 

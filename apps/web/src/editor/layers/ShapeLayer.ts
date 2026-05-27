@@ -1,4 +1,3 @@
-/** Shape layer model. */
 import { Layer, normalizeLayerTexture, serializeImportedLayerTexture } from "./Layer";
 import type {
   ImportedLayerTexture,

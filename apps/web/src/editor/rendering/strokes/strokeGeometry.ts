@@ -17,9 +17,6 @@ export type CachedStrokePathGeometry = {
   vertices: Float32Array;
 };
 
-/**
- * Builds cached mesh data for a stroke path in the owning layer's local space.
- */
 export function buildStrokePathGeometry(
   layer: StrokeLayer,
   path: StrokePath

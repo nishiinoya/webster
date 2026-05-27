@@ -1,4 +1,3 @@
-/** Textured layer shader program wrapper. */
 import { ShaderProgram } from "./ShaderProgram";
 import type { LayerFilterAdjustment, LayerFilterSettings } from "../../layers/Layer";
 

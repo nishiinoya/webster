@@ -1,4 +1,3 @@
-/** Reusable ellipse mesh buffers for vector shape rendering. */
 import { ShaderProgram } from "../shaders/ShaderProgram";
 
 type MaskableProgram = ShaderProgram & {

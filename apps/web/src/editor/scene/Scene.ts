@@ -61,9 +61,6 @@ export type SceneFontAsset = SerializedProjectFontAsset & {
   blob: Blob;
 };
 
-/**
- * Owns the editable document state, layer stack, and scene-level mutations.
- */
 export class Scene {
   readonly document: DocumentBounds;
   readonly selection = new SelectionManager();
@@ -109,9 +106,6 @@ export class Scene {
     }
   }
 
-  /**
-   * Recreates a scene from serialized project data and referenced binary assets.
-   */
   static async fromJSON(data: SerializedScene, assets = new Map<string, Blob>()) {
     const scene = new Scene({ createDefaultLayer: false });
     const loaded = await loadSceneFromJSON(data, assets);
@@ -151,9 +145,6 @@ export class Scene {
     }
   }
 
-  /**
-   * Appends a layer to the scene and makes it the active selection.
-   */
   addLayer<T extends Layer>(layer: T) {
     this.layers.push(layer);
     this.setSelectedLayerIds([layer.id]);
@@ -161,9 +152,6 @@ export class Scene {
     return layer;
   }
 
-  /**
-   * Creates a full-document adjustment layer and inserts it into the scene.
-   */
   addAdjustmentLayer() {
     return this.addLayer(
       new AdjustmentLayer({
@@ -177,9 +165,6 @@ export class Scene {
     );
   }
 
-  /**
-   * Creates a default isolated 3D object layer in the middle of the document.
-   */
   addObject3DLayer(objectKind: Object3DKind = "cube") {
     const size = Math.min(this.document.width, this.document.height, 280);
 
@@ -203,9 +188,6 @@ export class Scene {
     );
   }
 
-  /**
-   * Resizes the document bounds and shifts the origin according to the resize anchor.
-   */
   resizeDocument(width: number, height: number, anchor: DocumentResizeAnchor = "center") {
     const nextWidth = clampDocumentSize(width);
     const nextHeight = clampDocumentSize(height);
@@ -223,9 +205,6 @@ export class Scene {
     return this.document;
   }
 
-  /**
-   * Removes a layer from the stack and disposes any resources it owns.
-   */
   removeLayer(layerId: string) {
     const layerIndex = this.layers.findIndex((layer) => layer.id === layerId);
 
@@ -262,16 +241,10 @@ export class Scene {
     return layer;
   }
 
-  /**
-   * Returns the layer with the provided id when it exists.
-   */
   getLayer(layerId: string) {
     return this.layers.find((layer) => layer.id === layerId) ?? null;
   }
 
-  /**
-   * Updates the selected layer and returns the resolved layer when selection succeeds.
-   */
   selectLayer(layerId: string | null) {
     if (layerId === null) {
       this.setSelectedLayerIds([]);
@@ -295,23 +268,14 @@ export class Scene {
     return this.selectedLayerIds.map((layerId) => this.getLayer(layerId)).filter(Boolean);
   }
 
-  /**
-   * Finds the topmost visible editable layer under the provided world-space point.
-   */
   hitTestLayer(x: number, y: number) {
     return hitTestVisibleLayer(this.layers, x, y);
   }
 
-  /**
-   * Finds the topmost visible layer inside a group under the provided world-space point.
-   */
   hitTestLayerInsideGroup(groupId: string, x: number, y: number) {
     return hitTestVisibleLayerInsideGroup(this.layers, groupId, x, y);
   }
 
-  /**
-   * Moves an unlocked layer to a new world position.
-   */
   moveLayer(layerId: string, x: number, y: number) {
     const layer = this.getLayer(layerId);
 
@@ -330,9 +294,6 @@ export class Scene {
     return layer;
   }
 
-  /**
-   * Applies a partial update object to a layer and returns the updated instance.
-   */
   updateLayer(layerId: string, updates: SceneLayerUpdates) {
     const layer = this.getLayer(layerId);
 
@@ -363,9 +324,6 @@ export class Scene {
     return updatedLayer;
   }
 
-  /**
-   * Applies a mask command to an unlocked layer.
-   */
   updateLayerMask(layerId: string, action: LayerMaskAction) {
     const layer = this.getLayer(layerId);
 
@@ -376,9 +334,6 @@ export class Scene {
     return applyLayerMaskAction(layer, action);
   }
 
-  /**
-   * Duplicates a layer, inserts the copy above the source, and selects it.
-   */
   duplicateLayer(layerId: string) {
     const layer = this.getLayer(layerId);
 
@@ -682,9 +637,6 @@ export class Scene {
     return movingLayers;
   }
 
-  /**
-   * Moves a layer to a clamped index within the current layer stack.
-   */
   reorderLayer(layerId: string, targetIndex: number) {
     const currentIndex = this.layers.findIndex((layer) => layer.id === layerId);
 
@@ -733,9 +685,6 @@ export class Scene {
     return this.reorderLayer(layerId, 0);
   }
 
-  /**
-   * Returns UI-facing layer summaries in top-to-bottom display order.
-   */
   getLayerSummaries() {
     const collapsedGroupIds = new Set<string>();
     const summaries = [];
@@ -841,9 +790,6 @@ export class Scene {
     return group;
   }
 
-  /**
-   * Serializes the current scene into the persisted project format.
-   */
   async toJSON(): Promise<SerializedScene> {
     return serializeSceneToJSON({
       document: this.document,
@@ -853,9 +799,6 @@ export class Scene {
     });
   }
 
-  /**
-   * Disposes all layers currently owned by the scene.
-   */
   dispose() {
     for (const layer of this.layers) {
       disposeLayer(layer);

@@ -23,8 +23,6 @@ export default () => ({
   stripe: {
     secretKey: process.env.STRIPE_SECRET_KEY ?? '',
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
-    // Inline plan definition — no Stripe product/price needs to exist; we pass
-    // price_data at checkout time and Stripe creates everything on the fly.
     productName: process.env.STRIPE_PRODUCT_NAME ?? 'Webster Pro',
     currency: (process.env.STRIPE_CURRENCY ?? 'usd').toLowerCase(),
     monthlyAmountCents: parseInt(

@@ -2,7 +2,6 @@ import { Camera2D } from "../../geometry/Camera2D";
 import { DrawingTool } from "../drawing/DrawingTool";
 import type { DrawingToolOptions } from "../drawing/DrawingTool";
 import type { DrawPreviewPayload } from "../drawing/DrawingTool";
-/** Pointer input router for editor tools. */
 import { Scene } from "../../scene/Scene";
 import { MaskBrushTool } from "../mask-brush/MaskBrushTool";
 import type { MaskBrushPreviewPayload } from "../mask-brush/MaskBrushTool";
