@@ -53,6 +53,8 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
       ? `${window.location.origin}/?projectId=${encodeURIComponent(projectId)}`
       : `/?projectId=${encodeURIComponent(projectId)}`;
 
+  const shareUrl = publicInviteLink ?? projectLink;
+
   useEffect(() => {
     let cancelled = false;
 
@@ -328,6 +330,24 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
               {copied === "project" ? "Copied" : "Copy project link"}
             </button>
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={helperTextClass}>Share to</span>
+            {SOCIAL_TARGETS.map((target) => (
+              <button
+                key={target.name}
+                className={dialogSmallButtonClass}
+                onClick={() => openShare(target.buildUrl(shareUrl, SHARE_TEXT))}
+                type="button"
+              >
+                {target.name}
+              </button>
+            ))}
+          </div>
+          {!publicInviteLink ? (
+            <p className={helperTextClass}>
+              Tip: enable the anyone-with-link invite below so people you share with can open the project.
+            </p>
+          ) : null}
         </section>
 
         <section className={dialogSectionClass} aria-label="Invite people">
