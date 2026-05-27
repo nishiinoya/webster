@@ -4,7 +4,8 @@ import type {
   ChangeEvent,
   DragEvent as ReactDragEvent,
   KeyboardEvent as ReactKeyboardEvent,
-  MouseEvent
+  MouseEvent,
+  PointerEvent as ReactPointerEvent
 } from "react";
 import type { LayerCommand, LayerSummary } from "../../app/EditorApp";
 import { cn } from "../classNames";
@@ -71,6 +72,15 @@ export function LayersPanel({
   }, [openMenu]);
 
   function stopPanelControl(event: MouseEvent<HTMLElement>) {
+    event.stopPropagation();
+  }
+
+  function stopPanelPointerControl(event: ReactPointerEvent<HTMLElement>) {
+    event.stopPropagation();
+  }
+
+  function stopPanelDragControl(event: ReactDragEvent<HTMLElement>) {
+    event.preventDefault();
     event.stopPropagation();
   }
 
@@ -401,16 +411,23 @@ export function LayersPanel({
             </button>
             <label
               className="col-[1/-1] grid grid-cols-[auto_minmax(70px,1fr)_40px] items-center gap-[7px] text-[11px] text-[#9aa1ab] min-[1400px]:text-xs"
+              draggable={false}
               onClick={stopPanelControl}
+              onDragStart={stopPanelDragControl}
+              onPointerDown={stopPanelPointerControl}
             >
               <span>Opacity</span>
               <input
                 aria-label={`${layer.name} opacity`}
+                draggable={false}
                 max="100"
                 min="0"
                 onChange={(event) =>
                   updateLayer(layer.id, { opacity: Number(event.target.value) / 100 })
                 }
+                onClick={stopPanelControl}
+                onDragStart={stopPanelDragControl}
+                onPointerDown={stopPanelPointerControl}
                 disabled={!canEditDocument}
                 type="range"
                 value={Math.round(layer.opacity * 100)}

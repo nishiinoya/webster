@@ -85,6 +85,7 @@ export type SharedProjectUiState = {
 };
 
 type UseCollaborationOptions = {
+  activeDocumentId: string;
   activeDocumentTitle: string;
   editorAppRef: MutableRefObject<EditorApp | null>;
   onDocumentLoaded: (document: { height: number; title: string; width: number }) => void;
@@ -121,6 +122,7 @@ const initialState: SharedProjectUiState = {
 };
 
 export function useCollaboration({
+  activeDocumentId,
   activeDocumentTitle,
   editorAppRef,
   onDocumentLoaded,
@@ -387,11 +389,23 @@ export function useCollaboration({
 
       try {
         const assets = await fetchAssetsForProject(payload.projectId, payload.assets);
+        const editorApp = editorAppRef.current;
 
-        await editorAppRef.current.importSerializedScene(payload.snapshot as unknown as SerializedScene, assets, {
+        if (!editorApp) {
+          return;
+        }
+
+        editorApp.switchDocument({
+          height: payload.snapshot.canvas.height,
+          id: activeDocumentId,
+          width: payload.snapshot.canvas.width
+        });
+
+        await editorApp.importSerializedScene(payload.snapshot as unknown as SerializedScene, assets, {
           historyLabel: "Shared project"
         });
-        onLayersChange(editorAppRef.current.getLayerSummaries());
+        editorApp.rememberDocument(activeDocumentId);
+        onLayersChange(editorApp.getLayerSummaries());
         onDocumentLoaded({
           height: payload.snapshot.canvas.height,
           title: payload.projectName ?? activeDocumentTitle,
@@ -401,7 +415,14 @@ export function useCollaboration({
         isApplyingRemoteRef.current = false;
       }
     },
-    [activeDocumentTitle, editorAppRef, fetchAssetsForProject, onDocumentLoaded, onLayersChange]
+    [
+      activeDocumentId,
+      activeDocumentTitle,
+      editorAppRef,
+      fetchAssetsForProject,
+      onDocumentLoaded,
+      onLayersChange
+    ]
   );
 
   const applySharedProjectMeta = useCallback(

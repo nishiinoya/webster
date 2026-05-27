@@ -587,7 +587,7 @@ export function EditorPage() {
 
     const urlProjectId = url.searchParams.get('projectId');
     if (!urlProjectId) return;
-    if (!isEmailVerifiedForCloud) {
+    if (isAuthenticated && !isEmailVerifiedForCloud) {
       setRecentProjectError('Confirm your email before opening cloud projects.');
       url.searchParams.delete('projectId');
       window.history.replaceState(null, '', url.toString());
@@ -1028,12 +1028,7 @@ export function EditorPage() {
       return;
     }
 
-    if (!isAuthenticated) {
-      setAuthPrompt({ projectId: trimmed, projectName: title, type: 'open-cloud' });
-      return;
-    }
-
-    if (!requireVerifiedCloudAccess('Confirm your email before opening cloud projects.')) {
+    if (isAuthenticated && !requireVerifiedCloudAccess('Confirm your email before opening cloud projects.')) {
       return;
     }
 

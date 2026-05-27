@@ -295,6 +295,7 @@ export function CanvasView({
     sendPreviewFromCurrentScene,
     state: collaborationState,
   } = useCollaboration({
+    activeDocumentId: activeDocument.id,
     activeDocumentTitle: activeDocument.title,
     editorAppRef,
     onCommentEvent: handleCommentEvent,
@@ -444,6 +445,19 @@ export function CanvasView({
       return;
     }
 
+    if (!currentUserId && collaborationState.role === 'viewer') {
+      setComments([]);
+      setActiveCommentId(null);
+      setHoveredCommentId(null);
+      setPendingComment(null);
+      setReplyDrafts({});
+      setEditDraft(null);
+      setCommentDraftMode({ type: 'none' });
+      setCommentError(null);
+      setIsLoadingComments(false);
+      return;
+    }
+
     setIsLoadingComments(true);
     listProjectComments(projectId)
       .then((response) => {
@@ -466,7 +480,7 @@ export function CanvasView({
     return () => {
       cancelled = true;
     };
-  }, [collaborationState.mode, collaborationState.projectId]);
+  }, [collaborationState.mode, collaborationState.projectId, collaborationState.role, currentUserId]);
 
   useEffect(() => {
     editorAppRef.current?.setComments(

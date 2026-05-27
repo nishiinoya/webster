@@ -1,5 +1,14 @@
 import { FormEvent, useEffect, useState } from "react";
 import {
+  Copy,
+  Globe2,
+  Mail,
+  MessageCircle,
+  RefreshCw,
+  Send,
+  Share2
+} from "lucide-react";
+import {
   grantProjectAccess,
   isUpgradeRequiredError,
   listProjectAccesses,
@@ -209,6 +218,31 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
     }
   }
 
+  async function enableEveryoneWithLinkViewer() {
+    setIsUpdatingLink(true);
+    setDialogError(null);
+    setDialogErrorRequiresUpgrade(false);
+    setDialogSuccess(null);
+    setFreshInviteLink(null);
+
+    try {
+      const result = await updateProjectLinkAccess(projectId, {
+        mode: "anyone_with_link",
+        permission: "viewer"
+      });
+
+      setLinkMode(result.linkAccess.mode);
+      setLinkPermission(result.linkAccess.permission);
+      setPublicInviteExists(Boolean(result.linkAccess.hasInviteLink));
+      setPublicInviteLink(result.inviteLink ?? publicInviteLink);
+      setDialogSuccess("Everyone with the project link can now view this project.");
+    } catch (error) {
+      setDialogError(error instanceof Error ? error.message : "Unable to update link access.");
+    } finally {
+      setIsUpdatingLink(false);
+    }
+  }
+
   async function resetPublicLink() {
     setIsUpdatingLink(true);
     setDialogError(null);
@@ -310,7 +344,11 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
         <section className={dialogSectionClass} aria-label="Project link">
           <div>
             <h3 className={dialogSectionTitleClass}>Project link</h3>
-            <p className={helperTextClass}>Only people with access can open this link.</p>
+            <p className={helperTextClass}>
+              {linkMode === "anyone_with_link"
+                ? "Everyone with this link can open the project."
+                : "Only people with access can open this link."}
+            </p>
           </div>
           <div className="flex items-center gap-2">
             <input
@@ -325,8 +363,52 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
               onClick={() => copyToClipboard(projectLink, "project")}
               type="button"
             >
-              {copied === "project" ? "Copied" : "Copy project link"}
+              <Copy className="h-4 w-4" aria-hidden="true" />
+              <span>{copied === "project" ? "Copied" : "Copy project link"}</span>
             </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              className={primaryDialogButtonClass}
+              disabled={isUpdatingLink}
+              onClick={enableEveryoneWithLinkViewer}
+              type="button"
+            >
+              <Globe2 className="h-4 w-4" aria-hidden="true" />
+              <span>
+                {isUpdatingLink ? "Saving..." : "Set everyone with link to view"}
+              </span>
+            </button>
+            <span className={helperTextClass}>
+              Best for social sharing and read-only previews.
+            </span>
+          </div>
+          <div className="grid gap-2">
+            <p className={helperTextClass}>Share on social</p>
+            <div className="flex flex-wrap gap-2">
+              {SOCIAL_TARGETS.map((target) => {
+                const Icon = target.icon;
+
+                return (
+                  <button
+                    aria-label={`Share on ${target.name}`}
+                    className={socialButtonClass}
+                    disabled={linkMode !== "anyone_with_link"}
+                    key={target.name}
+                    onClick={() => openShare(target.buildUrl(projectLink, SHARE_TEXT))}
+                    title={
+                      linkMode === "anyone_with_link"
+                        ? `Share on ${target.name}`
+                        : "Set everyone with link before sharing"
+                    }
+                    type="button"
+                  >
+                    <Icon className="h-4 w-4" aria-hidden="true" />
+                    <span className="sr-only">{target.name}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </section>
 
@@ -448,7 +530,7 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
                 : linkMode === "anyone_with_link" && !publicInviteLink
                   ? publicInviteExists
                     ? "Create copyable link"
-                    : "Create anyone-with-link invite"
+                    : "Create everyone-with-link invite"
                   : "Save settings"}
             </button>
           </div>
@@ -466,7 +548,8 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
                 onClick={() => publicInviteLink && copyToClipboard(publicInviteLink, "public")}
                 type="button"
               >
-                {copied === "public" ? "Copied" : "Copy anyone-with-link invite"}
+                <Copy className="h-4 w-4" aria-hidden="true" />
+                <span>{copied === "public" ? "Copied" : "Copy everyone-with-link invite"}</span>
               </button>
               <button
                 className={dialogButtonClass}
@@ -474,6 +557,7 @@ export function ShareProjectDialog({ onClose, projectId }: ShareProjectDialogPro
                 onClick={resetPublicLink}
                 type="button"
               >
+                <RefreshCw className="h-4 w-4" aria-hidden="true" />
                 Reset link
               </button>
             </div>
@@ -642,37 +726,39 @@ function RoleBadge({ role }: { role: ProjectAccessPermission | "owner" }) {
 const SHARE_TEXT = "Check out my project on Webster";
 
 const SOCIAL_TARGETS: ReadonlyArray<{
+  icon: typeof Share2;
   name: string;
   buildUrl: (url: string, text: string) => string;
 }> = [
   {
+    icon: Share2,
     name: "X",
     buildUrl: (url, text) =>
       `https://twitter.com/intent/tweet?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`
   },
   {
+    icon: Share2,
     name: "Facebook",
     buildUrl: (url) => `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`
   },
   {
+    icon: Globe2,
     name: "LinkedIn",
     buildUrl: (url) => `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(url)}`
   },
   {
+    icon: MessageCircle,
     name: "WhatsApp",
     buildUrl: (url, text) => `https://wa.me/?text=${encodeURIComponent(`${text} ${url}`)}`
   },
   {
+    icon: Send,
     name: "Telegram",
     buildUrl: (url, text) =>
       `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`
   },
   {
-    name: "Reddit",
-    buildUrl: (url, text) =>
-      `https://www.reddit.com/submit?url=${encodeURIComponent(url)}&title=${encodeURIComponent(text)}`
-  },
-  {
+    icon: Mail,
     name: "Email",
     buildUrl: (url, text) =>
       `mailto:?subject=${encodeURIComponent(text)}&body=${encodeURIComponent(`${text}: ${url}`)}`
@@ -708,7 +794,13 @@ const dialogSectionTitleClass =
 const helperTextClass = "m-0 text-[12px] font-bold text-[#8b929b]";
 
 const dialogButtonClass =
-  "rounded-lg border border-[#333941] bg-[#202329] px-3 py-2 font-bold text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731] disabled:opacity-60";
+  "inline-flex items-center justify-center gap-2 rounded-lg border border-[#333941] bg-[#202329] px-3 py-2 font-bold text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731] disabled:opacity-60";
+
+const primaryDialogButtonClass =
+  "inline-flex items-center justify-center gap-2 rounded-lg border border-[#4aa391] bg-[#203731] px-3 py-2 font-extrabold text-[#eef1f4] hover:border-[#6fd6c1] hover:bg-[#25453e] focus-visible:border-[#6fd6c1] focus-visible:bg-[#25453e] disabled:opacity-60";
+
+const socialButtonClass =
+  "inline-flex h-9 w-9 items-center justify-center rounded-md border border-[#333941] bg-[#202329] text-[#eef1f4] hover:border-[#4aa391] hover:bg-[#203731] focus-visible:border-[#4aa391] focus-visible:bg-[#203731] disabled:cursor-not-allowed disabled:opacity-45";
 
 const dialogInputClass =
   "w-full rounded-md border border-[#30353d] bg-[#202329] px-2.5 py-[9px] text-[#eef1f4]";
