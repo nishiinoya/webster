@@ -1,3 +1,4 @@
+/** Built-in and locally saved reusable Webster project templates. */
 import { readScenePackageManifest } from "./ProjectPackage";
 
 export type BuiltInProjectTemplate = {

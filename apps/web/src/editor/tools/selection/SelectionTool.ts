@@ -1,3 +1,4 @@
+/** Rectangle, ellipse, lasso, and magic selection tool implementation. */
 import { invert3x3, transformPoint3x3 } from "../../geometry/Matrix3";
 import { Camera2D } from "../../geometry/Camera2D";
 import { getLayerCorners, getModelMatrix } from "../../geometry/TransformGeometry";

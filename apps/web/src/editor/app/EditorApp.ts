@@ -312,6 +312,9 @@ export type LayerCropPreviewPayload = {
   tool: "Crop";
 };
 
+/**
+ * Coordinates the active scene, renderer, tool input, and document-level editor workflows.
+ */
 export class EditorApp {
   private readonly renderer: Renderer;
   private scene: Scene;
@@ -372,6 +375,9 @@ export class EditorApp {
   >();
   private remoteLayerTransformAnimationFrameId: number | null = null;
 
+  /**
+   * Creates the app coordinator and initializes the shared renderer.
+   */
   static async create(
     canvas: HTMLCanvasElement,
     callbacks: {
@@ -426,6 +432,9 @@ export class EditorApp {
     this.textSelectionStart = state.selectionStart;
   }
 
+  /**
+   * Starts the render loop if it is not already running.
+   */
   start() {
     if (this.animationFrameId !== null || this.isDisposed) {
       return;
@@ -459,6 +468,9 @@ export class EditorApp {
     this.animationFrameId = window.requestAnimationFrame(tick);
   }
 
+  /**
+   * Stops rendering and disposes all editor-owned resources.
+   */
   dispose() {
     this.isDisposed = true;
 
@@ -516,6 +528,9 @@ export class EditorApp {
     };
   }
 
+  /**
+   * Replaces the current scene with a new blank document scene.
+   */
   createDocument(width: number, height: number) {
     this.replaceScene(createBlankDocumentScene(width, height), {
       rememberActiveDocument: true
@@ -525,6 +540,9 @@ export class EditorApp {
     return this.scene;
   }
 
+  /**
+   * Replaces the current scene with a document created from an imported image file.
+   */
   async createImageDocument(file: File) {
     const scene = await createImageDocumentFromFile(file);
 
@@ -538,6 +556,9 @@ export class EditorApp {
     return scene;
   }
 
+  /**
+   * Swaps the active scene and rebinds camera and input systems to it.
+   */
   replaceScene(
     nextScene: Scene,
     options: {
@@ -567,6 +588,9 @@ export class EditorApp {
     return this.scene;
   }
 
+  /**
+   * Switches the active document tab, creating a blank scene when needed.
+   */
   switchDocument(document: { height: number; id: string; width: number }) {
     const hadScene = this.tabScenes.has(document.id);
     const result = switchEditorDocument({
@@ -603,6 +627,9 @@ export class EditorApp {
     this.notifyHistoryChange();
   }
 
+  /**
+   * Exports the active scene as a native project package.
+   */
   async exportProjectFile(options: ProjectPackageOptions = {}) {
     return exportScenePackage(this.scene, undefined, options);
   }
@@ -619,6 +646,9 @@ export class EditorApp {
     }, options);
   }
 
+  /**
+   * Renders the current scene into an exported image or PDF blob using an offscreen renderer.
+   */
   async exportImageFile(format: ImageExportFormat, background: ImageExportBackground) {
     this.finishTextEdit();
 
@@ -663,6 +693,9 @@ export class EditorApp {
     }
   }
 
+  /**
+   * Imports a project package and replaces the active scene with it.
+   */
   async importProjectFile(
     file: File,
     options: { onProgress?: (state: ProjectPackageProgress) => void } = {}
@@ -678,6 +711,11 @@ export class EditorApp {
     return this.scene;
   }
 
+  /**
+   * Imports a server snapshot that uses the same manifest shape as `.webster`.
+   * Binary assets still arrive over REST as Blob entries, never through the
+   * realtime socket.
+   */
   async importSerializedScene(
     data: SerializedScene,
     assets = new Map<string, Blob>(),
@@ -702,6 +740,9 @@ export class EditorApp {
       rememberActiveDocument: true
     });
 
+    // Remote collaboration updates pass preserveHistory so they swap the canvas
+    // without wiping the local user's undo stack or adding an undoable step.
+    // (Falls back to a reset if no history exists yet, e.g. very first load.)
     const hasHistory = Boolean(
       this.activeDocumentId && this.histories.get(this.activeDocumentId)
     );
@@ -1094,6 +1135,9 @@ export class EditorApp {
     return { didChangeScene: true, didHandle: true };
   }
 
+  /**
+   * Applies a layer command against the active scene.
+   */
   applyLayerCommand(command: LayerCommand) {
     if (command.type === "select") {
       return applyLayerCommandToScene(this.scene, command);
@@ -1114,6 +1158,9 @@ export class EditorApp {
     return result;
   }
 
+  /**
+   * Applies a document command and keeps camera bounds in sync.
+   */
   applyDocumentCommand(command: DocumentCommand) {
     const before = this.captureAppSnapshot();
     const action = this.createHistoryAction({
@@ -1132,6 +1179,9 @@ export class EditorApp {
     return result;
   }
 
+  /**
+   * Applies an image-layer command against the active scene.
+   */
   async applyImageLayerCommand(command: ImageLayerCommand) {
     const before = this.captureAppSnapshot();
     const action = this.createHistoryAction({
@@ -1150,6 +1200,9 @@ export class EditorApp {
     return result;
   }
 
+  /**
+   * Imports font, texture, and model assets into editable layers.
+   */
   async applyLayerAssetCommand(command: LayerAssetCommand) {
     const before = this.captureAppSnapshot();
     const result = await this.applyLayerAssetCommandToScene(command);
@@ -1257,6 +1310,9 @@ export class EditorApp {
     return this.importDroppedFiles([file], clientX, clientY);
   }
 
+  /**
+   * Applies a selection command against the active scene selection.
+   */
   applySelectionCommand(command: SelectionCommand) {
     const before = this.captureAppSnapshot();
     const action = this.createHistoryAction({
@@ -1347,6 +1403,9 @@ export class EditorApp {
   }
 
   private notifyHistoryNavigation(operation: "undo" | "redo") {
+    // Synthesize a scene-kind action so the collab layer ships the new scene
+    // (as a JSON Patch) to other clients. Without this, undo/redo updates the
+    // local canvas but never propagates.
     this.onLocalEditorAction?.({
       id: crypto.randomUUID(),
       kind: "scene",
@@ -1437,6 +1496,7 @@ export class EditorApp {
     this.inputController.cancel();
   }
 
+  /** True while the user is actively interacting (pointer down on a tool). */
   isInteracting() {
     return this.pointerActive || this.pendingHistoryGesture !== null;
   }
@@ -2575,10 +2635,12 @@ export class EditorApp {
     return this.camera.screenToWorld(point.x, point.y);
   }
 
+  /** Convert client (viewport) coords to document world coords. */
   clientToWorldPoint(clientX: number, clientY: number) {
     return this.getClientWorldPoint(clientX, clientY);
   }
 
+  /** Convert document world coords to canvas-relative screen pixels. */
   worldToCanvasPoint(worldX: number, worldY: number) {
     return this.camera.worldToScreen(worldX, worldY);
   }
@@ -4757,6 +4819,7 @@ async function writeImageBlobToSystemClipboard(blob: Blob, marker: string) {
         })
       ]);
     } catch {
+      // Clipboard image writes may be blocked by browser permissions.
     }
   }
 }
@@ -4765,6 +4828,7 @@ async function writeClipboardTextMarker(text: string) {
   try {
     await navigator.clipboard?.writeText(text);
   } catch {
+    // Clipboard text writes may be blocked by browser permissions.
   }
 }
 

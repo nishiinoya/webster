@@ -62,6 +62,9 @@ type RenderOptions = {
   commentOverlay?: EditorCommentOverlayState | null;
 };
 
+/**
+ * Draws editor-only overlays such as document borders, selection outlines, and handles.
+ */
 export function renderEditorOverlays(
   context: OverlayRendererContext,
   scene: Scene,
@@ -340,6 +343,9 @@ function drawTransformHandles(
   }
 }
 
+/**
+ * Draws a world-space line by delegating to the shared rectangle primitive.
+ */
 export function drawWorldLine(
   drawWorldRectangleFn: OverlayRendererContext["drawWorldRectangle"],
   start: { x: number; y: number },

@@ -31,6 +31,7 @@ export class SubscriptionsController {
     return this.subscriptionsService.getMySubscription(user.id);
   }
 
+  // Change 2: public endpoint returning plan metadata for all configured prices.
   @Public()
   @Get('plans')
   getPlans() {
@@ -64,6 +65,7 @@ export class SubscriptionsController {
       throw new UnauthorizedException('Missing Stripe signature header');
     }
 
+    // express.raw middleware gives us a Buffer in req.body
     const rawBody = req.body as Buffer;
 
     await this.subscriptionsService.handleWebhookEvent(rawBody, signature);

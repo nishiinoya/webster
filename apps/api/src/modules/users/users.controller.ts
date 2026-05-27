@@ -53,6 +53,10 @@ export class UsersController {
     return this.usersService.resendVerificationEmail(authorization);
   }
 
+  // Public so it can be used directly in <img src>. Avatars are low-sensitivity
+  // and the user id is an unguessable UUID. We respond directly here (rather
+  // than letting the exception filter handle a throw through @Res()) so a
+  // missing avatar returns a clean 404 instead of leaving the socket open.
   @Public()
   @Get(':id/avatar')
   async getAvatar(@Param('id') id: string, @Res() res: Response) {

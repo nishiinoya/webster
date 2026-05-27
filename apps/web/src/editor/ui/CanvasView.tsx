@@ -316,6 +316,7 @@ export function CanvasView({
     collaborationActionHandlerRef.current = (action) => {
       void handleLocalEditorAction(action);
     };
+    // Stream small, throttled visual previews while the pointer gesture is active.
     collaborationPreviewHandlerRef.current = (tool, pointer) => {
       void sendPreviewFromCurrentScene(tool, pointer);
     };
@@ -1699,6 +1700,7 @@ async function writeClipboardText(text: string) {
   try {
     await navigator.clipboard.writeText(text);
   } catch {
+    // Some browsers block clipboard writes outside secure contexts.
   }
 }
 

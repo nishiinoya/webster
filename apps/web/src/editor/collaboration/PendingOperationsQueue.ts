@@ -1,5 +1,6 @@
 import type { ProjectOperation } from "@webster/shared";
 
+/** Keeps unconfirmed commit operations in send order across socket reconnects. */
 export class PendingOperationsQueue {
   private readonly operations: ProjectOperation[] = [];
 

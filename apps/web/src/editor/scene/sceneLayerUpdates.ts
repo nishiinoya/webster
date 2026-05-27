@@ -65,6 +65,9 @@ export type SceneLayerUpdates = Partial<{
   y: number;
 }>;
 
+/**
+ * Applies partial property updates to a layer, respecting each layer type's edit rules.
+ */
 export function applySceneLayerUpdates(layer: Layer, updates: SceneLayerUpdates) {
   if (updates.name !== undefined) {
     layer.name = updates.name;

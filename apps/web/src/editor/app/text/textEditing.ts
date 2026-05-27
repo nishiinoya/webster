@@ -14,17 +14,26 @@ export type TextEditingState = {
   selectionStart: number | null;
 };
 
+/**
+ * Ends text editing and clears any active caret or selection state.
+ */
 export function finishTextEdit(state: TextEditingState) {
   state.layerId = null;
   state.caretIndex = 0;
   clearTextSelection(state);
 }
 
+/**
+ * Clears the current text selection while leaving the active edit layer intact.
+ */
 export function clearTextSelection(state: TextEditingState) {
   state.selectionStart = null;
   state.selectionEnd = null;
 }
 
+/**
+ * Resolves the currently edited text layer, ending edit mode if the layer no longer exists.
+ */
 export function getActiveTextEditLayer(scene: Scene, state: TextEditingState) {
   if (!state.layerId) {
     return null;
@@ -40,6 +49,9 @@ export function getActiveTextEditLayer(scene: Scene, state: TextEditingState) {
   return layer;
 }
 
+/**
+ * Starts text editing at a client point, reusing an existing text layer or creating a new one.
+ */
 export function startTextEditAtClientPoint(input: {
   camera: Camera2D;
   getCanvasPoint: (clientX: number, clientY: number) => { x: number; y: number };
@@ -87,6 +99,9 @@ export function startTextEditAtClientPoint(input: {
   return nextLayer;
 }
 
+/**
+ * Starts a drag text selection from the text index nearest to the client point.
+ */
 export function startTextSelectionAtClientPoint(input: {
   camera: Camera2D;
   getCanvasPoint: (clientX: number, clientY: number) => { x: number; y: number };
@@ -116,6 +131,9 @@ export function startTextSelectionAtClientPoint(input: {
   return true;
 }
 
+/**
+ * Updates the trailing edge of the current text selection from a client point.
+ */
 export function updateTextSelectionAtClientPoint(input: {
   camera: Camera2D;
   getCanvasPoint: (clientX: number, clientY: number) => { x: number; y: number };
@@ -142,10 +160,16 @@ export function updateTextSelectionAtClientPoint(input: {
   return true;
 }
 
+/**
+ * Returns whether a text selection drag had an active anchor.
+ */
 export function endTextSelection(state: TextEditingState) {
   return state.selectionStart !== null;
 }
 
+/**
+ * Inserts text into the active text layer, replacing the current selection when present.
+ */
 export function insertTextInput(scene: Scene, state: TextEditingState, text: string) {
   const layer = getActiveTextEditLayer(scene, state);
 
@@ -164,6 +188,9 @@ export function insertTextInput(scene: Scene, state: TextEditingState, text: str
   return true;
 }
 
+/**
+ * Deletes one character backward or removes the current text selection.
+ */
 export function deleteTextBackward(scene: Scene, state: TextEditingState) {
   const layer = getActiveTextEditLayer(scene, state);
 
@@ -191,6 +218,9 @@ export function deleteTextBackward(scene: Scene, state: TextEditingState) {
   return true;
 }
 
+/**
+ * Deletes one character forward or removes the current text selection.
+ */
 export function deleteTextForward(scene: Scene, state: TextEditingState) {
   const layer = getActiveTextEditLayer(scene, state);
 
@@ -217,6 +247,9 @@ export function deleteTextForward(scene: Scene, state: TextEditingState) {
   return true;
 }
 
+/**
+ * Returns the currently selected text content when an edit selection exists.
+ */
 export function getSelectedTextInput(scene: Scene, state: TextEditingState) {
   const layer = getActiveTextEditLayer(scene, state);
 
@@ -229,6 +262,9 @@ export function getSelectedTextInput(scene: Scene, state: TextEditingState) {
   return selection ? layer.text.slice(selection.start, selection.end) : null;
 }
 
+/**
+ * Selects the full contents of the active text layer.
+ */
 export function selectAllTextInput(scene: Scene, state: TextEditingState) {
   const layer = getActiveTextEditLayer(scene, state);
 
@@ -243,6 +279,9 @@ export function selectAllTextInput(scene: Scene, state: TextEditingState) {
   return true;
 }
 
+/**
+ * Moves the caret within the active text layer and clears the current selection.
+ */
 export function moveTextCaret(
   scene: Scene,
   state: TextEditingState,
@@ -278,6 +317,9 @@ export function moveTextCaret(
   return true;
 }
 
+/**
+ * Creates the default text layer used by toolbar and quick-add flows.
+ */
 export function createDefaultTextLayer() {
   return new TextLayer({
     id: crypto.randomUUID(),

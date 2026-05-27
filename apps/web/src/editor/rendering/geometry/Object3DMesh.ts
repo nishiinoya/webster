@@ -39,6 +39,13 @@ type ObjFaceVertex = {
 
 const importedModelCacheKeys = new WeakMap<Imported3DModel, string>();
 
+/**
+ * WebGL mesh for built-in and imported 3D objects.
+ *
+ * Imported glTF/GLB indices are preserved and rendered with drawElements.
+ * OBJ and fallback meshes are indexed once during preparation so regular
+ * transforms only update uniforms.
+ */
 export class Object3DMesh {
   private readonly colorBuffer: WebGLBuffer;
   private readonly indexBuffer: WebGLBuffer | null;
@@ -162,7 +169,7 @@ export class Object3DMesh {
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, null);
     this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, null);
   }
-
+  
   private resetVertexAttributes() {
     const attributeCount = this.gl.getParameter(this.gl.MAX_VERTEX_ATTRIBS) as number;
 

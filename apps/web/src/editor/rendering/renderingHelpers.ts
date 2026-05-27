@@ -6,6 +6,9 @@ import { StrokeLayer } from "../layers/StrokeLayer";
 import type { StrokeSelectionClip } from "../layers/StrokeLayer";
 import type { SelectionMask } from "../selection/SelectionManager";
 
+/**
+ * Guards against invalid float buffers before uploading them to WebGL.
+ */
 export function isFiniteFloatArray(values: Float32Array) {
   for (const value of values) {
     if (!Number.isFinite(value)) {
@@ -16,6 +19,9 @@ export function isFiniteFloatArray(values: Float32Array) {
   return true;
 }
 
+/**
+ * Expands a drop shadow into the draw passes used by the current approximation.
+ */
 export function getDropShadowPasses(filters: LayerFilterSettings) {
   const blur = filters.dropShadowBlur;
 
@@ -39,6 +45,9 @@ export function getDropShadowPasses(filters: LayerFilterSettings) {
   ];
 }
 
+/**
+ * Returns the local polygon points for non-rectangular shape layers.
+ */
 export function getPolygonShapePoints(layer: ShapeLayer) {
   const width = layer.width;
   const height = layer.height;
@@ -79,6 +88,9 @@ export function getPolygonShapePoints(layer: ShapeLayer) {
   return [];
 }
 
+/**
+ * Converts a world-space stroke selection clip back into the layer's local space.
+ */
 export function getLayerSelectionClip(
   layer: StrokeLayer,
   clip: StrokeSelectionClip | null

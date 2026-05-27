@@ -21,6 +21,9 @@ export class AssetsService {
   constructor(
     private readonly prisma: PrismaService,
     @Optional() private readonly storage: StorageService | null,
+    // BUG 6 fix: no longer @Optional — ProjectsModule is imported so this is
+    // always provided. Kept as nullable type defensively; requireRole throws
+    // ServiceUnavailableException if somehow null at runtime.
     private readonly projectAccess: ProjectAccessService,
   ) {}
 
@@ -30,8 +33,10 @@ export class AssetsService {
     metadataItems: AssetMetadataItemDto[],
     files: Express.Multer.File[],
   ): Promise<SharedProjectAssetReference[]> {
+    // BUG 6 fix: enforce editor role before accepting any upload.
     await this.requireRole(projectId, userId, 'editor');
 
+    // Build a map from fileField → file
     const fileMap = new Map<string, Express.Multer.File>();
     for (const file of files) {
       fileMap.set(file.fieldname, file);
@@ -47,6 +52,7 @@ export class AssetsService {
         );
       }
 
+      // Sanitize assetPath
       const assetPath = item.assetPath.replace(/\\/g, '/');
       if (assetPath.includes('..')) {
         throw new BadRequestException(
@@ -67,9 +73,10 @@ export class AssetsService {
         );
         size = result.size;
       } else {
-        this.logger.warn('StorageService not available - skipping S3 upload');
+        this.logger.warn('StorageService not available — skipping S3 upload');
       }
 
+      // UPSERT project_assets (unique on projectId + storageKey)
       await this.prisma.projectAsset.upsert({
         where: {
           projectId_storageKey: {
@@ -111,10 +118,12 @@ export class AssetsService {
     assetPath: string,
     userId: string,
   ): Promise<{ body: Readable; mimeType: string; size: number }> {
+    // BUG 6 fix: enforce viewer role before streaming any asset.
     await this.requireRole(projectId, userId, 'viewer');
 
     const storageKey = `projects/${projectId}/assets/${assetPath}`;
 
+    // Look up mime type from DB
     const asset = await this.prisma.projectAsset.findFirst({
       where: { projectId, storageKey },
       select: { mimeType: true },
@@ -159,6 +168,7 @@ export class AssetsService {
     return this.streamStoredAsset(projectId, assetPath);
   }
 
+  /** BUG 6 fix: copied from SnapshotsService — enforces minimum role for projectId/userId. */
   private async requireRole(
     projectId: string,
     userId: string,

@@ -23,6 +23,7 @@ export class SnapshotsService {
     @Optional() private readonly roomService: RoomService | null,
   ) {}
 
+  /** GET /api/shared-projects/:projectId/snapshots — viewer+ */
   async listSnapshots(
     projectId: string,
     user: AuthUser,
@@ -55,6 +56,7 @@ export class SnapshotsService {
     return { snapshots };
   }
 
+  /** POST /api/shared-projects/:projectId/snapshots — editor+ */
   async createSnapshot(
     projectId: string,
     user: AuthUser,
@@ -91,6 +93,7 @@ export class SnapshotsService {
     };
   }
 
+  /** POST /api/shared-projects/:projectId/snapshots/:snapshotId/restore — owner only */
   async restoreSnapshot(
     projectId: string,
     snapshotId: string,
@@ -179,7 +182,7 @@ export class SnapshotsService {
     userId: string,
     min: 'viewer' | 'editor' | 'owner',
   ): Promise<void> {
-    if (!this.projectAccessService) return;
+    if (!this.projectAccessService) return; // graceful degrade if not wired
 
     const role = await this.projectAccessService.resolveRole(projectId, userId);
 

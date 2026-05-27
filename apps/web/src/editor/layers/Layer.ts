@@ -1,3 +1,4 @@
+/** Base layer model shared by all editable scene layer types. */
 import type { SerializedImported3DModel } from "../import3d/Imported3DModel";
 import { deserializeImported3DModel } from "../import3d/Imported3DModel";
 import { LayerMask } from "../masks/LayerMask";
@@ -421,7 +422,7 @@ export abstract class Layer {
 
     if (data.type === "text") {
       const { TextLayer } = await import("./TextLayer");
-
+      
       return new TextLayer({
         ...getLayerOptions(data),
         align: data.align,

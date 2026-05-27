@@ -7,12 +7,18 @@ import { ShapeLayer } from "../layers/ShapeLayer";
 import { StrokeLayer } from "../layers/StrokeLayer";
 import { TextLayer } from "../layers/TextLayer";
 
+/**
+ * Releases layer-owned resources when the layer provides a custom disposer.
+ */
 export function disposeLayer(layer: Layer) {
   if ("dispose" in layer && typeof layer.dispose === "function") {
     layer.dispose();
   }
 }
 
+/**
+ * Creates a detached duplicate of a layer with a new id and a small positional offset.
+ */
 export function cloneLayer(
   layer: Layer,
   optionsOverride: {

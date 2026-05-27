@@ -1,4 +1,5 @@
 import { ImageLayer } from "../../layers/ImageLayer";
+/** WebGL texture lifetime management for images and layer masks. */
 import type { Imported3DTexture } from "../../import3d/Imported3DModel";
 import type { ImportedLayerTexture } from "../../layers/Layer";
 import { LayerMask } from "../../masks/LayerMask";
@@ -174,6 +175,7 @@ export class TextureManager {
   }
 
   private configureMaskTexture() {
+    // Raw LUMINANCE masks are single-byte rows.
     this.gl.pixelStorei(this.gl.UNPACK_ALIGNMENT, 1);
     this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, true);
 

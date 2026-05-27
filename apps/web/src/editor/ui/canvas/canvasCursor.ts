@@ -1,3 +1,4 @@
+/** Canvas cursor mapping helpers. */
 export function getCanvasCursorStyle(cursor: string) {
   if (cursor.startsWith("mask-brush-")) {
     const [, , sizePart, mode] = cursor.split("-");

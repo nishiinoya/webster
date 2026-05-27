@@ -51,8 +51,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     const auth0Subject = payload.sub;
 
+    // FAST PATH: a subject we've already seen is the overwhelmingly common case.
+    // Resolve it with a single lookup — no /userinfo call, no merge transaction.
+    // (Calling /userinfo + a multi-table merge on EVERY request was both slow and
+    // a source of lock contention/hangs under concurrent REST + WS auth.)
     const known = await this.prisma.user.findUnique({ where: { auth0Subject } });
     if (known) {
+      // Cheap backfill: if the JWT carries a real email and our stored one is a
+      // placeholder, update it once. No /userinfo, no merge.
       const claimEmail = (payload.email ?? '').trim().toLowerCase();
       if (claimEmail && known.email.startsWith('noemail:')) {
         try {
@@ -62,11 +68,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
           });
           return this.toAuthUser(updated);
         } catch {
+          // email may now collide with a pending row — ignore and use what we have
         }
       }
       return this.toAuthUser(known);
     }
 
+    // SLOW PATH (new subject only): resolve a real email so we can attach to a
+    // pending invite, falling back to /userinfo when the token lacks the claim.
     let realEmail = (payload.email ?? '').trim().toLowerCase();
     let displayName = payload.name ?? null;
     if (!realEmail) {
@@ -80,12 +89,17 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     const placeholderEmail = `noemail:${auth0Subject}`;
     const emailForRow = realEmail || placeholderEmail;
 
+    // ------------------------------------------------------------------
+    // Reconciliation — coalesce subject-row and pending-email-row if both exist.
+    // ------------------------------------------------------------------
     const user = await this.prisma.$transaction(async (tx) => {
       const bySubject = await tx.user.findUnique({ where: { auth0Subject } });
       const byEmail = realEmail
         ? await tx.user.findUnique({ where: { email: realEmail } })
         : null;
 
+      // Both rows exist and they're different — merge the pending into the
+      // real one. Re-point every project_access then delete the pending row.
       if (bySubject && byEmail && bySubject.id !== byEmail.id) {
         await tx.projectAccess.updateMany({
           where: { sharedWithUserId: byEmail.id },
@@ -127,6 +141,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         });
       }
 
+      // Only pending row exists — attach our subject to it.
       if (!bySubject && byEmail) {
         return tx.user.update({
           where: { id: byEmail.id },
@@ -134,6 +149,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         });
       }
 
+      // Only subject row exists — refresh email/name if changed.
       if (bySubject) {
         if (bySubject.email !== emailForRow || bySubject.displayName !== displayName) {
           return tx.user.update({
@@ -144,6 +160,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         return bySubject;
       }
 
+      // New user.
       return tx.user.create({
         data: { auth0Subject, email: emailForRow, displayName },
       });
@@ -166,6 +183,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     };
   }
 
+  /** Fetch the user's email from Auth0 /userinfo using the access token. */
   private async fetchUserInfo(
     req: Request,
   ): Promise<{ email?: string; name?: string } | null> {

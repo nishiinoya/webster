@@ -1,3 +1,4 @@
+/** GPU text geometry generation helpers for compiled fonts. */
 import { TextLayer } from "../../layers/TextLayer";
 import type { BitmapTextRect } from "./BitmapText";
 import type { RuntimeFont } from "./FontLoader";

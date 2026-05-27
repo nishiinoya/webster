@@ -1,3 +1,4 @@
+/** Import/export helpers for the native `.webster` project package format. */
 import { ImageLayer } from "../layers/ImageLayer";
 import type { SerializedObject3DModel, SerializedLayer } from "../layers/Layer";
 import { Object3DLayer } from "../layers/Object3DLayer";

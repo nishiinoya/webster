@@ -9,6 +9,9 @@ import {
 } from "./imageFileUtils";
 import { canvasToBlob } from "../export/exportFileUtils";
 
+/**
+ * Creates a new scene sized to an image file and inserts that image as the first layer.
+ */
 export async function createImageDocumentFromFile(file: File) {
   const image = await loadImageElement(file);
   const width = image.naturalWidth || image.width;
@@ -37,6 +40,9 @@ export async function createImageDocumentFromFile(file: File) {
   return scene;
 }
 
+/**
+ * Imports an image file into the current scene with a reasonable initial on-canvas scale.
+ */
 export async function addImageFileToScene(
   scene: Scene,
   file: File,
@@ -68,6 +74,9 @@ export async function addImageFileToScene(
   return layer;
 }
 
+/**
+ * Re-rasterizes an image layer to a new pixel size while preserving its visible bounds.
+ */
 export async function resampleImageLayerInScene(
   scene: Scene,
   layerId: string,
@@ -120,6 +129,9 @@ export async function resampleImageLayerInScene(
   return layer;
 }
 
+/**
+ * Restores an image layer back to its original source pixels and scale.
+ */
 export function restoreOriginalImageLayerInScene(scene: Scene, layerId: string) {
   const layer = scene.getLayer(layerId);
 

@@ -34,6 +34,9 @@ type EditorHistoryOptions<TSnapshot> = {
   mergeWindowMs?: number;
 };
 
+/**
+ * Generic undo/redo stack that stores reversible editor actions with cloned snapshots.
+ */
 export class EditorHistory<TSnapshot> {
   private readonly cloneSnapshot: (snapshot: TSnapshot) => TSnapshot;
   private readonly limit: number;

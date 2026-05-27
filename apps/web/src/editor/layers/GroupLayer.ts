@@ -1,3 +1,4 @@
+/** Group layer model used to move and edit related layers together. */
 import { Layer } from "./Layer";
 import type { LayerOptions, SerializedGroupLayer } from "./Layer";
 

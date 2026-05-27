@@ -59,6 +59,7 @@ type MaskSnapshotPayload = {
 
 export type PreparedProjectOperation = {
   assetUploads: SharedProjectAssetUpload[];
+  /** The fully-serialised current scene — caller stores this as the next previousScene. */
   manifest: WebsterProjectManifest;
   operation: ProjectOperation;
 };
@@ -281,6 +282,14 @@ function shouldIncludeSceneFallbackForAction(action: SharedEditorAction) {
   return action.kind === "gesture" && action.tool === "Crop";
 }
 
+/**
+ * Decide whether to send a full scene snapshot or just a JSON Patch diff.
+ *
+ * - No previousScene (first op of session, post-resync): include full scene.
+ * - Small diff: send only scenePatch.
+ * - Large diff (more ops than scene size justifies): send full scene to keep
+ *   things simple and avoid huge patch lists.
+ */
 function buildSceneFields(
   previousScene: WebsterProjectManifest | null,
   currentScene: WebsterProjectManifest,
@@ -292,6 +301,7 @@ function buildSceneFields(
 
   const patch = compare(previousScene, currentScene) as ProjectScenePatchOp[];
   if (patch.length === 0) {
+    // No change — but still need to ship the op so the server bumps version.
     return { scenePatch: [] };
   }
 
@@ -302,6 +312,8 @@ function buildSceneFields(
     };
   }
 
+  // Heuristic: if the patch is more than ~25% the size of the scene, just
+  // send the scene — patches stop being a win at that point.
   const sceneSize = JSON.stringify(currentScene).length;
   const patchSize = JSON.stringify(patch).length;
   if (patchSize * 4 > sceneSize) {
@@ -311,6 +323,10 @@ function buildSceneFields(
   return { scenePatch: patch };
 }
 
+/**
+ * Compute the patch between two manifests — used to derive a replay-safe
+ * delta for pending ops that were sent as full scenes.
+ */
 export function computeSceneDiff(
   from: WebsterProjectManifest,
   to: WebsterProjectManifest
@@ -318,6 +334,15 @@ export function computeSceneDiff(
   return compare(from, to) as ProjectScenePatchOp[];
 }
 
+/**
+ * Enforce the layer-id uniqueness invariant of a manifest. Merging a remote
+ * op's scene base with the local pending-op replay patches can occasionally
+ * produce two layers with the same id (the replay patch was diffed against a
+ * different base than it is applied to). Two layers sharing an id crashes the
+ * React layer list ("two children with the same key"). We keep the LAST
+ * occurrence of each id (most recent state) in its position. Returns the same
+ * object when there is nothing to dedupe so callers don't churn React state.
+ */
 export function dedupeManifestLayers(
   manifest: WebsterProjectManifest
 ): WebsterProjectManifest {
@@ -347,6 +372,10 @@ export function dedupeManifestLayers(
   return { ...manifest, layers: deduped };
 }
 
+/**
+ * Re-export so the receiver hook can apply incoming patches to its local
+ * manifest before importing into the editor.
+ */
 export function applyScenePatch(
   base: WebsterProjectManifest,
   patch: ProjectScenePatchOp[]
@@ -382,6 +411,11 @@ export function applyMaskSnapshotFallback(
   return didApply ? cloned : null;
 }
 
+/**
+ * Applies a backend-broadcast operation to the local editor by hydrating the
+ * `.webster` manifest shape the app already understands. Future granular
+ * operations can be added here without leaking socket concerns into tools/UI.
+ */
 export class ScenePatchApplyError extends Error {
   constructor(message: string) {
     super(message);
@@ -389,6 +423,13 @@ export class ScenePatchApplyError extends Error {
   }
 }
 
+/**
+ * Returns the applied manifest on success.
+ * Returns `null` when there is genuinely nothing to apply (no scene, no patch).
+ * THROWS `ScenePatchApplyError` when a patch was provided but couldn't be
+ * applied to the given base — the caller should resync from the server rather
+ * than silently dropping the update (which causes one client to fall behind).
+ */
 export async function applyOperationToScene(
   editorApp: EditorApp,
   operation: ProjectOperation,
@@ -543,6 +584,11 @@ function readSerializedMask(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+/**
+ * Removes per-user UI state from a manifest before it enters the sync
+ * pipeline. Returns a shallow copy with selection normalised to empty, so the
+ * field is always identical across users and never produces a diff.
+ */
 function stripVolatileManifestFields(
   manifest: WebsterProjectManifest
 ): WebsterProjectManifest {
@@ -558,12 +604,21 @@ async function createCollaborationSceneSnapshot(
   projectId: string,
   alreadyUploadedAssetPaths?: ReadonlySet<string>
 ) {
+  // Skip re-encoding the binary for assets we already uploaded this session.
+  // The manifest still references them (this only skips the blob packing),
+  // and they're filtered out of the upload step anyway — so this just saves
+  // the CPU cost of re-reading every image/model/font on each keystroke.
   const { assetEntries, manifest: rawManifest } = await serializeScenePackageAssets(
     editorApp.getScene(),
     undefined,
     alreadyUploadedAssetPaths ? { skipAssetPaths: alreadyUploadedAssetPaths } : {}
   );
 
+  // Selection is per-user UI state, NOT shared document state. Leaving it in
+  // the synced manifest means (a) every selection change produces a commit —
+  // and drawing inside a selection churns it constantly, which storms the
+  // socket and React — and (b) one user's selection would override another's
+  // on the remote canvas. Strip it so the synced scene is selection-free.
   const manifest = stripVolatileManifestFields(rawManifest as WebsterProjectManifest);
   const assetUploads = assetEntries.map((entry) => {
     const mimeType = inferAssetMimeType(entry.name);

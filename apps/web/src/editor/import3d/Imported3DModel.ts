@@ -663,6 +663,7 @@ async function importedTextureToBlob(texture: Imported3DTexture) {
       return response.blob();
     }
   } catch {
+    // Fall through to a transparent placeholder; geometry still remains recoverable.
   }
 
   return new Blob([], { type: texture.mimeType || "application/octet-stream" });

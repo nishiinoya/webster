@@ -7,6 +7,9 @@ type ReplaceSceneOptions = {
   rememberActiveDocument?: boolean;
 };
 
+/**
+ * Creates an empty editor scene for a blank document.
+ */
 export function createBlankDocumentScene(width: number, height: number) {
   return new Scene({
     createDefaultLayer: false,
@@ -15,6 +18,9 @@ export function createBlankDocumentScene(width: number, height: number) {
   });
 }
 
+/**
+ * Swaps the active scene and updates camera/input bindings around the new document.
+ */
 export function replaceEditorScene(input: {
   camera: Camera2D;
   currentScene: Scene;
@@ -38,6 +44,9 @@ export function replaceEditorScene(input: {
   return input.nextScene;
 }
 
+/**
+ * Switches the active document tab, creating a blank scene for the tab when needed.
+ */
 export function switchEditorDocument(input: {
   activeDocumentId: string | null;
   currentScene: Scene;
@@ -74,6 +83,9 @@ export function switchEditorDocument(input: {
   };
 }
 
+/**
+ * Records the currently active scene under a document id.
+ */
 export function rememberEditorDocument(
   tabScenes: Map<string, Scene>,
   documentId: string,
@@ -83,6 +95,9 @@ export function rememberEditorDocument(
   return documentId;
 }
 
+/**
+ * Removes a remembered document and disposes its scene when it is no longer active.
+ */
 export function forgetEditorDocument(input: {
   activeDocumentId: string | null;
   documentId: string;

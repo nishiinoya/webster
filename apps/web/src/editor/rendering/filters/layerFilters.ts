@@ -13,6 +13,9 @@ export type EffectiveLayerFilters = {
   visible: boolean;
 };
 
+/**
+ * Resolves the effective per-layer filter stack, including adjustment layers above each layer.
+ */
 export function getEffectiveLayerFilters(layers: Layer[]) {
   const effectiveFilters = new Map<Layer, EffectiveLayerFilters>();
   const groupsById = new Map(
@@ -77,6 +80,9 @@ export function getEffectiveLayerFilters(layers: Layer[]) {
   );
 }
 
+/**
+ * Combines two filter objects into one clamped filter state.
+ */
 export function combineLayerFilters(base: LayerFilterSettings, overlay: LayerFilterSettings) {
   return {
     brightness: clampFilter(base.brightness + overlay.brightness, -1, 1),
@@ -103,6 +109,9 @@ export function combineLayerFilters(base: LayerFilterSettings, overlay: LayerFil
   };
 }
 
+/**
+ * Returns whether any visible adjustment layer currently requires a blur pass.
+ */
 export function hasAdjustmentBlur(layers: Layer[]) {
   const groupsById = getGroupsById(layers);
 
@@ -116,6 +125,9 @@ export function hasAdjustmentBlur(layers: Layer[]) {
   );
 }
 
+/**
+ * Finds the last layer index that still participates in the adjustment blur stack.
+ */
 export function getTopmostAdjustmentBlurIndex(layers: Layer[]) {
   const groupsById = getGroupsById(layers);
 
@@ -136,6 +148,9 @@ export function getTopmostAdjustmentBlurIndex(layers: Layer[]) {
   return layers.length - 1;
 }
 
+/**
+ * Converts blur regions into clip-only regions for the final composite pass.
+ */
 export function toClipOnlyBlurRegions(regions: BlurRegion[]): BlurRegion[] {
   return regions.map((region) => ({
     ...region,

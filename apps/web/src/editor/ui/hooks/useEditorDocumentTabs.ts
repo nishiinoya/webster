@@ -1,3 +1,4 @@
+/** Hook that owns editor document tab state and active tab transitions. */
 import { MutableRefObject, useEffect, useRef } from "react";
 import type { EditorDocumentTab } from "../editorDocuments";
 import { EditorApp } from "../../app/EditorApp";

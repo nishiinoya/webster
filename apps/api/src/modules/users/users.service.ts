@@ -82,6 +82,7 @@ export class UsersService {
 
     await this.storage.putObject(this.avatarKey(user.id), file.buffer, file.mimetype);
 
+    // Store a short, cache-busted URL path — the binary lives in object storage.
     const avatarUrl = `/users/${user.id}/avatar?v=${Date.now()}`;
 
     return this.prisma.user.update({
@@ -96,6 +97,7 @@ export class UsersService {
       try {
         await this.storage.deleteObject(this.avatarKey(user.id));
       } catch {
+        // already gone — non-fatal
       }
     }
 
@@ -113,6 +115,9 @@ export class UsersService {
       throw new ServiceUnavailableException('Storage is not available');
     }
 
+    // Pre-check the DB so we never call getObject for a key that doesn't
+    // exist — a missing-key GetObject against MinIO hangs instead of failing
+    // fast. If the row has no avatarUrl, there is no object to stream.
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { avatarUrl: true },

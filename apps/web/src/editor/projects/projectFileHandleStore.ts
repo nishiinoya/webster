@@ -1,3 +1,4 @@
+/** IndexedDB persistence for remembered project file handles. */
 import type { WebsterFileHandle } from "./projectFiles";
 
 const databaseName = "webster.editor";

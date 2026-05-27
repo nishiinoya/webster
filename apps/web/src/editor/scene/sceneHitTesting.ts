@@ -3,6 +3,9 @@ import { getLayerCorners } from "../geometry/TransformGeometry";
 import { GroupLayer } from "../layers/GroupLayer";
 import { Layer } from "../layers/Layer";
 
+/**
+ * Returns the topmost visible non-adjustment, non-group layer under the given world point.
+ */
 export function hitTestVisibleLayer(layers: Layer[], x: number, y: number) {
   const groupsById = new Map(
     layers
@@ -38,6 +41,9 @@ export function hitTestVisibleLayer(layers: Layer[], x: number, y: number) {
   return null;
 }
 
+/**
+ * Returns the topmost visible descendant of a group under the provided world point.
+ */
 export function hitTestVisibleLayerInsideGroup(
   layers: Layer[],
   groupId: string,
@@ -161,6 +167,9 @@ function isPointInsideGroupChain(
   return true;
 }
 
+/**
+ * Tests whether a world-space point falls inside the layer's transformed bounds.
+ */
 export function isPointInsideLayer(layer: Layer, x: number, y: number) {
   const corners = getLayerCorners(layer);
 

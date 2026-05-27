@@ -28,6 +28,9 @@ type StrokeLayerRendererContext = {
   getStrokeGeometry: (layer: StrokeLayer) => { paths: CachedStrokePathGeometry[] };
 };
 
+/**
+ * Draws a stroke layer from cached stroke geometry and selection clips.
+ */
 export function renderStrokeLayer(
   context: StrokeLayerRendererContext,
   layer: StrokeLayer,

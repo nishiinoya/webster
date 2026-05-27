@@ -72,6 +72,7 @@ export type SharedProjectUiState = {
   connectionStatus: CollaborationConnectionStatus;
   currentVersion: number | null;
   error: string | null;
+  /** True when `error` is a 402 free-tier limit the user can fix by upgrading. */
   errorRequiresUpgrade: boolean;
   isBusy: boolean;
   mode: "local" | "shared";
@@ -153,15 +154,41 @@ export function useCollaboration({
   const handledRequestIdRef = useRef<number | null>(null);
   const isApplyingRemoteRef = useRef(false);
   const latestStateRef = useRef(state);
+  // Optimistic baseVersion for outgoing commits. Each send bumps this so rapid
+  // typing doesn't ship N commits all with the same stale baseVersion (which
+  // would trip the gateway's version_conflict check on every one after the
+  // first). Reset whenever we re-sync from the server.
   const nextBaseVersionRef = useRef(0);
+  // Last manifest we either sent to or received from the server. We diff
+  // against this to compute the JSON Patch for the next commit, instead of
+  // shipping the whole scene each time.
   const lastSyncedSceneRef = useRef<import("@webster/shared").WebsterProjectManifest | null>(null);
+  // Confirmed server state — updated only on operation:applied, never by
+  // optimistic local commits. Used as the base when replaying pending ops
+  // on top of an incoming remote operation.
   const serverBaseSceneRef = useRef<import("@webster/shared").WebsterProjectManifest | null>(null);
+  // Commits are serialised through this chain so two rapid edits can't both
+  // read the same baseVersion / previousScene during their `await` window
+  // and ship inconsistent patches.
   const commitChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  // Debounce timer for gesture actions (draw, transform, mask brush, shape).
+  // Instead of committing one op per pointer-move point, we wait for inactivity
+  // and send a single op capturing the full stroke/gesture result.
   const gestureDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // True while the debounce timeout is flushing — prevents re-entering the
+  // debounce branch and creating an infinite timeout loop.
   const gestureFlushingRef = useRef(false);
+  // The latest debounced gesture action, so we can flush it immediately on
+  // pointer-up (before replaying deferred remote ops) instead of waiting out
+  // the debounce — otherwise a deferred remote import could wipe the stroke
+  // before it lands in the pending queue.
   const pendingGestureActionRef = useRef<SharedEditorAction | null>(null);
   const pendingQueueRef = useRef(new PendingOperationsQueue());
   const pendingQueueIdleWaitersRef = useRef<Array<() => void>>([]);
+  // Stores the pure delta (diff from previousScene to manifest) for each
+  // pending op, keyed by clientOperationId. Used during replay instead of
+  // op.scene so the replay applies the op's change on top of the current
+  // replayTarget rather than replacing it — prevents duplicate layer IDs.
   const pendingOpReplaysRef = useRef(new Map<string, import("@webster/shared").ProjectScenePatchOp[]>());
   const resyncingRef = useRef(false);
   const uploadedAssetPathsRef = useRef(new Set<string>());
@@ -186,7 +213,13 @@ export function useCollaboration({
     operationId: string;
     version: number | null;
   } | null>(null);
+  // Remote ops that arrived while the local user was mid-gesture. Importing a
+  // remote scene during an active stroke orphans the layer the tool is drawing
+  // into, so the user "can't do anything". We defer these and flush them when
+  // the user lifts the pointer.
   const deferredRemoteOpsRef = useRef<AppliedProjectOperation[]>([]);
+  // Serialise applied-operation handlers so a slow async handler (e.g. asset
+  // fetch) doesn't let the next event run before the version counter advances.
   const applyChainRef = useRef<Promise<unknown>>(Promise.resolve());
 
   useEffect(() => {
@@ -340,6 +373,8 @@ export function useCollaboration({
 
   const importSharedState = useCallback(
     async (payload: SharedProjectLoadResponse) => {
+      // The receiver-side flow opens a project from a URL with no tab/editor
+      // pre-mounted. Wait up to ~3s for the editor to mount before importing.
       for (let attempts = 0; attempts < 30 && !editorAppRef.current; attempts += 1) {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
@@ -374,7 +409,9 @@ export function useCollaboration({
       const capabilities = getProjectRoleCapabilities(payload.role, payload.permissions);
 
       if (updateSceneRefs) {
+        // Resync the optimistic baseVersion counter to the server's truth.
         nextBaseVersionRef.current = payload.currentVersion;
+        // The server's snapshot IS our new baseline — next commit diffs against it.
         lastSyncedSceneRef.current = payload.snapshot ?? null;
         serverBaseSceneRef.current = payload.snapshot ?? null;
       }
@@ -620,6 +657,8 @@ export function useCollaboration({
     async (payload: SharedProjectLoadResponse) => {
       clientRef.current?.disconnect();
 
+      // BUG 3 fix: fetch the access token before creating the client so the
+      // socket handshake auth.token is populated.
       const accessToken = (await getAccessToken()) ?? "";
 
       const client = new CollaborationClient({
@@ -628,6 +667,8 @@ export function useCollaboration({
         onAppliedOperation: (applied) => {
           applyChainRef.current = applyChainRef.current
             .then(() => {
+              // Skip processing during resync — the resync will import the
+              // authoritative state and reset all refs itself.
               if (resyncingRef.current) return;
               return handleAppliedOperation(applied);
             })
@@ -647,11 +688,17 @@ export function useCollaboration({
           applyRemotePreview(operation);
         },
         onReadyToResend: () => {
+          // Commit operations stay in the pending queue until the backend
+          // confirms them. Reconnect resends them in order so a browser tab can
+          // recover from a dropped socket without losing local edits.
           for (const operation of pendingQueueRef.current.list()) {
             clientRef.current?.sendCommit(operation);
           }
         },
         onState: async (projectState) => {
+          // If already showing this project, only refresh meta (users, version,
+          // snapshots) without re-importing the full scene — avoids a double
+          // import that can drop the presence list on reconnect.
           if (latestStateRef.current.projectId === projectState.projectId &&
               latestStateRef.current.mode === "shared") {
             const missedRemoteState =
@@ -662,6 +709,10 @@ export function useCollaboration({
               return;
             }
 
+            // Reconnect — only refresh presence/version/snapshots, do NOT reset
+            // lastSyncedSceneRef or serverBaseSceneRef. Resetting them to the
+            // server snapshot without importing it into the editor would make
+            // the next commit diff against the wrong base, producing corrupt patches.
             applySharedProjectMeta(projectState, false);
           } else {
             await applySharedProjectState(projectState);
@@ -713,6 +764,8 @@ export function useCollaboration({
 
   const shareLocalProject = useCallback(
     async (title: string) => {
+      // Programmatic auto-share fires right after a new tab is created; the
+      // editor may not have mounted yet, so wait up to ~3s for it.
       let editorApp = editorAppRef.current;
       for (let attempts = 0; attempts < 30 && !editorApp; attempts += 1) {
         await new Promise((resolve) => setTimeout(resolve, 100));
@@ -737,9 +790,13 @@ export function useCollaboration({
         isBusy: true
       }));
 
+      // Local mode becomes shared mode by creating a real `.webster` package
+      // with the same exporter used by Save As, then uploading it via REST.
       const projectBlob = await editorApp.exportProjectFile();
       const payload = await uploadLocalWebsterProject(projectBlob, getWebsterFilename(title));
 
+      // Sharer already has the canonical scene in their editor — skip the
+      // re-import (which would call resetCurrentHistory and wipe undo).
       applySharedProjectMeta(payload);
       connectToSharedProject(payload);
     },
@@ -758,6 +815,9 @@ export function useCollaboration({
     try {
       const payload = await loadSharedProject(projectId);
 
+      // MVP conflict recovery is intentionally conservative: reload the latest
+      // state and clear unconfirmed commits instead of trying to merge divergent
+      // local edits against the new version.
       pendingQueueRef.current.clear();
       pendingOpReplaysRef.current.clear();
       updatePendingCount();
@@ -780,6 +840,9 @@ export function useCollaboration({
       pendingOpReplaysRef.current.delete(applied.operation.clientOperationId);
       updatePendingCount();
 
+      // Advance server base to include our confirmed op. This is an
+      // approximation — if the server rebased our op the result may differ
+      // slightly, but it self-heals on the next remote op + replay cycle.
       if (serverBaseSceneRef.current) {
         const op = applied.operation;
         if (op.scenePatch?.length) {
@@ -803,6 +866,9 @@ export function useCollaboration({
         await restoreCommittedSceneAfterPreview().catch(() => undefined);
       }
     } else if (editorAppRef.current) {
+      // If the local user is mid-gesture, importing now would orphan the layer
+      // their tool is drawing into. Defer this op (in order) and flush when they
+      // lift the pointer.
       if (editorAppRef.current.isInteracting()) {
         deferredRemoteOpsRef.current.push(applied);
         return;
@@ -810,6 +876,7 @@ export function useCollaboration({
 
       const remoteOp = applied.operation;
 
+      // 1. Compute new confirmed server base.
       let newServerBase: import("@webster/shared").WebsterProjectManifest | null = null;
       if (remoteOp.scenePatch?.length) {
         if (!serverBaseSceneRef.current && !remoteOp.scene) {
@@ -842,8 +909,19 @@ export function useCollaboration({
       if (newServerBase) {
         serverBaseSceneRef.current = newServerBase;
 
+        // Always wait for any in-flight commit to finish before replaying.
+        // A just-finished gesture may be queued on the commit chain but not yet
+        // in pendingQueue, so a size check is not enough — without this the
+        // import could run first and wipe the stroke. When nothing is in flight
+        // commitChainRef is already resolved, so this is effectively free.
         await commitChainRef.current;
 
+        // 2. Replay all unconfirmed local ops on top of the new server base so
+        // the user's in-progress strokes / edits are not wiped by the remote op.
+        // Always use the stored replayPatch (pure delta) rather than op.scene to
+        // avoid replacing replayTarget with a stale full-scene snapshot, which
+        // would cause the op's layers to be added again on the next replay cycle
+        // and produce duplicate layer keys.
         let replayTarget: import("@webster/shared").WebsterProjectManifest = newServerBase;
         for (const pendingOp of pendingQueueRef.current.list()) {
           const replayPatch = pendingOpReplaysRef.current.get(pendingOp.clientOperationId);
@@ -852,12 +930,17 @@ export function useCollaboration({
             try {
               replayTarget = applyScenePatch(replayTarget, patchToApply);
             } catch {
+              // Patch no longer applies cleanly — skip in replay.
             }
           }
         }
 
+        // Replay patches were diffed against the optimistic baseline, not against
+        // newServerBase, so merging them can produce duplicate layer ids. Enforce
+        // the uniqueness invariant before import to avoid crashing the layer list.
         replayTarget = dedupeManifestLayers(replayTarget);
 
+        // 3. Single import of the final replayed state.
         const assets = await fetchAssetsForProject(
           remoteOp.projectId,
           remoteOp.assetReferences ?? []
@@ -914,6 +997,10 @@ export function useCollaboration({
         return;
       }
 
+      // Gesture actions (draw strokes, transforms, mask brush) fire on every
+      // pointer move. Debounce them so we send one op per completed gesture
+      // instead of one per intermediate point. gestureFlushingRef prevents
+      // the timeout callback from re-entering this branch (infinite loop).
       if (action.kind === "gesture" && !gestureFlushingRef.current) {
         if (gestureDebounceRef.current) {
           clearTimeout(gestureDebounceRef.current);
@@ -944,8 +1031,14 @@ export function useCollaboration({
         return;
       }
 
+      // Capture the projectId at enqueue time. We re-check the live state
+      // when the chained task actually runs in case the user switched away.
       const projectId = currentState.projectId;
 
+      // Commits are serialised through the chain, so only one task runs at a
+      // time. We compute baseVersion INSIDE the task (not synchronously here)
+      // so that we only consume a version number for commits that actually
+      // carry a change — selection-only / no-op actions are dropped.
       commitChainRef.current = commitChainRef.current.then(async () => {
         const editorAppNow = editorAppRef.current;
         const stateNow = latestStateRef.current;
@@ -974,6 +1067,8 @@ export function useCollaboration({
             projectVersion: baseVersion
           });
 
+          // No actual document change (e.g. a selection-only action, which is
+          // stripped from the synced scene) — don't burn a version or send.
           const op = preparedOperation.operation;
           const hasChange = Boolean(op.scene) || (op.scenePatch?.length ?? 0) > 0;
           if (!hasChange) {
@@ -981,10 +1076,15 @@ export function useCollaboration({
           }
 
           nextBaseVersionRef.current = baseVersion + 1;
+          // Update the baseline immediately so the NEXT commit (already queued
+          // behind us) diffs against this manifest and not the stale one.
           lastSyncedSceneRef.current = preparedOperation.manifest;
 
           const operation = await prepareOperationForSocket(preparedOperation);
 
+          // Store the pure delta for this op so replay can apply just this
+          // change on top of any replayTarget instead of replacing it with
+          // op.scene (which would lose concurrent remote changes).
           if (previousScene) {
             const replayPatch = computeSceneDiff(previousScene, preparedOperation.manifest);
             if (replayPatch.length > 0) {
@@ -1006,6 +1106,10 @@ export function useCollaboration({
     [clientId, editorAppRef, prepareOperationForSocket, updatePendingCount]
   );
 
+  // Called when the local user lifts the pointer. First flushes the user's own
+  // debounced gesture commit (so the finished stroke lands in the pending queue
+  // and survives the replay), then replays any remote ops that were deferred
+  // during the gesture, in arrival order, through the apply chain.
   const flushDeferredRemoteOps = useCallback(() => {
     if (pendingGestureActionRef.current) {
       const action = pendingGestureActionRef.current;

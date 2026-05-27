@@ -36,6 +36,9 @@ export type SerializedProjectTemplateMetadata = {
   version: 1;
 };
 
+/**
+ * Hydrates a scene snapshot into plain document data, layer instances, and a valid selection id.
+ */
 export async function loadSceneFromJSON(
   data: SerializedSceneData,
   assets = new Map<string, Blob>()
@@ -71,6 +74,9 @@ export async function loadSceneFromJSON(
   };
 }
 
+/**
+ * Serializes the current scene state into the persisted `.webster` scene shape.
+ */
 export async function serializeSceneToJSON(input: {
   document: {
     color: [number, number, number, number];

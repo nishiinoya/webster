@@ -38,6 +38,7 @@ export class SharedProjectsService {
     @Optional() private readonly entitlements: EntitlementsService | null,
   ) {}
 
+  /** POST /api/shared-projects/import-webster */
   async importWebster(
     user: AuthUser,
     buffer: Buffer,
@@ -52,6 +53,7 @@ export class SharedProjectsService {
     await this.entitlements?.assertCanCreateProject(user.id);
     await this.entitlements?.assertManifest3DAllowed(user.id, manifest);
 
+    // Derive project name from filename (strip .webster) or manifest template name
     const projectName =
       manifest.template?.name ||
       originalFilename.replace(/\.webster$/i, '').trim() ||
@@ -61,6 +63,8 @@ export class SharedProjectsService {
       throw new ServiceUnavailableException('StorageService is not available');
     }
 
+    // BUG 5 fix: upload all assets to S3 BEFORE opening the transaction so we
+    // don't exceed Prisma's default 5 s transaction timeout on slow MinIO.
     type UploadedAsset = {
       assetPath: string;
       storageKey: string;
@@ -68,6 +72,8 @@ export class SharedProjectsService {
       mimeType: string;
     };
 
+    // We need the project id to build storage keys, so create a temporary
+    // placeholder project first, then do a single transaction for DB writes only.
     const tempProject = await this.prisma.project.create({
       data: {
         ownerId: user.id,
@@ -110,6 +116,7 @@ export class SharedProjectsService {
       });
     }
 
+    // DB-only transaction: update storageKey and insert asset rows
     await this.prisma.$transaction(async (tx) => {
       await tx.project.update({
         where: { id: projectId },
@@ -130,13 +137,16 @@ export class SharedProjectsService {
       }
     });
 
+    // BUG 1 fix: return full SharedProjectLoadResponse instead of bare {projectId, projectName}
     return this.loadProject(projectId, user);
   }
 
+  /** GET /api/shared-projects/:projectId */
   async loadProject(
     projectId: string,
     user: AuthUser,
   ): Promise<SharedProjectStatePayload> {
+    // Resolve role — 404 if no access at all
     const internalRole = this.projectAccess
       ? await this.projectAccess.resolveOrGrantLinkRole(projectId, user.id)
       : null;
@@ -149,6 +159,7 @@ export class SharedProjectsService {
       ? this.projectAccess.toFrontendRole(internalRole)
       : 'viewer';
 
+    // Load project
     const project = await this.prisma.project.findFirst({
       where: { id: projectId, isDeleted: false },
     });
@@ -159,6 +170,7 @@ export class SharedProjectsService {
 
     const assets = await this.getProjectAssetReferences(projectId);
 
+    // Load top-50 snapshot summaries
     const snapshotRows = await this.prisma.projectSnapshot.findMany({
       where: { projectId },
       orderBy: { createdAt: 'desc' },
@@ -175,6 +187,7 @@ export class SharedProjectsService {
       type: 'manual' as const,
     }));
 
+    // Get presence from RoomService (optional)
     const users = this.roomService ? this.roomService.getPresence(projectId) : [];
 
     return {
@@ -252,6 +265,7 @@ export class SharedProjectsService {
     return this.loadPublicViewerProject(linkAccess.projectId);
   }
 
+  /** POST /api/shared-projects/:projectId/save */
   async saveProject(
     projectId: string,
     user: AuthUser,
@@ -318,6 +332,7 @@ export class SharedProjectsService {
     return this.loadProject(projectId, user);
   }
 
+  /** GET /api/shared-projects/:projectId/export-webster */
   async exportWebster(
     projectId: string,
     user: AuthUser,
@@ -332,6 +347,7 @@ export class SharedProjectsService {
       throw new ServiceUnavailableException('WebsterPackageService is not available');
     }
 
+    // Require editor+ access
     const internalRole = await this.projectAccess.resolveRole(projectId, user.id);
     if (!internalRole) {
       throw new NotFoundException('Project not found');
@@ -344,9 +360,10 @@ export class SharedProjectsService {
       commenter: 1,
     };
     if ((roleRank[internalRole] ?? 0) < roleRank['editor']) {
-      throw new ForbiddenException('Insufficient permissions - editor role required');
+      throw new ForbiddenException('Insufficient permissions — editor role required');
     }
 
+    // Load project
     const project = await this.prisma.project.findFirst({
       where: { id: projectId, isDeleted: false },
     });
@@ -361,6 +378,7 @@ export class SharedProjectsService {
       where: { projectId },
     });
 
+    // Fetch each asset binary from S3
     const packedAssets: { path: string; data: Buffer; mimeType: string }[] = [];
 
     await Promise.all(
@@ -368,12 +386,14 @@ export class SharedProjectsService {
         try {
           const { body, mimeType } = await this.storage!.getObject(a.storageKey);
 
+          // Collect stream into buffer
           const chunks: Buffer[] = [];
           for await (const chunk of body as Readable) {
             chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
           }
           const data = Buffer.concat(chunks);
 
+          // Derive relative path
           const assetsPrefix = `projects/${projectId}/assets/`;
           const assetPath = a.storageKey.startsWith(assetsPrefix)
             ? a.storageKey.slice(assetsPrefix.length)

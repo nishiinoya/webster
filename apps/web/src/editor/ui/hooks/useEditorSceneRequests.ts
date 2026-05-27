@@ -1,3 +1,4 @@
+/** Hook that coordinates async scene commands, imports, exports, and UI loading state. */
 import { MutableRefObject, useEffect, useRef } from "react";
 import type {
   ImageLayerCommand,
@@ -163,6 +164,7 @@ export function useEditorSceneRequests({
     const runImageLayerCommand = async () => {
       const startedAt = performance.now();
 
+      // Give React/browser one paint so the progress dialog appears before canvas resampling blocks.
       await waitForNextPaint();
       await editorAppRef.current?.applyImageLayerCommand(imageLayerCommandRequest.command);
 

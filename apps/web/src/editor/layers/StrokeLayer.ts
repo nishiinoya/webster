@@ -1,3 +1,4 @@
+/** Stroke layer model and stroke path normalization helpers. */
 import { transformPoint3x3 } from "../geometry/Matrix3";
 import { getModelMatrix } from "../geometry/TransformGeometry";
 import { Layer } from "./Layer";

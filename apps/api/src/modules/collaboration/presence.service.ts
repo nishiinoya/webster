@@ -24,6 +24,7 @@ export class PresenceService {
     return [...this.getRoom(projectId).values()];
   }
 
+  /** Remove ALL presence entries for a given socket's clients. */
   clearBySocket(socketClientIds: { projectId: string; clientId: string }[]): void {
     for (const { projectId, clientId } of socketClientIds) {
       this.remove(projectId, clientId);

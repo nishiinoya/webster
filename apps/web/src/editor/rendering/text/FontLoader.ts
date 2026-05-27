@@ -1,3 +1,4 @@
+/** Font manifest loading and runtime font resolution for text rendering. */
 import opentype from "opentype.js";
 import type { CompiledFontManifest, CompiledFontManifestEntry, CompiledGlyph } from "./CompiledFont";
 import { GlyphMeshCache } from "./GlyphMeshCache";

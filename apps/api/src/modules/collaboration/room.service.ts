@@ -17,6 +17,7 @@ export class RoomService {
 
   constructor(private readonly presenceService: PresenceService) {}
 
+  /** Called by the gateway after init to register the Socket.IO server instance. */
   setServer(server: Server): void {
     this.server = server;
   }
@@ -30,6 +31,10 @@ export class RoomService {
     return this.presenceService.getAll(projectId);
   }
 
+  /**
+   * Used by REST flows such as snapshot restore and explicit cloud save to
+   * notify connected clients through the same operation path as realtime edits.
+   */
   async notifyProjectReplaced(
     projectId: string,
     newManifest: WebsterProjectManifest,

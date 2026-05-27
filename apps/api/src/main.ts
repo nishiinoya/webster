@@ -10,28 +10,33 @@ async function bootstrap() {
   const logger = new Logger('Bootstrap');
 
   const app = await NestFactory.create(AppModule, {
-    bodyParser: false,
+    bodyParser: false, // We set up body parsers manually below
   });
 
   const config = app.get(ConfigService);
   const port = config.get<number>('port') ?? 4000;
   const corsOrigin = config.get<string[]>('corsOrigin') ?? ['http://localhost:3000'];
 
+  // CORS
   app.enableCors({
     origin: corsOrigin,
     credentials: true,
   });
 
+  // Global prefix for REST (WebSocket gateway uses /ws namespace)
   app.setGlobalPrefix('api');
 
+  // Stripe webhook needs raw body — wire it in before the global JSON parser
   app.use(
     '/api/subscriptions/webhook',
     express.raw({ type: 'application/json' }),
   );
 
+  // Standard JSON body parser for all other routes (100 MB for image uploads)
   app.use(express.json({ limit: '100mb' }));
   app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
+  // Swagger
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Webster API')
     .setDescription('Webster collaborative image editor API')

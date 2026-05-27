@@ -33,6 +33,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
         message = (resp['message'] as string) ?? message;
       }
 
+      // Map HTTP status to error codes
       if (status === HttpStatus.UNAUTHORIZED) code = 'forbidden';
       else if (status === HttpStatus.FORBIDDEN) code = 'forbidden';
       else if (status === HttpStatus.NOT_FOUND) code = 'not_found';
@@ -42,6 +43,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       this.logger.error(`Unhandled exception: ${exception.message}`, exception.stack);
     }
 
+    // Extract projectId from request params if available
     const projectId: string | undefined =
       (request.params as Record<string, string>)?.['projectId'] ??
       (request.params as Record<string, string>)?.['id'];

@@ -40,6 +40,9 @@ type ShapeLayerRendererContext = {
   ) => [number, number, number, number];
 };
 
+/**
+ * Draws a shape layer using the appropriate primitive path for its shape kind.
+ */
 export function renderShapeLayer(
   context: ShapeLayerRendererContext,
   layer: ShapeLayer,

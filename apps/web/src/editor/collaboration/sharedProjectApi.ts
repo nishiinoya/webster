@@ -26,6 +26,7 @@ export function setAccessTokenGetter(fn: () => Promise<string | null>) {
   _getToken = fn;
 }
 
+/** BUG 3 fix: exported helper so useCollaboration can fetch a token before connecting. */
 export async function getAccessToken(): Promise<string | null> {
   return _getToken ? _getToken() : null;
 }
@@ -35,6 +36,9 @@ export function getSharedProjectApiBaseUrl() {
 }
 
 export function getSharedProjectWebSocketUrl(_projectId: string) {
+  // BUG 2 fix: socket.io-client interprets the URL path as a namespace.
+  // The gateway uses the default "/" namespace, so we must pass the host
+  // origin only — no path component. Room joining happens via project:join.
   if (process.env.NEXT_PUBLIC_WEBSTER_WS_URL) {
     return trimTrailingSlash(process.env.NEXT_PUBLIC_WEBSTER_WS_URL);
   }
@@ -46,6 +50,11 @@ export function getSharedProjectWebSocketUrl(_projectId: string) {
   return window.location.origin;
 }
 
+/**
+ * Uploads a normal `.webster` package through REST when a local project becomes
+ * shared. The backend owns decomposing the package, extracting big assets, and
+ * creating the first project snapshot from manifest.json.
+ */
 export async function uploadLocalWebsterProject(file: Blob, filename: string) {
   const formData = new FormData();
 
@@ -98,7 +107,12 @@ export async function saveSharedProject(
   );
 }
 
+/**
+ * Downloads a server-packed `.webster` file through REST. WebSocket is only for
+ * realtime operations and never carries project archives or binary assets.
+ */
 export async function downloadSharedProjectFile(projectId: string) {
+  // BUG 4 fix: include Authorization header so JwtAuthGuard accepts the request.
   const response = await authedFetch(
     `${getSharedProjectApiBaseUrl()}/shared-projects/${encodeURIComponent(projectId)}/export-webster`
   );
@@ -110,6 +124,11 @@ export async function downloadSharedProjectFile(projectId: string) {
   return response.blob();
 }
 
+/**
+ * Uploads binary assets introduced while already in shared mode. The socket
+ * operation carries only asset references plus the scene manifest; the backend
+ * stores these blobs and returns download URLs other clients can fetch.
+ */
 export async function uploadSharedProjectAssets(
   projectId: string,
   uploads: SharedProjectAssetUpload[]
@@ -158,6 +177,10 @@ export async function listProjectSnapshots(projectId: string) {
   );
 }
 
+/**
+ * Manual snapshots are checkpoints for loading/history. Commits remain the
+ * autosave path, so the user does not need to create a snapshot after every edit.
+ */
 export async function createProjectSnapshot({ message, projectId }: CreateSnapshotInput) {
   return fetchJson<{ snapshot: SharedProjectSnapshotSummary }>(
     `/shared-projects/${encodeURIComponent(projectId)}/snapshots`,
@@ -210,6 +233,7 @@ export async function removeAvatar() {
   return fetchJson<UserProfile>("/users/me/avatar", { method: "DELETE" });
 }
 
+/** Turns a relative avatarUrl (e.g. /users/<id>/avatar?v=...) into an absolute URL. */
 export function toAbsoluteAvatarUrl(avatarUrl: string | null | undefined) {
   if (!avatarUrl) {
     return null;
@@ -555,6 +579,7 @@ export async function fetchSharedProjectAssets(
 
   await Promise.all(
     references.map(async (asset) => {
+      // BUG 4 fix: include Authorization header so JwtAuthGuard accepts the request.
       const response = await authedFetch(toAbsoluteAssetUrl(asset.downloadUrl));
 
       if (!response.ok) {
@@ -574,6 +599,7 @@ export async function fetchSharedProjectAssets(
   return assets;
 }
 
+/** BUG 4 fix: authenticated fetch — adds Bearer header the same way fetchJson does. */
 async function authedFetch(url: string, init?: RequestInit): Promise<Response> {
   const headers: Record<string, string> = {};
 
@@ -620,6 +646,11 @@ async function fetchJson<T>(
   return response.json() as Promise<T>;
 }
 
+/**
+ * Error carrying the HTTP status (and backend `code` if present) so callers can
+ * distinguish e.g. a 402 free-tier limit from a generic failure. Backward
+ * compatible: existing callers that only read `.message` keep working.
+ */
 export class ApiError extends Error {
   readonly status: number;
   readonly code?: string;
@@ -632,6 +663,7 @@ export class ApiError extends Error {
   }
 }
 
+/** True when an error is a 402 "upgrade to Pro" free-tier limit response. */
 export function isUpgradeRequiredError(err: unknown): boolean {
   return err instanceof ApiError && err.status === 402;
 }
@@ -650,6 +682,7 @@ async function toApiError(response: Response, fallback: string): Promise<ApiErro
       code = payload.code;
     }
   } catch {
+    // Non-JSON body — keep the fallback message.
   }
 
   return new ApiError(message, response.status, code);

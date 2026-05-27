@@ -1,3 +1,4 @@
+/** Renderer for dimmed selections and marching-ants outlines. */
 import { Camera2D } from "../../geometry/Camera2D";
 import { distance, getModelMatrix, midpoint } from "../../geometry/TransformGeometry";
 import { defaultLayerFilters } from "../../layers/Layer";

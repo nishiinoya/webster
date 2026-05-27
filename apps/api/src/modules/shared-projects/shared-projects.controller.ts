@@ -35,6 +35,10 @@ type SaveSharedProjectBody = {
 export class SharedProjectsController {
   constructor(private readonly sharedProjectsService: SharedProjectsService) {}
 
+  /**
+   * POST /api/shared-projects/import-webster
+   * Auth required. Accepts multipart upload — takes the first file.
+   */
   @Post('import-webster')
   @HttpCode(HttpStatus.OK)
   @UseInterceptors(AnyFilesInterceptor())
@@ -55,6 +59,10 @@ export class SharedProjectsController {
     );
   }
 
+  /**
+   * GET /api/shared-projects/:projectId/public
+   * Anonymous viewer access for projects whose anyone-with-link role is Viewer.
+   */
   @Public()
   @Get(':projectId/public')
   async loadPublicViewerProject(
@@ -71,6 +79,10 @@ export class SharedProjectsController {
     return this.sharedProjectsService.loadPublicViewerInvite(token);
   }
 
+  /**
+   * GET /api/shared-projects/:projectId
+   * viewer+ access required.
+   */
   @Get(':projectId')
   async loadProject(
     @Param('projectId') projectId: string,
@@ -79,6 +91,11 @@ export class SharedProjectsController {
     return this.sharedProjectsService.loadProject(projectId, user);
   }
 
+  /**
+   * POST /api/shared-projects/:projectId/save
+   * Explicit cloud save. The realtime socket is still responsible for live
+   * collaboration; this endpoint persists a complete editor state snapshot.
+   */
   @Post(':projectId/save')
   @HttpCode(HttpStatus.OK)
   async saveProject(
@@ -89,6 +106,10 @@ export class SharedProjectsController {
     return this.sharedProjectsService.saveProject(projectId, user, body);
   }
 
+  /**
+   * GET /api/shared-projects/:projectId/export-webster
+   * editor+ access required. Streams a .webster zip file.
+   */
   @Get(':projectId/export-webster')
   async exportWebster(
     @Param('projectId') projectId: string,

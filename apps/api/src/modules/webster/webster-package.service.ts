@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+// adm-zip is CommonJS (module.exports = AdmZip); use require to avoid the .default interop wrapper.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const AdmZip = require('adm-zip') as typeof import('adm-zip');
 import type { WebsterProjectManifest } from '@webster/shared';
@@ -20,6 +21,7 @@ export class WebsterPackageService {
     const zip = new AdmZip(zipBuffer);
     const entries = zip.getEntries();
 
+    // Extract manifest
     const manifestEntry = entries.find((e) => e.entryName === 'manifest.json');
     if (!manifestEntry) {
       throw new Error('Invalid .webster package: manifest.json not found');
@@ -29,6 +31,7 @@ export class WebsterPackageService {
       manifestEntry.getData().toString('utf-8'),
     ) as WebsterProjectManifest;
 
+    // Extract all other entries as assets
     const assets: UnpackedAsset[] = [];
     for (const entry of entries) {
       if (entry.entryName === 'manifest.json' || entry.isDirectory) {

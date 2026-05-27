@@ -1,4 +1,5 @@
-
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
   provider = "prisma-client-js"
@@ -7,7 +8,11 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-}
+}
+
+// ==========================================
+// ENUMS
+// ==========================================
 
 enum SubscriptionStatus {
   active
@@ -57,7 +62,11 @@ enum AssetType {
   other
 
   @@map("asset_type")
-}
+}
+
+// ==========================================
+// MODELS
+// ==========================================
 
 model User {
   id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
@@ -66,7 +75,9 @@ model User {
   displayName  String?  @map("display_name") @db.VarChar
   avatarUrl    String?  @map("avatar_url") @db.Text
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
   subscription      Subscription?
   payments          Payment[]
   ownedProjects     Project[]          @relation("ProjectOwner")
@@ -89,7 +100,9 @@ model Subscription {
   providerSubId    String?            @unique @map("provider_sub_id") @db.VarChar
   currentPeriodEnd DateTime?          @map("current_period_end") @db.Timestamptz
   createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt        DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  updatedAt        DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
   user     User      @relation(fields: [userId], references: [id])
   payments Payment[]
 
@@ -103,7 +116,9 @@ model Payment {
   amount         Decimal  @db.Decimal(10, 2)
   currency       String   @default("USD") @db.VarChar(3)
   providerTxId   String   @unique @map("provider_tx_id") @db.VarChar
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
   user         User          @relation(fields: [userId], references: [id])
   subscription Subscription? @relation(fields: [subscriptionId], references: [id])
 
@@ -117,11 +132,14 @@ model Project {
   storageKey   String   @map("storage_key") @db.VarChar
   sizeBytes    BigInt   @default(0) @map("size_bytes")
   mimeType     String   @default("image/png") @map("mime_type") @db.VarChar
-  metadata     Json?
+  metadata     Json?
+  /// Increments on every committed shared-edit operation. Used for optimistic concurrency.
   currentVersion Int    @default(0) @map("current_version")
   isDeleted    Boolean  @default(false) @map("is_deleted")
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
   owner     User              @relation("ProjectOwner", fields: [ownerId], references: [id])
   assets    ProjectAsset[]
   snapshots ProjectSnapshot[]
@@ -142,7 +160,9 @@ model ProjectAsset {
   storageKey String    @map("storage_key") @db.VarChar
   sizeBytes  BigInt    @map("size_bytes")
   mimeType   String?   @map("mime_type") @db.VarChar
-  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
   project    Project @relation(fields: [projectId], references: [id])
   uploader   User    @relation("AssetUploader", fields: [uploadedBy], references: [id])
 
@@ -157,7 +177,9 @@ model ProjectSnapshot {
   snapshotName        String?  @map("snapshot_name") @db.VarChar
   stateData           Json?    @map("state_data")
   thumbnailStorageKey String?  @map("thumbnail_storage_key") @db.VarChar
-  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
   project Project @relation(fields: [projectId], references: [id])
   creator User    @relation("SnapshotCreator", fields: [createdBy], references: [id])
 
@@ -173,7 +195,9 @@ model ProjectAccess {
   createdBy        String          @map("created_by") @db.Uuid
   createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz
   updatedAt        DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
-  revokedAt        DateTime?       @map("revoked_at") @db.Timestamptz
+  revokedAt        DateTime?       @map("revoked_at") @db.Timestamptz
+
+  // Relations
   project        Project @relation(fields: [projectId], references: [id])
   sharedWithUser User?   @relation("AccessReceiver", fields: [sharedWithUserId], references: [id])
   creator        User    @relation("AccessCreator", fields: [createdBy], references: [id])
@@ -234,7 +258,9 @@ model ProjectComment {
   isDeleted       Boolean   @default(false) @map("is_deleted")
   deletedAt       DateTime? @map("deleted_at") @db.Timestamptz
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
   project       Project          @relation(fields: [projectId], references: [id])
   author        User             @relation("CommentAuthor", fields: [authorUserId], references: [id])
   resolver      User?            @relation("CommentResolver", fields: [resolvedByUserId], references: [id])

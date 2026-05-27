@@ -2,6 +2,9 @@ export type ImageExportBackground = "checkerboard" | "transparent" | "white";
 
 export type ImageExportFormat = "jpeg" | "pdf" | "png";
 
+/**
+ * Normalizes background choices to formats that support them.
+ */
 export function getExportRenderBackground(
   format: ImageExportFormat,
   background: ImageExportBackground
@@ -13,6 +16,9 @@ export function getExportRenderBackground(
   return background;
 }
 
+/**
+ * Converts a canvas into a blob and rejects when the browser export fails.
+ */
 export function canvasToBlob(canvas: HTMLCanvasElement, mimeType: string, quality?: number) {
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(
@@ -30,6 +36,9 @@ export function canvasToBlob(canvas: HTMLCanvasElement, mimeType: string, qualit
   });
 }
 
+/**
+ * Wraps a JPEG export inside a minimal single-page PDF document.
+ */
 export async function createPdfFromJpeg(jpeg: Blob, width: number, height: number) {
   const imageBytes = new Uint8Array(await jpeg.arrayBuffer());
   const contentStream = `q\n${width} 0 0 ${height} 0 0 cm\n/Im0 Do\nQ\n`;
